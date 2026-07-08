@@ -35,9 +35,17 @@ Users can install the published npm package directly:
 npm install -g fpasoterm
 ```
 
+For an unpacked checkout, `npm run install:desktop` installs a local `fpasoterm` command into `XDG_BIN_HOME` or `~/.local/bin`.
+
+`npm run update:desktop` overwrites the same command, launcher entry, and hicolor icon files. `npm run uninstall:desktop` removes those installed files without removing the source checkout or npm dependencies.
+
 The project icon is `extra/logo/fpasoterm.png`.
 
+The application window uses that PNG as its runtime icon. Linux desktop entries still refer to `Icon=fpasoterm` so installers can place the image in the target icon theme. Size-specific hicolor PNGs are generated under `extra/linux/icons/hicolor/`.
+
 The package license is MIT and the repository must expose `bin.fpasoterm` from `package.json` for global installation.
+
+When the shell-backed PTY exits, FpasoTerm closes the owning application window. This makes `exit` behave like closing a normal terminal window.
 
 ## Diagnostics
 

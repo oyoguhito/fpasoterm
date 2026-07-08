@@ -3,11 +3,11 @@ const path = require('node:path');
 const zlib = require('node:zlib');
 
 const root = path.resolve(__dirname, '..');
-const size = 256;
-const pixels = Buffer.alloc(size * size * 4);
+const sourceSize = 256;
+const pixels = Buffer.alloc(sourceSize * sourceSize * 4);
 
 function setPixel(x, y, r, g, b, a = 255) {
-  const offset = (y * size + x) * 4;
+  const offset = (y * sourceSize + x) * 4;
   pixels[offset] = r;
   pixels[offset + 1] = g;
   pixels[offset + 2] = b;
@@ -87,8 +87,58 @@ function chunk(type, data) {
   return Buffer.concat([length, typeBuffer, data, crc]);
 }
 
-for (let y = 0; y < size; y += 1) {
-  for (let x = 0; x < size; x += 1) {
+function encodePng(imageSize, imagePixels) {
+  const raw = Buffer.alloc((imageSize * 4 + 1) * imageSize);
+  for (let y = 0; y < imageSize; y += 1) {
+    const rowStart = y * (imageSize * 4 + 1);
+    raw[rowStart] = 0;
+    imagePixels.copy(raw, rowStart + 1, y * imageSize * 4, (y + 1) * imageSize * 4);
+  }
+
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(imageSize, 0);
+  ihdr.writeUInt32BE(imageSize, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 6;
+  ihdr[10] = 0;
+  ihdr[11] = 0;
+  ihdr[12] = 0;
+
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    chunk('IHDR', ihdr),
+    chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
+    chunk('IEND', Buffer.alloc(0)),
+  ]);
+}
+
+function resizePixels(targetSize) {
+  if (targetSize === sourceSize) {
+    return Buffer.from(pixels);
+  }
+
+  const resized = Buffer.alloc(targetSize * targetSize * 4);
+  for (let y = 0; y < targetSize; y += 1) {
+    for (let x = 0; x < targetSize; x += 1) {
+      const sourceX = Math.min(sourceSize - 1, Math.floor((x * sourceSize) / targetSize));
+      const sourceY = Math.min(sourceSize - 1, Math.floor((y * sourceSize) / targetSize));
+      const sourceOffset = (sourceY * sourceSize + sourceX) * 4;
+      const targetOffset = (y * targetSize + x) * 4;
+      pixels.copy(resized, targetOffset, sourceOffset, sourceOffset + 4);
+    }
+  }
+  return resized;
+}
+
+function writeIcon(relativePath, imageSize) {
+  const outputPath = path.join(root, relativePath);
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, encodePng(imageSize, resizePixels(imageSize)));
+  console.log(outputPath);
+}
+
+for (let y = 0; y < sourceSize; y += 1) {
+  for (let x = 0; x < sourceSize; x += 1) {
     const shade = Math.round(18 + (x + y) * 0.08);
     setPixel(x, y, shade, shade + 8, shade + 18);
   }
@@ -108,30 +158,8 @@ fillRoundedRect(158, 118, 34, 10, 5, [16, 21, 29, 255]);
 fillRoundedRect(158, 135, 34, 10, 5, [16, 21, 29, 255]);
 fillRoundedRect(64, 216, 128, 8, 4, [245, 215, 110, 255]);
 
-const raw = Buffer.alloc((size * 4 + 1) * size);
-for (let y = 0; y < size; y += 1) {
-  const rowStart = y * (size * 4 + 1);
-  raw[rowStart] = 0;
-  pixels.copy(raw, rowStart + 1, y * size * 4, (y + 1) * size * 4);
+writeIcon('extra/logo/fpasoterm.png', 256);
+
+for (const iconSize of [16, 32, 48, 64, 128, 192, 256, 512]) {
+  writeIcon(`extra/linux/icons/hicolor/${iconSize}x${iconSize}/apps/fpasoterm.png`, iconSize);
 }
-
-const ihdr = Buffer.alloc(13);
-ihdr.writeUInt32BE(size, 0);
-ihdr.writeUInt32BE(size, 4);
-ihdr[8] = 8;
-ihdr[9] = 6;
-ihdr[10] = 0;
-ihdr[11] = 0;
-ihdr[12] = 0;
-
-const png = Buffer.concat([
-  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
-  chunk('IHDR', ihdr),
-  chunk('IDAT', zlib.deflateSync(raw, { level: 9 })),
-  chunk('IEND', Buffer.alloc(0)),
-]);
-
-const outputPath = path.join(root, 'extra', 'logo', 'fpasoterm.png');
-fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-fs.writeFileSync(outputPath, png);
-console.log(outputPath);

@@ -5,6 +5,9 @@ const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
 const debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
+const imeDuplicateWindowMs = 500;
+let pendingCompositionData = '';
+let recentCompositionCommit = null;
 
 window.addEventListener('error', (event) => {
   console.error(`renderer error: ${event.message} at ${event.filename}:${event.lineno}:${event.colno}`);
@@ -61,6 +64,72 @@ function focusTerminalInput() {
   }
 }
 
+function isPlainTextInput(data) {
+  return data.length > 0 && !/[\u0000-\u001f\u007f]/.test(data);
+}
+
+function trackCompositionUpdate(event) {
+  if (event.data) {
+    pendingCompositionData = event.data;
+  }
+}
+
+function trackCompositionCommit(event) {
+  const data = event.data || pendingCompositionData;
+  pendingCompositionData = '';
+
+  if (data && isPlainTextInput(data)) {
+    recentCompositionCommit = {
+      data,
+      time: performance.now(),
+      seen: false,
+    };
+  }
+}
+
+function correctCompositionData(data) {
+  if (!recentCompositionCommit || !isPlainTextInput(data)) {
+    return data;
+  }
+
+  if (performance.now() - recentCompositionCommit.time > imeDuplicateWindowMs) {
+    recentCompositionCommit = null;
+    return data;
+  }
+
+  if (data === recentCompositionCommit.data + recentCompositionCommit.data) {
+    const correctedData = recentCompositionCommit.data;
+    recentCompositionCommit = null;
+    return correctedData;
+  }
+
+  if (data !== recentCompositionCommit.data) {
+    return data;
+  }
+
+  if (!recentCompositionCommit.seen) {
+    recentCompositionCommit.seen = true;
+    return data;
+  }
+
+  recentCompositionCommit = null;
+  return '';
+}
+
+function installCompositionDuplicateGuard() {
+  const textarea = terminalElement.querySelector('.xterm-helper-textarea');
+  if (!textarea) {
+    return;
+  }
+
+  textarea.addEventListener('compositionstart', () => {
+    pendingCompositionData = '';
+    recentCompositionCommit = null;
+  });
+  textarea.addEventListener('compositionupdate', trackCompositionUpdate);
+  textarea.addEventListener('compositionend', trackCompositionCommit);
+}
+
 function showDiagnostic(message) {
   if (!debugKeys) {
     return;
@@ -92,7 +161,18 @@ copyDiagnosticsButton.addEventListener('click', async () => {
 window.addEventListener('resize', fitAndResize);
 
 term.onData((data) => {
-  window.fpasoterm.writeTerminal(data);
+  const correctedData = correctCompositionData(data);
+
+  if (!correctedData) {
+    showDiagnostic(`renderer dropped duplicate composition data=${data}`);
+    return;
+  }
+
+  if (correctedData !== data) {
+    showDiagnostic(`renderer corrected duplicate composition data=${data} corrected=${correctedData}`);
+  }
+
+  window.fpasoterm.writeTerminal(correctedData);
 });
 
 window.fpasoterm.onTerminalData((data) => {
@@ -125,4 +205,5 @@ terminalElement.addEventListener('pointerdown', () => {
 
 fitAddon.fit();
 window.fpasoterm.startTerminal({ cols: term.cols, rows: term.rows });
+installCompositionDuplicateGuard();
 focusTerminalInput();
