@@ -1,0 +1,41 @@
+#!/bin/sh
+set -eu
+
+if ! command -v jj >/dev/null 2>&1; then
+  echo "jj is not installed. Install jj first, then rerun this script." >&2
+  exit 127
+fi
+
+if [ -d .jj ] || [ -d .git ]; then
+  echo "This directory already looks initialized. Refusing to overwrite repository metadata." >&2
+  exit 1
+fi
+
+tmpdir=$(mktemp -d)
+restore_needed=1
+cleanup() {
+  status=$?
+  if [ "$restore_needed" = 1 ] && [ -d "$tmpdir" ]; then
+    find "$tmpdir" -mindepth 1 -maxdepth 1 -exec mv {} . \;
+  fi
+  if [ "$status" = 0 ]; then
+    rm -rf "$tmpdir"
+  else
+    echo "Initialization failed. Project files were restored; temporary directory left at: $tmpdir" >&2
+  fi
+  exit "$status"
+}
+trap cleanup EXIT INT TERM
+
+find . -mindepth 1 -maxdepth 1 ! -name .jj ! -name .git -exec mv {} "$tmpdir"/ \;
+
+jj git init --colocate .
+jj describe -m "empty main"
+jj bookmark create main -r @
+
+jj new main -m "Initial FpasoTerm terminal app"
+find "$tmpdir" -mindepth 1 -maxdepth 1 -exec mv {} . \;
+restore_needed=0
+
+jj file track .
+jj status

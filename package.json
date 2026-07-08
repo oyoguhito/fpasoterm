@@ -1,0 +1,60 @@
+{
+  "name": "fpasoterm",
+  "version": "0.0.1",
+  "description": "Cross-platform terminal with Japanese IME support.",
+  "main": "src/main.js",
+  "license": "MIT",
+  "homepage": "https://github.com/oyoguhito/fpasoterm#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/oyoguhito/fpasoterm.git"
+  },
+  "bugs": {
+    "url": "https://github.com/oyoguhito/fpasoterm/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "terminal",
+    "xterm",
+    "ime",
+    "japanese",
+    "chromeos"
+  ],
+  "bin": {
+    "fpasoterm": "bin/fpasoterm"
+  },
+  "files": [
+    "bin/",
+    "docs/",
+    "extra/",
+    "scripts/",
+    "src/",
+    "CHANGELOG.md",
+    "CONTRIBUTING.md",
+    "INSTALL.md",
+    "README.md",
+    "LICENSE",
+    "package.json",
+    "package-lock.json"
+  ],
+  "scripts": {
+    "start": "fpasoterm",
+    "postinstall": "electron-rebuild -f -w node-pty",
+    "check": "npm run check:syntax && npm test",
+    "check:syntax": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/renderer.js",
+    "test": "node scripts/tests/smoke.js",
+    "scan:secrets": "node scripts/security/scan-secrets.js",
+    "security": "npm run scan:secrets && npm run audit:prod",
+    "audit:prod": "npm audit --omit=dev",
+    "build:artifacts": "node scripts/build-artifacts.js"
+  },
+  "dependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@xterm/addon-fit": "0.12.0-beta.288",
+    "@xterm/xterm": "6.1.0-beta.288",
+    "electron": "42.5.0",
+    "node-pty": "1.2.0-beta.13"
+  }
+}
