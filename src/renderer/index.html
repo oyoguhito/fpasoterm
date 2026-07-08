@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="utf-8">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
+    >
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>FpasoTerm</title>
+    <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+    <link rel="stylesheet" href="./styles.css">
+  </head>
+  <body>
+    <main id="terminal"></main>
+    <section id="diagnostics-panel" hidden>
+      <div class="diagnostics-toolbar">
+        <span>Diagnostics</span>
+        <button id="copy-diagnostics" type="button">Copy</button>
+      </div>
+      <textarea id="diagnostics" readonly aria-label="Diagnostics"></textarea>
+      <div id="diagnostics-path"></div>
+    </section>
+    <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
+    <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="./renderer.js"></script>
+  </body>
+</html>

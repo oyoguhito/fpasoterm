@@ -1,0 +1,52 @@
+name: Check
+
+on:
+  push:
+    branches:
+      - main
+      - fpasoterm
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  check:
+    name: Check and test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install system tools
+        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run checks
+        run: npm run check
+
+      - name: Scan for credentials
+        run: npm run scan:secrets
+
+      - name: Validate desktop file
+        run: desktop-file-validate extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+
+      - name: Audit production dependencies
+        run: npm run audit:prod
+
+      - name: Build artifacts
+        run: npm run build:artifacts
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: fpasoterm-artifacts
+          path: artifacts/*
+          if-no-files-found: error

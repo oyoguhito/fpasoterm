@@ -1,0 +1,94 @@
+:root {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  background: #101317;
+  color: #e8edf2;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+#terminal {
+  min-width: 0;
+  min-height: 0;
+  padding: 8px;
+}
+
+#diagnostics-panel {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 10;
+  width: min(760px, calc(100vw - 16px));
+  height: 190px;
+  display: grid;
+  grid-template-rows: 28px 1fr 22px;
+  border: 1px solid #3b4652;
+  border-radius: 6px;
+  background: #171b21;
+}
+
+#diagnostics-panel[hidden] {
+  display: none;
+}
+
+.diagnostics-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 4px 8px;
+  color: #f5d76e;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#copy-diagnostics {
+  height: 22px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: inherit;
+}
+
+#diagnostics {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 8px;
+  border: 0;
+  border-top: 1px solid #252b33;
+  border-bottom: 1px solid #252b33;
+  background: #171b21;
+  color: #f5d76e;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  resize: none;
+  white-space: pre;
+}
+
+#diagnostics-path {
+  overflow: hidden;
+  padding: 4px 8px;
+  color: #b9c2cc;
+  font: 11px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.xterm {
+  height: 100%;
+}
