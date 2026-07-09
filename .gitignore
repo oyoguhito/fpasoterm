@@ -1,0 +1,8 @@
+node_modules/
+dist/
+out/
+artifacts/
+diagnostics/
+SESSION.md
+*.log
+.DS_Store
