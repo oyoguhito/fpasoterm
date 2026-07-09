@@ -1,8 +1,8 @@
-# FpasoTerm Specification
+# fpasoterm Specification
 
 ## Purpose
 
-FpasoTerm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems.
+fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems.
 
 ## Architecture
 
@@ -13,9 +13,9 @@ FpasoTerm is a desktop terminal application focused on Japanese input in ChromeO
 
 ## ChromeOS Linux Input Policy
 
-FpasoTerm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to Chromium and the operating system.
+fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to Chromium and the operating system.
 
-On Linux, FpasoTerm is launched with `--ozone-platform=x11` by default:
+On Linux, fpasoterm is launched with `--ozone-platform=x11` by default:
 
 ```text
 --ozone-platform=x11
@@ -28,6 +28,7 @@ FPASOTERM_OZONE_PLATFORM=wayland fpasoterm
 ```
 
 The npm binary name is `fpasoterm`. The binary passes Chromium switches before the app path so Ozone is initialized correctly.
+By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
 
 Users can install the published npm package directly:
 
@@ -45,7 +46,28 @@ The application window uses that PNG as its runtime icon. Linux desktop entries 
 
 The package license is MIT and the repository must expose `bin.fpasoterm` from `package.json` for global installation.
 
-When the shell-backed PTY exits, FpasoTerm closes the owning application window. This makes `exit` behave like closing a normal terminal window.
+When the shell-backed PTY exits, fpasoterm closes the owning application window. This makes `exit` behave like closing a normal terminal window.
+
+## Configuration and Plugins
+
+User configuration is read from `~/.config/fpasoterm/User/config.toml`, or from `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` when `XDG_CONFIG_HOME` is set.
+`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch.
+`--show-config` prints the resolved settings and plugin load status. `--enable-plugin` and `--disable-plugin` select one or more files below `User/plugins` by file name and edit `plugins.enabled`.
+
+If `config.toml` does not exist, fpasoterm writes `config.toml.example` with the default settings. fpasoterm does not overwrite an existing user config.
+
+Supported config sections:
+
+- `window`: initial window size, minimum window size, background color, and theme source.
+- `terminal`: xterm.js terminal options such as `fontFamily`, `fontSize`, `scrollback`, and `theme`.
+- `ime`: duplicate input guard options: `duplicateGuard`, `duplicateWindowMs`, and `repeatedTextWindowMs`.
+- `plugins.enabled`: relative plugin paths under the config directory.
+
+Plugins must be placed under `~/.config/fpasoterm/User/plugins/`. `.js` and `.ts` plugins are supported. TypeScript plugins are transpiled to `~/.config/fpasoterm/User/cache/plugins/` at launch and then loaded into the renderer.
+
+Renderer plugins access `window.fpasotermPluginApi`, which exposes the terminal, fit addon, resolved config, and a diagnostics logger.
+
+The full default configuration is documented in `docs/config.en.md`. See `examples/config/` for sample configs and `examples/plugins/` for sample plugins.
 
 ## Diagnostics
 
@@ -61,6 +83,6 @@ The debug panel also exposes a Copy button that uses the desktop runtime's clipb
 
 ## Non-goals
 
-- FpasoTerm does not manage IBus engines.
-- FpasoTerm does not emulate OS-level Japanese input switching.
-- FpasoTerm does not implement terminal shell behavior itself; that is delegated to the user's shell through node-pty.
+- fpasoterm does not manage IBus engines.
+- fpasoterm does not emulate OS-level Japanese input switching.
+- fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through node-pty.

@@ -49,7 +49,7 @@ fpasoterm
 The desktop entry template is:
 
 ```text
-extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+extra/linux/io.github.oyoguhito.fpasoterm.desktop
 ```
 
 The application icon is:

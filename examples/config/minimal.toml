@@ -1,0 +1,18 @@
+# Minimal fpasoterm config example.
+# Copy this to ~/.config/fpasoterm/User/config.toml and edit as needed.
+
+[window]
+width = 1000
+height = 680
+
+[terminal]
+fontSize = 14
+fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
+
+[ime]
+duplicateGuard = true
+duplicateWindowMs = 800
+repeatedTextWindowMs = 140
+
+[plugins]
+enabled = []

@@ -1,37 +1,308 @@
 #!/usr/bin/env node
 
 const { spawn } = require('node:child_process');
+const fs = require('node:fs');
 const path = require('node:path');
+const toml = require('smol-toml');
 
 const root = path.resolve(__dirname, '..');
-const electron = require('electron');
+const {
+  configPath,
+  discoverPluginFiles,
+  loadConfig,
+  readUserConfig,
+  resolvePluginSelector,
+  writeUserConfig,
+} = require(path.join(root, 'src', 'config'));
 
-const electronArgs = [];
+const helpText = `Usage: fpasoterm [options]
 
-if (process.platform === 'linux') {
-  const ozonePlatform = process.env.FPASOTERM_OZONE_PLATFORM || 'x11';
-  electronArgs.push(`--ozone-platform=${ozonePlatform}`);
+Options:
+  --help                    Show this help.
+  --foreground              Keep the launcher attached to the current console.
+  --console-diagnostics     Print diagnostics to stderr as well as the log file.
+  --config <path>           Use a specific config.toml for this launch.
+  --show-config             Print resolved settings and plugin load status, then exit.
+  --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
+  --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
+  --width <px>              Override the configured window width for this launch.
+  --height <px>             Override the configured window height for this launch.
+  --size <width>x<height>   Override both window dimensions for this launch.
+  --debug-keys              Enable key/composition diagnostics.
+  --ozone-platform <name>   Override Linux Ozone platform, for example x11 or wayland.
+  --disable-gpu             Disable GPU acceleration for diagnostics.
+
+Normal launches detach from the console so the shell prompt is available again.
+Use --foreground when you want the command to wait for the app process.
+`;
+
+// Converts CLI options into environment variables consumed by the main process.
+function parseArgs(argv) {
+  const env = {};
+  const electronArgs = [];
+  const enablePlugins = [];
+  const disablePlugins = [];
+  let foreground = false;
+  let showConfig = false;
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+
+    if (arg === '--help' || arg === '-h') {
+      return { help: true };
+    }
+
+    if (arg === '--foreground') {
+      foreground = true;
+      continue;
+    }
+
+    if (arg === '--show-config') {
+      showConfig = true;
+      continue;
+    }
+
+    if (arg === '--enable-plugin') {
+      enablePlugins.push(...parsePluginSelectors(requireValue(argv, index, arg), arg));
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--disable-plugin') {
+      disablePlugins.push(...parsePluginSelectors(requireValue(argv, index, arg), arg));
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--console-diagnostics') {
+      env.FPASOTERM_CONSOLE_DIAGNOSTICS = '1';
+      continue;
+    }
+
+    if (arg === '--debug-keys') {
+      env.FPASOTERM_DEBUG_KEYS = '1';
+      continue;
+    }
+
+    if (arg === '--disable-gpu') {
+      env.FPASOTERM_DISABLE_GPU = '1';
+      continue;
+    }
+
+    if (arg === '--config') {
+      env.FPASOTERM_CONFIG_PATH = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--width') {
+      env.FPASOTERM_WINDOW_WIDTH = requirePositiveInteger(requireValue(argv, index, arg), arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--height') {
+      env.FPASOTERM_WINDOW_HEIGHT = requirePositiveInteger(requireValue(argv, index, arg), arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--size') {
+      const value = requireValue(argv, index, arg);
+      const match = value.match(/^(\d+)x(\d+)$/i);
+      if (!match) {
+        throw new Error(`${arg} must be formatted as <width>x<height>`);
+      }
+      env.FPASOTERM_WINDOW_WIDTH = requirePositiveInteger(match[1], '--width');
+      env.FPASOTERM_WINDOW_HEIGHT = requirePositiveInteger(match[2], '--height');
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--ozone-platform') {
+      env.FPASOTERM_OZONE_PLATFORM = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    electronArgs.push(arg);
+  }
+
+  return {
+    help: false,
+    foreground,
+    showConfig,
+    enablePlugins,
+    disablePlugins,
+    env,
+    electronArgs,
+  };
 }
 
-electronArgs.push(root, ...process.argv.slice(2));
+// Reads the value after a flag and reports a CLI-friendly error when missing.
+function requireValue(argv, index, flag) {
+  const value = argv[index + 1];
+  if (!value || value.startsWith('--')) {
+    throw new Error(`${flag} requires a value`);
+  }
+  return value;
+}
 
-const child = spawn(electron, electronArgs, {
-  stdio: 'inherit',
-  windowsHide: false,
-});
+// Normalizes dimension arguments before they are passed to the app process.
+function requirePositiveInteger(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed <= 0) {
+    throw new Error(`${flag} must be a positive integer`);
+  }
+  return String(parsed);
+}
 
-for (const signal of ['SIGINT', 'SIGTERM', 'SIGUSR2']) {
-  process.on(signal, () => {
-    if (!child.killed) {
-      child.kill(signal);
+// Splits a comma-separated plugin argument while preserving repeated options.
+function parsePluginSelectors(value, flag) {
+  const selectors = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (selectors.length === 0) {
+    throw new Error(`${flag} requires at least one plugin name`);
+  }
+  return selectors;
+}
+
+// Applies environment overrides while running config-only CLI commands.
+function applyEnv(env) {
+  for (const [key, value] of Object.entries(env)) {
+    process.env[key] = value;
+  }
+}
+
+// Updates plugins.enabled in config.toml without launching the application.
+function updatePluginConfig(options) {
+  if (options.enablePlugins.length === 0 && options.disablePlugins.length === 0) {
+    return false;
+  }
+
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const userConfig = readUserConfig(targetPath);
+  const plugins = userConfig.plugins && typeof userConfig.plugins === 'object' ? userConfig.plugins : {};
+  const enabled = new Set(Array.isArray(plugins.enabled) ? plugins.enabled : []);
+  const available = discoverPluginFiles(targetPath);
+
+  for (const selector of options.enablePlugins) {
+    enabled.add(resolvePluginSelector(selector, available, 'enable'));
+  }
+
+  for (const selector of options.disablePlugins) {
+    const plugin = resolvePluginSelector(selector, [...enabled], 'disable');
+    enabled.delete(plugin);
+  }
+
+  writeUserConfig({
+    ...userConfig,
+    plugins: {
+      ...plugins,
+      enabled: [...enabled].sort(),
+    },
+  }, targetPath);
+
+  console.log(`updated ${targetPath}`);
+  printPluginList(targetPath, [...enabled].sort());
+  return true;
+}
+
+// Prints the resolved config and which configured plugins can be loaded.
+function showConfig(options) {
+  applyEnv(options.env);
+  const runtimeConfig = loadConfig();
+  const enabled = Array.isArray(runtimeConfig.config.plugins?.enabled) ? runtimeConfig.config.plugins.enabled : [];
+
+  console.log(`Config path: ${runtimeConfig.configPath}`);
+  console.log(`Config directory: ${runtimeConfig.configDir}`);
+  console.log('');
+  console.log('Resolved config:');
+  process.stdout.write(toml.stringify(runtimeConfig.config));
+  console.log('');
+  printPluginList(runtimeConfig.configPath, enabled, runtimeConfig.pluginUrls);
+}
+
+// Prints plugin entries with simple status information.
+function printPluginList(targetPath, enabled, pluginUrls = []) {
+  const configDir = path.dirname(targetPath);
+  const loadedByName = new Map(pluginUrls.map((plugin) => [plugin.name, plugin]));
+
+  console.log('');
+  console.log('Plugins:');
+  if (enabled.length === 0) {
+    console.log('  (none enabled)');
+    return;
+  }
+
+  for (const plugin of enabled) {
+    const pluginPath = path.resolve(configDir, plugin);
+    const relativeName = path.relative(configDir, pluginPath);
+    const loaded = loadedByName.get(relativeName);
+    const exists = fs.existsSync(pluginPath);
+    const status = loaded ? 'loadable' : exists ? 'not loadable' : 'missing';
+    console.log(`  - ${plugin} [${status}]${loaded ? ` -> ${loaded.url}` : ''}`);
+  }
+}
+
+// Starts the desktop runtime. By default the child is detached so the shell prompt returns.
+function launch(options) {
+  const electron = require('electron');
+  const electronArgs = [];
+
+  if (process.platform === 'linux') {
+    const ozonePlatform = options.env.FPASOTERM_OZONE_PLATFORM || process.env.FPASOTERM_OZONE_PLATFORM || 'x11';
+    electronArgs.push(`--ozone-platform=${ozonePlatform}`);
+  }
+
+  electronArgs.push(root, ...options.electronArgs);
+
+  const child = spawn(electron, electronArgs, {
+    detached: !options.foreground,
+    env: {
+      ...process.env,
+      ...options.env,
+    },
+    stdio: options.foreground ? 'inherit' : 'ignore',
+    windowsHide: false,
+  });
+
+  if (!options.foreground) {
+    child.unref();
+    return;
+  }
+
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGUSR2']) {
+    process.on(signal, () => {
+      if (!child.killed) {
+        child.kill(signal);
+      }
+    });
+  }
+
+  child.on('exit', (code, signal) => {
+    if (signal) {
+      console.error(`${electron} exited with signal ${signal}`);
+      process.exit(1);
     }
+    process.exit(code ?? 0);
   });
 }
 
-child.on('exit', (code, signal) => {
-  if (signal) {
-    console.error(`${electron} exited with signal ${signal}`);
-    process.exit(1);
+try {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    process.stdout.write(helpText);
+  } else if (updatePluginConfig(options)) {
+    // The config command has completed without starting the desktop process.
+  } else if (options.showConfig) {
+    showConfig(options);
+  } else {
+    launch(options);
   }
-  process.exit(code ?? 0);
-});
+} catch (error) {
+  console.error(`fpasoterm: ${error.message}`);
+  console.error('Try `fpasoterm --help` for usage.');
+  // Let stdout/stderr flush before Node exits, including when called from a pipe.
+  process.exitCode = 2;
+}

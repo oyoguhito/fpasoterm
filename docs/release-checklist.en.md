@@ -6,7 +6,7 @@
 npm ci
 npm run check
 npm run scan:secrets
-desktop-file-validate extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 npm pack --dry-run
 npm run build:artifacts
@@ -25,7 +25,7 @@ Verify:
 - The app starts without Wayland/GPU errors.
 - The terminal shell appears and accepts normal ASCII input.
 - Japanese input works with the configured ChromeOS Linux input method.
-- `かな` / `英数` keys are not intercepted by FpasoTerm.
+- `かな` / `英数` keys are not intercepted by fpasoterm.
 - If debugging, `diagnostics/fpasoterm-debug.log` is written.
 - `npm install -g fpasoterm` exposes the `fpasoterm` command after the package is published.
 - Artifacts include `fpasoterm-<version>.tgz` and `fpasoterm-<version>-source-portable.tar.gz`.

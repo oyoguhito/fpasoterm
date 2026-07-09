@@ -1,5 +1,6 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+// Exposes a small, explicit IPC API to the renderer without enabling Node.js there.
 contextBridge.exposeInMainWorld('fpasoterm', {
   startTerminal: (size) => ipcRenderer.invoke('terminal:start', size),
   writeTerminal: (data) => ipcRenderer.send('terminal:write', data),
@@ -15,4 +16,5 @@ contextBridge.exposeInMainWorld('fpasoterm', {
   },
   copyDiagnostics: () => ipcRenderer.invoke('diagnostics:copy'),
   getDiagnosticsPath: () => ipcRenderer.invoke('diagnostics:path'),
+  getConfig: () => ipcRenderer.invoke('config:get'),
 });
