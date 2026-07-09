@@ -35,9 +35,17 @@ npm registry から直接インストールできます。
 npm install -g fpasoterm
 ```
 
+展開済み checkout では、`npm run install:desktop` により `XDG_BIN_HOME` または `~/.local/bin` にローカル `fpasoterm` コマンドをインストールします。
+
+`npm run update:desktop` は同じ command、launcher entry、hicolor icon files を上書きします。`npm run uninstall:desktop` は source checkout や npm dependencies を削除せず、インストール済みファイルだけを削除します。
+
 プロジェクトアイコンは `extra/logo/fpasoterm.png` です。
 
+アプリケーションウィンドウはこの PNG を runtime icon として使います。Linux desktop entry は `Icon=fpasoterm` を参照するため、installer はこの画像を対象環境の icon theme へ配置します。サイズ別 hicolor PNG は `extra/linux/icons/hicolor/` に生成します。
+
 license は MIT です。global install で `fpasoterm` コマンドを作るため、`package.json` の `bin.fpasoterm` を公開します。
+
+shell 付き PTY が終了した場合、FpasoTerm は対応するアプリケーションウィンドウを閉じます。これにより shell で `exit` を実行すると通常の Terminal ウィンドウと同じように終了します。
 
 ## 診断
 

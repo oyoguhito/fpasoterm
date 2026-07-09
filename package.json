@@ -1,6 +1,6 @@
 {
   "name": "fpasoterm",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "description": "Cross-platform terminal with Japanese IME support.",
   "main": "src/main.js",
   "license": "MIT",
@@ -40,7 +40,7 @@
     "package-lock.json"
   ],
   "scripts": {
-    "start": "fpasoterm",
+    "start": "node ./bin/fpasoterm",
     "postinstall": "electron-rebuild -f -w node-pty",
     "check": "npm run check:syntax && npm test",
     "check:syntax": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/renderer.js",
@@ -48,6 +48,10 @@
     "scan:secrets": "node scripts/security/scan-secrets.js",
     "security": "npm run scan:secrets && npm run audit:prod",
     "audit:prod": "npm audit --omit=dev",
+    "generate:icons": "node scripts/generate-icon.js",
+    "install:desktop": "node scripts/install-linux-desktop.js",
+    "update:desktop": "node scripts/install-linux-desktop.js",
+    "uninstall:desktop": "node scripts/uninstall-linux-desktop.js",
     "build:artifacts": "node scripts/build-artifacts.js"
   },
   "dependencies": {

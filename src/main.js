@@ -11,6 +11,7 @@ const OZONE_PLATFORM = process.env.FPASOTERM_OZONE_PLATFORM || (process.platform
 const ENABLE_WAYLAND_IME = process.env.FPASOTERM_ENABLE_WAYLAND_IME === '1';
 const GTK_VERSION = process.env.FPASOTERM_GTK_VERSION;
 const ENABLE_FEATURES = process.env.FPASOTERM_ENABLE_FEATURES;
+const ICON_PATH = path.join(__dirname, '..', 'extra', 'logo', 'fpasoterm.png');
 
 const terminals = new Map();
 const diagnostics = [];
@@ -116,6 +117,10 @@ function spawnTerminal(webContents, options) {
     terminals.delete(webContents.id);
     if (!webContents.isDestroyed()) {
       webContents.send('terminal:exit', exitCode);
+      const window = BrowserWindow.fromWebContents(webContents);
+      if (window && !window.isDestroyed()) {
+        window.close();
+      }
     }
   });
 }
@@ -156,6 +161,7 @@ function createWindow() {
     minWidth: 420,
     minHeight: 260,
     title: 'FpasoTerm',
+    icon: ICON_PATH,
     backgroundColor: '#101317',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),

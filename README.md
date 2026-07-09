@@ -1,5 +1,7 @@
 # FpasoTerm
 
+![FpasoTerm logo](extra/logo/fpasoterm.png)
+
 Cross-platform terminal app built with xterm.js and node-pty.
 
 日本語の概要は [日本語](#日本語) を参照してください。
@@ -63,6 +65,27 @@ mise exec node -- npm install
 mise exec node -- npm start
 ```
 
+To install a local command and launcher entry for this checkout:
+
+```sh
+npm run install:desktop
+fpasoterm
+```
+
+The command is installed to `~/.local/bin/fpasoterm` by default. Set `XDG_BIN_HOME` to choose a different command directory.
+
+To update the local command, launcher entry, and icons after pulling a newer checkout:
+
+```sh
+npm run update:desktop
+```
+
+To cleanly remove the local command, launcher entry, and installed launcher icons:
+
+```sh
+npm run uninstall:desktop
+```
+
 ## Command-line binary
 
 Install from the npm registry:
@@ -90,6 +113,8 @@ fpasoterm
 
 The binary passes `--ozone-platform=x11` before the app path on Linux.
 
+When the shell exits, for example by running `exit`, FpasoTerm closes the application window.
+
 ## Icon
 
 The project icon is a PNG asset:
@@ -98,7 +123,20 @@ The project icon is a PNG asset:
 extra/logo/fpasoterm.png
 ```
 
-The desktop entry uses `Icon=fpasoterm`. Installers should copy the PNG into the target platform's icon location.
+The application window uses this PNG directly. The desktop entry uses `Icon=fpasoterm`; ChromeOS/Linux launchers resolve that name through the hicolor icon theme files under:
+
+```text
+extra/linux/icons/hicolor/
+```
+
+To replace the icon, update `extra/logo/fpasoterm.png`, regenerate the launcher sizes, and reinstall the desktop entry:
+
+```sh
+npm run generate:icons
+npm run update:desktop
+```
+
+For Android-native packaging, use the same PNG as the source asset for the Android adaptive icon pipeline.
 
 ## License
 
@@ -160,6 +198,8 @@ npm install
 ./scripts/run
 ```
 
+shell で `exit` を実行すると FpasoTerm のウィンドウも閉じます。
+
 npm registry から global install する場合:
 
 ```sh
@@ -187,3 +227,12 @@ fpasoterm
 FPASOTERM_DEBUG_KEYS=1 ./scripts/run
 cat diagnostics/fpasoterm-debug.log
 ```
+
+アイコンを変更する場合は `extra/logo/fpasoterm.png` を差し替え、以下を実行します。
+
+```sh
+npm run generate:icons
+npm run install:desktop
+```
+
+ChromeOS Linux launcher は `extra/linux/icons/hicolor/` に生成されるサイズ別 PNG を使います。Android native package を作る場合は、この PNG を adaptive icon の元画像として使います。

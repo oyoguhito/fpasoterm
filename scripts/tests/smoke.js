@@ -15,17 +15,27 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '0.0.1');
+assert.equal(packageJson.version, '0.0.2');
 assert.equal(packageJson.main, 'src/main.js');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
+assert.equal(packageJson.scripts.start, 'node ./bin/fpasoterm');
+assert.equal(packageJson.scripts['generate:icons'], 'node scripts/generate-icon.js');
+assert.equal(packageJson.scripts['install:desktop'], 'node scripts/install-linux-desktop.js');
+assert.equal(packageJson.scripts['update:desktop'], 'node scripts/install-linux-desktop.js');
+assert.equal(packageJson.scripts['uninstall:desktop'], 'node scripts/uninstall-linux-desktop.js');
 assertFile('bin/fpasoterm');
 assertFile('LICENSE');
 assertFile('CHANGELOG.md');
 assertFile('CONTRIBUTING.md');
 assertFile('INSTALL.md');
 assertFile('extra/logo/fpasoterm.png');
+for (const size of [16, 32, 48, 64, 128, 192, 256, 512]) {
+  assertFile(`extra/linux/icons/hicolor/${size}x${size}/apps/fpasoterm.png`);
+}
+assertFile('scripts/install-linux-desktop.js');
+assertFile('scripts/uninstall-linux-desktop.js');
 assertFile('scripts/security/scan-secrets.js');
 
 for (const file of [
@@ -46,14 +56,37 @@ for (const file of [
 const main = read('src/main.js');
 assert.match(main, /FPASOTERM_DEBUG_KEYS/);
 assert.match(main, /ozone-platform/);
+assert.match(main, /extra', 'logo', 'fpasoterm\.png/);
+assert.match(main, /icon: ICON_PATH/);
+assert.match(main, /BrowserWindow\.fromWebContents\(webContents\)/);
+assert.match(main, /window\.close\(\)/);
 assert.doesNotMatch(main, /ibus/i);
 
 const bin = read('bin/fpasoterm');
 assert.match(bin, /--ozone-platform=/);
 assert.match(bin, /FPASOTERM_OZONE_PLATFORM/);
 
+const installDesktop = read('scripts/install-linux-desktop.js');
+assert.match(installDesktop, /XDG_BIN_HOME/);
+assert.match(installDesktop, /fpasoterm command/);
+assert.match(installDesktop, /APP_ROOT=/);
+
+const uninstallDesktop = read('scripts/uninstall-linux-desktop.js');
+assert.match(uninstallDesktop, /XDG_BIN_HOME/);
+assert.match(uninstallDesktop, /removed:/);
+assert.match(uninstallDesktop, /io\.github\.oyoguhito\.FpasoTerm\.desktop/);
+assert.match(uninstallDesktop, /fpasoterm\.png/);
+
 const preload = read('src/preload.js');
 assert.match(preload, /contextBridge\.exposeInMainWorld\('fpasoterm'/);
+
+const readme = read('README.md');
+assert.match(readme, /!\[FpasoTerm logo\]\(extra\/logo\/fpasoterm\.png\)/);
+
+const renderer = read('src/renderer/renderer.js');
+assert.match(renderer, /correctCompositionData/);
+assert.match(renderer, /installCompositionDuplicateGuard/);
+assert.match(renderer, /compositionupdate/);
 
 const desktop = read('extra/linux/io.github.oyoguhito.FpasoTerm.desktop');
 assert.match(desktop, /^Name=FpasoTerm$/m);
