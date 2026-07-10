@@ -36,7 +36,7 @@ jobs:
         run: npm run scan:secrets
 
       - name: Validate desktop file
-        run: desktop-file-validate extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+        run: desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 
       - name: Audit production dependencies
         run: npm run audit:prod

@@ -120,6 +120,52 @@ function encodePng(imageSize, imagePixels) {
   ]);
 }
 
+// Encodes one macOS icon chunk from a PNG payload.
+function iconChunk(type, pngData) {
+  const chunkHeader = Buffer.alloc(8);
+  chunkHeader.write(type, 0, 4, 'ascii');
+  chunkHeader.writeUInt32BE(pngData.length + 8, 4);
+  return Buffer.concat([chunkHeader, pngData]);
+}
+
+// Encodes a macOS .icns file with PNG-backed icon representations.
+function encodeIcns(iconEntries) {
+  const body = Buffer.concat(iconEntries.map(({ type, pngData }) => iconChunk(type, pngData)));
+  const header = Buffer.alloc(8);
+  header.write('icns', 0, 4, 'ascii');
+  header.writeUInt32BE(body.length + 8, 4);
+  return Buffer.concat([header, body]);
+}
+
+// Writes a Windows .ico file that embeds PNG icon images.
+function encodeIco(iconEntries) {
+  const imageCount = iconEntries.length;
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);
+  header.writeUInt16LE(1, 2);
+  header.writeUInt16LE(imageCount, 4);
+
+  const directory = Buffer.alloc(imageCount * 16);
+  let offset = 6 + imageCount * 16;
+  const images = [];
+
+  iconEntries.forEach(({ size, pngData }, index) => {
+    const entryOffset = index * 16;
+    directory[entryOffset] = size >= 256 ? 0 : size;
+    directory[entryOffset + 1] = size >= 256 ? 0 : size;
+    directory[entryOffset + 2] = 0;
+    directory[entryOffset + 3] = 0;
+    directory.writeUInt16LE(1, entryOffset + 4);
+    directory.writeUInt16LE(32, entryOffset + 6);
+    directory.writeUInt32LE(pngData.length, entryOffset + 8);
+    directory.writeUInt32LE(offset, entryOffset + 12);
+    offset += pngData.length;
+    images.push(pngData);
+  });
+
+  return Buffer.concat([header, directory, ...images]);
+}
+
 // Resizes the source icon using nearest-neighbor sampling for crisp small icons.
 function resizePixels(targetSize) {
   if (targetSize === sourceSize) {
@@ -173,3 +219,33 @@ writeIcon('extra/logo/fpasoterm.png', 256);
 for (const iconSize of [16, 32, 48, 64, 128, 192, 256, 512]) {
   writeIcon(`extra/linux/icons/hicolor/${iconSize}x${iconSize}/apps/fpasoterm.png`, iconSize);
 }
+
+const macIconEntries = [
+  { type: 'icp4', size: 16 },
+  { type: 'icp5', size: 32 },
+  { type: 'icp6', size: 64 },
+  { type: 'ic07', size: 128 },
+  { type: 'ic08', size: 256 },
+  { type: 'ic09', size: 512 },
+  { type: 'ic10', size: 1024 },
+].map(({ type, size }) => ({
+  type,
+  pngData: encodePng(size, resizePixels(size)),
+}));
+
+const macIcnsPath = path.join(root, 'extra', 'macos', 'fpasoterm.icns');
+fs.mkdirSync(path.dirname(macIcnsPath), { recursive: true });
+fs.writeFileSync(macIcnsPath, encodeIcns(macIconEntries));
+console.log(macIcnsPath);
+
+const windowsIconEntries = [
+  16, 32, 48, 64, 128, 256,
+].map((size) => ({
+  size,
+  pngData: encodePng(size, resizePixels(size)),
+}));
+
+const windowsIcoPath = path.join(root, 'extra', 'windows', 'fpasoterm.ico');
+fs.mkdirSync(path.dirname(windowsIcoPath), { recursive: true });
+fs.writeFileSync(windowsIcoPath, encodeIco(windowsIconEntries));
+console.log(windowsIcoPath);

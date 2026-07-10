@@ -14,7 +14,9 @@ const OZONE_PLATFORM = process.env.FPASOTERM_OZONE_PLATFORM || (process.platform
 const ENABLE_WAYLAND_IME = process.env.FPASOTERM_ENABLE_WAYLAND_IME === '1';
 const GTK_VERSION = process.env.FPASOTERM_GTK_VERSION;
 const ENABLE_FEATURES = process.env.FPASOTERM_ENABLE_FEATURES;
-const ICON_PATH = path.join(__dirname, '..', 'extra', 'logo', 'fpasoterm.png');
+const ICON_PATH = process.platform === 'win32'
+  ? path.join(__dirname, '..', 'extra', 'windows', 'fpasoterm.ico')
+  : path.join(__dirname, '..', 'extra', 'logo', 'fpasoterm.png');
 
 const terminals = new Map();
 const diagnostics = [];
@@ -191,6 +193,13 @@ function installRendererDiagnostics(window) {
   });
 }
 
+// Sets the application icon on platforms that do not use BrowserWindow icon for the app shell.
+function applyApplicationIcon() {
+  if (process.platform === 'darwin' && app.dock) {
+    app.dock.setIcon(ICON_PATH);
+  }
+}
+
 // Creates one application window using the resolved user configuration.
 function createWindow() {
   const windowConfig = runtimeConfig.config.window || {};
@@ -225,6 +234,8 @@ app.setPath('userData', profileDir());
 
 // Loads user configuration before creating the first window.
 app.whenReady().then(() => {
+  applyApplicationIcon();
+
   try {
     runtimeConfig = loadConfig();
     runtimeConfig.config = applyRuntimeOverrides(runtimeConfig.config);

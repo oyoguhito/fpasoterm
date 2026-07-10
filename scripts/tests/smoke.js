@@ -21,7 +21,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '0.0.3');
+assert.equal(packageJson.version, '0.0.4');
 assert.equal(packageJson.main, 'src/main.js');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
@@ -46,6 +46,8 @@ assertFile('examples/plugins/theme.ts');
 assertFile('examples/config/minimal.toml');
 assertFile('examples/config/with-plugins.toml');
 assertFile('extra/logo/fpasoterm.png');
+assertFile('extra/macos/fpasoterm.icns');
+assertFile('extra/windows/fpasoterm.ico');
 for (const size of [16, 32, 48, 64, 128, 192, 256, 512]) {
   assertFile(`extra/linux/icons/hicolor/${size}x${size}/apps/fpasoterm.png`);
 }
@@ -86,6 +88,8 @@ assert.match(main, /width: windowConfig\.width/);
 assert.match(main, /height: windowConfig\.height/);
 assert.match(main, /ozone-platform/);
 assert.match(main, /extra', 'logo', 'fpasoterm\.png/);
+assert.match(main, /app\.dock\.setIcon\(ICON_PATH\)/);
+assert.match(main, /extra', 'windows', 'fpasoterm\.ico/);
 assert.match(main, /icon: ICON_PATH/);
 assert.match(main, /BrowserWindow\.fromWebContents\(webContents\)/);
 assert.match(main, /window\.close\(\)/);

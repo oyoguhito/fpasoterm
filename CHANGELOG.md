@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.0.4
+
+- macOS Dock and bundle icons now use the generated project assets.
+- Windows window icons now use the generated `.ico` asset.
+
 ## 0.0.3
 
 - Initial fpasoterm release.
