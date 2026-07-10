@@ -24,6 +24,7 @@ const patterns = [
   ['Generic assigned secret', /\b(?:api[_-]?key|secret|token|password|passwd|pwd)\b\s*[:=]\s*['"][^'"]{12,}['"]/i],
 ];
 
+// Recursively returns repository files that should be scanned.
 function walk(dir) {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const files = [];
@@ -47,6 +48,7 @@ function walk(dir) {
   return files;
 }
 
+// Heuristically skips binary files to avoid noisy text scanning.
 function isBinary(buffer) {
   return buffer.includes(0);
 }

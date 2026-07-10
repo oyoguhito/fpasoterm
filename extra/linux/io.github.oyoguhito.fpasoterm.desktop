@@ -1,10 +1,10 @@
 [Desktop Entry]
 Type=Application
-Name=FpasoTerm
+Name=fpasoterm
 Comment=Cross-platform terminal with Japanese IME support
 Exec=fpasoterm
 Icon=fpasoterm
 Terminal=false
 Categories=System;TerminalEmulator;
 StartupNotify=true
-StartupWMClass=io.github.oyoguhito.FpasoTerm
+StartupWMClass=io.github.oyoguhito.fpasoterm

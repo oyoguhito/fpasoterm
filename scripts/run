@@ -5,11 +5,11 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 cd "$SCRIPT_DIR"
 
 if command -v node >/dev/null 2>&1; then
-  exec node ./bin/fpasoterm "$@"
+  exec node ./bin/fpasoterm --foreground "$@"
 fi
 
 if command -v mise >/dev/null 2>&1; then
-  exec mise exec node -- node ./bin/fpasoterm "$@"
+  exec mise exec node -- node ./bin/fpasoterm --foreground "$@"
 fi
 
 echo "node is not available. Install Node.js or enable mise's Node toolchain." >&2

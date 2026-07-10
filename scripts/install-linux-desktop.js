@@ -10,12 +10,14 @@ const applicationsDir = path.join(dataHome, 'applications');
 const iconsDir = path.join(dataHome, 'icons', 'hicolor');
 const iconSizes = [16, 32, 48, 64, 128, 192, 256, 512];
 
+// Copies one desktop or icon file, creating the target directory first.
 function copyFile(source, target) {
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.copyFileSync(source, target);
   console.log(`${source} -> ${target}`);
 }
 
+// Runs optional desktop cache refresh commands when they exist on the host.
 function runOptional(command, args) {
   const result = childProcess.spawnSync(command, args, { stdio: 'inherit' });
   if (result.error && result.error.code !== 'ENOENT') {
@@ -23,10 +25,20 @@ function runOptional(command, args) {
   }
 }
 
+// Removes legacy files created by older fpasoterm versions.
+function removeFile(target) {
+  if (fs.existsSync(target)) {
+    fs.rmSync(target, { force: true });
+    console.log(`removed old file: ${target}`);
+  }
+}
+
+// Quotes paths safely for the generated shell wrapper.
 function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\''")}'`;
 }
 
+// Installs the local fpasoterm command wrapper into the user's bin directory.
 function installCommand() {
   fs.mkdirSync(binHome, { recursive: true });
   const commandPath = path.join(binHome, 'fpasoterm');
@@ -55,9 +67,10 @@ exit 127
 installCommand();
 
 copyFile(
-  path.join(root, 'extra', 'linux', 'io.github.oyoguhito.FpasoTerm.desktop'),
-  path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'),
+  path.join(root, 'extra', 'linux', 'io.github.oyoguhito.fpasoterm.desktop'),
+  path.join(applicationsDir, 'io.github.oyoguhito.fpasoterm.desktop'),
 );
+removeFile(path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'));
 
 for (const size of iconSizes) {
   copyFile(

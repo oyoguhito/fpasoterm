@@ -9,6 +9,7 @@ const applicationsDir = path.join(dataHome, 'applications');
 const iconsDir = path.join(dataHome, 'icons', 'hicolor');
 const iconSizes = [16, 32, 48, 64, 128, 192, 256, 512];
 
+// Removes a file if it was installed by fpasoterm or a legacy version.
 function removeFile(target) {
   if (!fs.existsSync(target)) {
     console.log(`not found: ${target}`);
@@ -19,6 +20,7 @@ function removeFile(target) {
   console.log(`removed: ${target}`);
 }
 
+// Removes a directory only when no other application files remain inside it.
 function removeEmptyDir(target) {
   try {
     fs.rmdirSync(target);
@@ -30,6 +32,7 @@ function removeEmptyDir(target) {
   }
 }
 
+// Checks whether the applications directory still contains desktop entries.
 function hasDesktopEntries(target) {
   try {
     return fs.readdirSync(target).some((entry) => entry.endsWith('.desktop'));
@@ -41,6 +44,7 @@ function hasDesktopEntries(target) {
   }
 }
 
+// Runs optional desktop cache refresh commands when available.
 function runOptional(command, args) {
   const result = childProcess.spawnSync(command, args, { stdio: 'inherit' });
   if (result.error && result.error.code !== 'ENOENT') {
@@ -49,6 +53,7 @@ function runOptional(command, args) {
 }
 
 removeFile(path.join(binHome, 'fpasoterm'));
+removeFile(path.join(applicationsDir, 'io.github.oyoguhito.fpasoterm.desktop'));
 removeFile(path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'));
 
 for (const size of iconSizes) {

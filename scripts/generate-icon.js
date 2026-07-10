@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const sourceSize = 256;
 const pixels = Buffer.alloc(sourceSize * sourceSize * 4);
 
+// Writes one RGBA pixel into the source icon buffer.
 function setPixel(x, y, r, g, b, a = 255) {
   const offset = (y * sourceSize + x) * 4;
   pixels[offset] = r;
@@ -14,6 +15,7 @@ function setPixel(x, y, r, g, b, a = 255) {
   pixels[offset + 3] = a;
 }
 
+// Fills an axis-aligned rectangle in the source icon buffer.
 function fillRect(x, y, width, height, color) {
   for (let row = y; row < y + height; row += 1) {
     for (let col = x; col < x + width; col += 1) {
@@ -22,6 +24,7 @@ function fillRect(x, y, width, height, color) {
   }
 }
 
+// Fills a rectangle with rounded corners for the terminal-window shape.
 function fillRoundedRect(x, y, width, height, radius, color) {
   for (let row = y; row < y + height; row += 1) {
     for (let col = x; col < x + width; col += 1) {
@@ -34,6 +37,7 @@ function fillRoundedRect(x, y, width, height, radius, color) {
   }
 }
 
+// Draws a rectangular outline by filling four thin rectangles.
 function strokeRect(x, y, width, height, thickness, color) {
   fillRect(x, y, width, thickness, color);
   fillRect(x, y + height - thickness, width, thickness, color);
@@ -41,6 +45,7 @@ function strokeRect(x, y, width, height, thickness, color) {
   fillRect(x + width - thickness, y, thickness, height, color);
 }
 
+// Draws a thick line using small rounded rectangles along a Bresenham path.
 function line(x0, y0, x1, y1, thickness, color) {
   const dx = Math.abs(x1 - x0);
   const dy = Math.abs(y1 - y0);
@@ -67,6 +72,7 @@ function line(x0, y0, x1, y1, thickness, color) {
   }
 }
 
+// Computes PNG chunk checksums.
 function crc32(buffer) {
   let crc = 0xffffffff;
   for (const byte of buffer) {
@@ -78,6 +84,7 @@ function crc32(buffer) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
+// Creates a single PNG chunk with length, type, data, and CRC.
 function chunk(type, data) {
   const typeBuffer = Buffer.from(type);
   const length = Buffer.alloc(4);
@@ -87,6 +94,7 @@ function chunk(type, data) {
   return Buffer.concat([length, typeBuffer, data, crc]);
 }
 
+// Encodes raw RGBA pixels into a minimal PNG file.
 function encodePng(imageSize, imagePixels) {
   const raw = Buffer.alloc((imageSize * 4 + 1) * imageSize);
   for (let y = 0; y < imageSize; y += 1) {
@@ -112,6 +120,7 @@ function encodePng(imageSize, imagePixels) {
   ]);
 }
 
+// Resizes the source icon using nearest-neighbor sampling for crisp small icons.
 function resizePixels(targetSize) {
   if (targetSize === sourceSize) {
     return Buffer.from(pixels);
@@ -130,6 +139,7 @@ function resizePixels(targetSize) {
   return resized;
 }
 
+// Writes one icon file at the requested size.
 function writeIcon(relativePath, imageSize) {
   const outputPath = path.join(root, relativePath);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });

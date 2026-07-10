@@ -8,6 +8,7 @@ const npmCacheDir = path.join(artifactsDir, '.npm-cache');
 const packageJson = require(path.join(root, 'package.json'));
 const version = packageJson.version;
 
+// Runs packaging commands from the repository root with an artifact-local npm cache.
 function run(command, args, options = {}) {
   childProcess.execFileSync(command, args, {
     cwd: root,
@@ -32,6 +33,7 @@ fs.mkdirSync(portableRoot, { recursive: true });
 for (const entry of [
   'bin',
   'docs',
+  'examples',
   'extra',
   'scripts',
   'src',

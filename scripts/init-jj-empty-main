@@ -33,7 +33,7 @@ jj git init --colocate .
 jj describe -m "empty main"
 jj bookmark create main -r @
 
-jj new main -m "Initial FpasoTerm terminal app"
+jj new main -m "Initial fpasoterm terminal app"
 find "$tmpdir" -mindepth 1 -maxdepth 1 -exec mv {} . \;
 restore_needed=0
 

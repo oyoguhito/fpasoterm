@@ -3,9 +3,12 @@ const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const pty = require('node-pty');
+const { loadConfig, profileDir } = require('./config');
 
-const APP_ID = 'io.github.oyoguhito.FpasoTerm';
+const APP_ID = 'io.github.oyoguhito.fpasoterm';
+const APP_NAME = 'fpasoterm';
 const DEBUG_KEYS = process.env.FPASOTERM_DEBUG_KEYS === '1';
+const CONSOLE_DIAGNOSTICS = process.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1';
 const DISABLE_GPU = process.env.FPASOTERM_DISABLE_GPU === '1';
 const OZONE_PLATFORM = process.env.FPASOTERM_OZONE_PLATFORM || (process.platform === 'linux' ? 'x11' : undefined);
 const ENABLE_WAYLAND_IME = process.env.FPASOTERM_ENABLE_WAYLAND_IME === '1';
@@ -17,6 +20,7 @@ const terminals = new Map();
 const diagnostics = [];
 const diagnosticsDir = path.join(process.cwd(), 'diagnostics');
 const diagnosticsPath = path.join(diagnosticsDir, 'fpasoterm-debug.log');
+let runtimeConfig;
 
 if (process.platform === 'linux' && DISABLE_GPU) {
   app.disableHardwareAcceleration();
@@ -40,6 +44,7 @@ if (ENABLE_FEATURES) {
   app.commandLine.appendSwitch('enable-features', ENABLE_FEATURES);
 }
 
+// Records diagnostics in memory and the debug log file.
 function appendDiagnostic(message) {
   const line = `${new Date().toISOString()} ${message}`;
   diagnostics.push(line);
@@ -47,7 +52,9 @@ function appendDiagnostic(message) {
     diagnostics.shift();
   }
 
-  console.error(message);
+  if (CONSOLE_DIAGNOSTICS || DEBUG_KEYS) {
+    console.error(message);
+  }
 
   try {
     fs.mkdirSync(diagnosticsDir, { recursive: true });
@@ -57,6 +64,33 @@ function appendDiagnostic(message) {
   }
 }
 
+// Reads a positive integer environment override.
+function readPositiveIntegerEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+// Applies one-launch CLI overrides after config.toml has been resolved.
+function applyRuntimeOverrides(config) {
+  const width = readPositiveIntegerEnv('FPASOTERM_WINDOW_WIDTH');
+  const height = readPositiveIntegerEnv('FPASOTERM_WINDOW_HEIGHT');
+
+  return {
+    ...config,
+    window: {
+      ...config.window,
+      ...(width ? { width } : {}),
+      ...(height ? { height } : {}),
+    },
+  };
+}
+
+// Converts arbitrary thrown values into readable diagnostic text.
 function formatError(error) {
   if (error && error.stack) {
     return error.stack;
@@ -67,6 +101,7 @@ function formatError(error) {
   return String(error);
 }
 
+// Shows main-process failures to the user and mirrors them to diagnostics.
 function reportMainProcessError(title, error) {
   const message = formatError(error);
   appendDiagnostic(`${title}\n${message}`);
@@ -77,13 +112,14 @@ function reportMainProcessError(title, error) {
 }
 
 process.on('uncaughtException', (error) => {
-  reportMainProcessError('Uncaught exception in FpasoTerm main process', error);
+  reportMainProcessError('Uncaught exception in fpasoterm main process', error);
 });
 
 process.on('unhandledRejection', (reason) => {
-  reportMainProcessError('Unhandled rejection in FpasoTerm main process', reason);
+  reportMainProcessError('Unhandled rejection in fpasoterm main process', reason);
 });
 
+// Picks the user's default shell for the PTY.
 function shellCommand() {
   if (process.platform === 'win32') {
     return process.env.ComSpec || 'powershell.exe';
@@ -92,6 +128,7 @@ function shellCommand() {
   return process.env.SHELL || (process.platform === 'darwin' ? '/bin/zsh' : '/bin/bash');
 }
 
+// Starts the shell-backed PTY and wires its data stream to one renderer.
 function spawnTerminal(webContents, options) {
   const shell = shellCommand();
   const term = pty.spawn(shell, [], {
@@ -125,6 +162,7 @@ function spawnTerminal(webContents, options) {
   });
 }
 
+// Logs key events only when FPASOTERM_DEBUG_KEYS=1 is enabled.
 function installInputMethodHooks(window) {
   window.webContents.on('before-input-event', (_event, input) => {
     if (DEBUG_KEYS) {
@@ -138,6 +176,7 @@ function installInputMethodHooks(window) {
   });
 }
 
+// Captures renderer console/process/load failures in the main diagnostics log.
 function installRendererDiagnostics(window) {
   window.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     appendDiagnostic(`renderer console level=${level} ${sourceId}:${line} ${message}`);
@@ -152,17 +191,19 @@ function installRendererDiagnostics(window) {
   });
 }
 
+// Creates one application window using the resolved user configuration.
 function createWindow() {
-  nativeTheme.themeSource = 'system';
+  const windowConfig = runtimeConfig.config.window || {};
+  nativeTheme.themeSource = windowConfig.themeSource || 'system';
 
   const window = new BrowserWindow({
-    width: 1000,
-    height: 680,
-    minWidth: 420,
-    minHeight: 260,
-    title: 'FpasoTerm',
+    width: windowConfig.width,
+    height: windowConfig.height,
+    minWidth: windowConfig.minWidth,
+    minHeight: windowConfig.minHeight,
+    title: APP_NAME,
     icon: ICON_PATH,
-    backgroundColor: '#101317',
+    backgroundColor: windowConfig.backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -178,10 +219,26 @@ function createWindow() {
   });
 }
 
-app.setName('FpasoTerm');
+app.setName(APP_NAME);
 app.setAppUserModelId(APP_ID);
+app.setPath('userData', profileDir());
 
+// Loads user configuration before creating the first window.
 app.whenReady().then(() => {
+  try {
+    runtimeConfig = loadConfig();
+    runtimeConfig.config = applyRuntimeOverrides(runtimeConfig.config);
+    appendDiagnostic(`loaded config ${runtimeConfig.configPath}`);
+  } catch (error) {
+    runtimeConfig = {
+      config: {},
+      configDir: path.join(os.homedir(), '.config', 'fpasoterm', 'User'),
+      configPath: path.join(os.homedir(), '.config', 'fpasoterm', 'User', 'config.toml'),
+      pluginUrls: [],
+    };
+    reportMainProcessError('Failed to load fpasoterm config', error);
+  }
+
   createWindow();
 
   app.on('activate', () => {
@@ -191,6 +248,7 @@ app.whenReady().then(() => {
   });
 });
 
+// Ensures shell processes are stopped when the final window closes.
 app.on('window-all-closed', () => {
   for (const term of terminals.values()) {
     term.kill();
@@ -202,6 +260,7 @@ app.on('window-all-closed', () => {
   }
 });
 
+// Creates a PTY for a renderer once xterm.js reports its initial size.
 ipcMain.handle('terminal:start', (event, options) => {
   const existing = terminals.get(event.sender.id);
   if (existing) {
@@ -210,6 +269,7 @@ ipcMain.handle('terminal:start', (event, options) => {
   spawnTerminal(event.sender, options);
 });
 
+// Forwards keyboard/input data from xterm.js to the PTY.
 ipcMain.on('terminal:write', (event, data) => {
   const term = terminals.get(event.sender.id);
   if (term) {
@@ -217,6 +277,7 @@ ipcMain.on('terminal:write', (event, data) => {
   }
 });
 
+// Applies renderer size changes to the PTY.
 ipcMain.on('terminal:resize', (event, size) => {
   const term = terminals.get(event.sender.id);
   if (term && size.cols > 0 && size.rows > 0) {
@@ -224,10 +285,15 @@ ipcMain.on('terminal:resize', (event, size) => {
   }
 });
 
+// Copies accumulated diagnostics through the desktop clipboard API.
 ipcMain.handle('diagnostics:copy', () => {
   const text = diagnostics.join('\n');
   clipboard.writeText(text);
   return text.length;
 });
 
+// Exposes the diagnostics log path to the renderer debug panel.
 ipcMain.handle('diagnostics:path', () => diagnosticsPath);
+
+// Sends resolved settings and plugin script URLs to the renderer.
+ipcMain.handle('config:get', () => runtimeConfig);

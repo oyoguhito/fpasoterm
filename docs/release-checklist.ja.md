@@ -6,7 +6,7 @@
 npm ci
 npm run check
 npm run scan:secrets
-desktop-file-validate extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 npm pack --dry-run
 npm run build:artifacts
@@ -25,7 +25,7 @@ FPASOTERM_DEBUG_KEYS=1 ./scripts/run
 - Wayland/GPU エラーで起動に失敗しない。
 - Terminal shell が表示され、通常の ASCII 入力を受け付ける。
 - 設定済みの ChromeOS Linux 入力メソッドで日本語入力できる。
-- `かな` / `英数` キーを FpasoTerm が横取りしない。
+- `かな` / `英数` キーを fpasoterm が横取りしない。
 - debug 時に `diagnostics/fpasoterm-debug.log` が書き出される。
 - package 公開後、`npm install -g fpasoterm` で `fpasoterm` コマンドが使える。
 - artifact に `fpasoterm-<version>.tgz` と `fpasoterm-<version>-source-portable.tar.gz` が含まれる。

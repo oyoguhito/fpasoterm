@@ -1,6 +1,6 @@
 {
   "name": "fpasoterm",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "description": "Cross-platform terminal with Japanese IME support.",
   "main": "src/main.js",
   "license": "MIT",
@@ -28,6 +28,7 @@
   "files": [
     "bin/",
     "docs/",
+    "examples/",
     "extra/",
     "scripts/",
     "src/",
@@ -43,7 +44,7 @@
     "start": "node ./bin/fpasoterm",
     "postinstall": "electron-rebuild -f -w node-pty",
     "check": "npm run check:syntax && npm test",
-    "check:syntax": "node --check src/main.js && node --check src/preload.js && node --check src/renderer/renderer.js",
+    "check:syntax": "node --check bin/fpasoterm && node --check src/config.js && node --check src/main.js && node --check src/preload.js && node --check src/renderer/renderer.js",
     "test": "node scripts/tests/smoke.js",
     "scan:secrets": "node scripts/security/scan-secrets.js",
     "security": "npm run scan:secrets && npm run audit:prod",
@@ -59,6 +60,8 @@
     "@xterm/addon-fit": "0.12.0-beta.288",
     "@xterm/xterm": "6.1.0-beta.288",
     "electron": "42.5.0",
-    "node-pty": "1.2.0-beta.13"
+    "node-pty": "1.2.0-beta.13",
+    "smol-toml": "^1.4.2",
+    "typescript": "^5.9.3"
   }
 }
