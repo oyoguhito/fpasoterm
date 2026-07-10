@@ -10,7 +10,9 @@ Cross-platform terminal app built with xterm.js and node-pty.
 - xterm.js renders the terminal in the renderer process.
 - node-pty owns the real shell/PTY in the main process.
 
-Japanese IME composition and keyboard layout switching are handled by Chromium/xterm.js. fpasoterm does not intercept `かな` / `英数` key presses.
+Japanese IME composition and keyboard layout switching are handled by Chromium/xterm.js on platforms where Chromium dispatches the input events. fpasoterm does not intercept `かな` / `英数` key presses.
+
+On macOS, Chromium does not dispatch events for the JIS `かな` / `英数` hardware keys, so fpasoterm cannot bind those keys directly in the current Chromium-based desktop runtime.
 
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
@@ -219,6 +221,20 @@ The application window uses this PNG directly. The desktop entry uses `Icon=fpas
 
 ```text
 extra/linux/icons/hicolor/
+```
+
+On macOS, the app also sets the Dock icon to the same PNG at launch so the generic app icon is not shown.
+
+When packaging a macOS `.app` bundle, use the generated icon at:
+
+```text
+extra/macos/fpasoterm.icns
+```
+
+On Windows, the app window uses the generated icon at:
+
+```text
+extra/windows/fpasoterm.ico
 ```
 
 To replace the icon, update `extra/logo/fpasoterm.png`, regenerate the launcher sizes, and reinstall the desktop entry:

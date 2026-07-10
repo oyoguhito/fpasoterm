@@ -9,6 +9,8 @@ npm install -g fpasoterm
 fpasoterm
 ```
 
+If your network makes npm's automatic audit request noisy, use `--no-audit` for local installs. CI still runs the explicit security checks in this repository.
+
 ## Development Build
 
 ```sh
@@ -56,6 +58,18 @@ The application icon is:
 
 ```text
 extra/logo/fpasoterm.png
+```
+
+For macOS app bundles, use:
+
+```text
+extra/macos/fpasoterm.icns
+```
+
+For Windows app bundles, use:
+
+```text
+extra/windows/fpasoterm.ico
 ```
 
 Install the desktop entry and hicolor launcher icons into the current user's data directory:
