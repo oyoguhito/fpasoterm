@@ -15,7 +15,7 @@ Before submitting changes, run:
 ```sh
 npm run check
 npm run scan:secrets
-desktop-file-validate extra/linux/io.github.oyoguhito.FpasoTerm.desktop
+desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run build:artifacts
 ```
 
