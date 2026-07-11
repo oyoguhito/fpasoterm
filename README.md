@@ -4,6 +4,8 @@
 
 Cross-platform terminal app built with xterm.js and node-pty.
 
+fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not plan to manage split panes or multiple windows itself.
+
 日本語の概要は [日本語](#日本語) を参照してください。
 
 - The desktop runtime provides the application shell and Chromium text input/composition behavior.
@@ -137,6 +139,8 @@ Useful one-shot overrides:
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm --size 1200x760
 fpasoterm --width 1200 --height 760
+fpasoterm --command "tmux attach -t work"
+fpasoterm --reset-window-state
 ```
 
 Inspect the resolved settings and plugin load status without launching:
@@ -167,15 +171,20 @@ fpasoterm reads user configuration from:
 ~/.config/fpasoterm/User/config.toml
 ```
 
-On first launch, fpasoterm writes an example file to:
+On launch, fpasoterm writes or refreshes the example file at:
 
 ```text
 ~/.config/fpasoterm/User/config.toml.example
 ```
 
+The example file is safe to regenerate because fpasoterm does not overwrite `config.toml`.
+
 Example:
 
 ```toml
+[window]
+rememberBounds = true
+frame = false
 [terminal]
 fontSize = 15
 fontFamily = "Noto Sans Mono CJK JP, monospace"
@@ -207,7 +216,19 @@ api.terminal.options.cursorBlink = true;
 
 The IME duplicate guard can be adjusted from `config.toml`. If a specific environment still produces duplicate text, increase `ime.duplicateWindowMs` or `ime.repeatedTextWindowMs` slightly.
 
+When `window.rememberBounds` is enabled, fpasoterm stores the last window size locally in `~/.config/fpasoterm/User/window-state.json`.
+
+Window size is resolved in this order: default settings, explicit `window.width` / `window.height` values in `config.toml`, saved `window-state.json`, then one-shot CLI overrides such as `--size`.
+
+To return to the configured or default size manually, set `window.rememberBounds = false`, or run:
+
+```sh
+fpasoterm --reset-window-state
+```
+
 The full default configuration and plugin setup are documented in [Configuration](docs/config.en.md). Sample configs are available in [examples/config](examples/config), and sample TypeScript plugins are available in [examples/plugins](examples/plugins).
+
+Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
 ## Icon
 
@@ -290,6 +311,8 @@ GitHub Actions runs the same check set on pushes and pull requests.
 ## 日本語
 
 fpasoterm は xterm.js、node-pty を使った Terminal アプリです。ChromeOS Linux での日本語入力を重視しつつ、将来的に他 OS へ展開しやすい構成にしています。
+
+screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身で画面分割や複数 window の管理は行いません。
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は Chromium と OS 側に任せます。
 

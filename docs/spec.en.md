@@ -2,7 +2,7 @@
 
 ## Purpose
 
-fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems.
+fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes or multiple-window management itself.
 
 ## Architecture
 
@@ -51,14 +51,14 @@ When the shell-backed PTY exits, fpasoterm closes the owning application window.
 ## Configuration and Plugins
 
 User configuration is read from `~/.config/fpasoterm/User/config.toml`, or from `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` when `XDG_CONFIG_HOME` is set.
-`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch.
+`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch. `--command <command>` sends a command to the shell after launch. `--reset-window-state` deletes the saved window size.
 `--show-config` prints the resolved settings and plugin load status. `--enable-plugin` and `--disable-plugin` select one or more files below `User/plugins` by file name and edit `plugins.enabled`.
 
-If `config.toml` does not exist, fpasoterm writes `config.toml.example` with the default settings. fpasoterm does not overwrite an existing user config.
+On launch, fpasoterm writes or refreshes `config.toml.example` with the default settings. fpasoterm does not overwrite an existing user config. When `window.rememberBounds` is enabled, the last window size is saved locally to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch. Saved size overrides explicit `window.width` and `window.height` values in `config.toml`; one-shot CLI overrides are applied last.
 
 Supported config sections:
 
-- `window`: initial window size, minimum window size, background color, and theme source.
+- `window`: initial window size, minimum window size, background color, theme source, frame/titlebar visibility, and whether to remember the last size locally.
 - `terminal`: xterm.js terminal options such as `fontFamily`, `fontSize`, `scrollback`, and `theme`.
 - `ime`: duplicate input guard options: `duplicateGuard`, `duplicateWindowMs`, and `repeatedTextWindowMs`.
 - `plugins.enabled`: relative plugin paths under the config directory.
@@ -68,6 +68,8 @@ Plugins must be placed under `~/.config/fpasoterm/User/plugins/`. `.js` and `.ts
 Renderer plugins access `window.fpasotermPluginApi`, which exposes the terminal, fit addon, resolved config, and a diagnostics logger.
 
 The full default configuration is documented in `docs/config.en.md`. See `examples/config/` for sample configs and `examples/plugins/` for sample plugins.
+
+Known platform limitations are tracked in `docs/known-issues.en.md`.
 
 ## Diagnostics
 
@@ -84,5 +86,6 @@ The debug panel also exposes a Copy button that uses the desktop runtime's clipb
 ## Non-goals
 
 - fpasoterm does not manage IBus engines.
+- fpasoterm does not implement split panes or multiple-window management.
 - fpasoterm does not emulate OS-level Japanese input switching.
 - fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through node-pty.

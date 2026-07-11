@@ -6,13 +6,13 @@ fpasoterm reads user-editable settings from:
 ~/.config/fpasoterm/User/config.toml
 ```
 
-If the file does not exist, fpasoterm writes the full default example to:
+On launch, fpasoterm writes or refreshes the full default example at:
 
 ```text
 ~/.config/fpasoterm/User/config.toml.example
 ```
 
-Copy the example to `config.toml` and edit only the values you want to change. Existing `config.toml` files are not overwritten.
+Copy the example to `config.toml` and edit only the values you want to change. Existing `config.toml` files are not overwritten. If `config.toml.example` is missing or outdated, fpasoterm regenerates it on the next launch.
 
 Use another config file for one launch:
 
@@ -24,6 +24,18 @@ Temporarily override the configured window size:
 
 ```sh
 fpasoterm --size 1200x760
+```
+
+Run a command in the shell after launch:
+
+```sh
+fpasoterm --command "tmux attach -t work"
+```
+
+Delete the saved window size:
+
+```sh
+fpasoterm --reset-window-state
 ```
 
 Print the resolved configuration and plugin status:
@@ -53,7 +65,8 @@ minWidth = 420
 minHeight = 260
 backgroundColor = "#101317"
 themeSource = "system"
-
+rememberBounds = true
+frame = false
 [terminal]
 cursorBlink = true
 cursorStyle = "block"
@@ -94,10 +107,16 @@ enabled = []
 
 ## Sections
 
-- `window`: initial window size, minimum size, background color, and native theme source. `themeSource` can be `system`, `light`, or `dark`.
+- `window`: initial window size, minimum size, background color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`.
 - `terminal`: xterm.js options passed when the terminal is created.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
+
+When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
+
+Window size is resolved in this order: default settings, explicit `window.width` / `window.height` values in `config.toml`, saved `window-state.json`, then one-shot CLI overrides such as `--size`. If you want config changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
+
+TOML does not allow the same table to be defined more than once. To test values such as `frame = true`, edit the existing `[window]` section. Adding another `[window]` section at the end of the file causes a config parse error.
 
 ## Plugins
 

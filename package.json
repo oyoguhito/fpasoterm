@@ -1,6 +1,6 @@
 {
   "name": "fpasoterm",
-  "version": "0.0.4",
+  "version": "0.0.5",
   "description": "Cross-platform terminal with Japanese IME support.",
   "main": "src/main.js",
   "license": "MIT",

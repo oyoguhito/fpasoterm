@@ -1,5 +1,6 @@
 :root {
   color-scheme: dark;
+  background: rgba(0, 0, 0, 0);
 }
 
 * {
@@ -10,21 +11,70 @@ html,
 body {
   height: 100%;
   margin: 0;
+  background: rgba(0, 0, 0, 0);
 }
 
 body {
-  display: grid;
-  grid-template-rows: 1fr;
   overflow: hidden;
-  background: #101317;
   color: #e8edf2;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
+#drag-region {
+  position: fixed;
+  top: 0;
+  right: 0;
+  left: 0;
+  z-index: 10000;
+  height: 34px;
+  pointer-events: auto;
+  background: #1565c0;
+  color: #e8edf2;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  line-height: 34px;
+  text-align: center;
+  user-select: none;
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+#drag-region span {
+  pointer-events: none;
+  app-region: drag;
+  -webkit-app-region: drag;
+}
+
+#close-window {
+  position: absolute;
+  top: 5px;
+  right: 8px;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 1px solid rgba(255, 255, 255, 0.54);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.18);
+  color: #e8edf2;
+  font: inherit;
+  line-height: 20px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#close-window:hover {
+  background: rgba(255, 107, 107, 0.42);
+}
+
 #terminal {
-  min-width: 0;
-  min-height: 0;
-  padding: 8px;
+  position: fixed;
+  top: 34px;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  padding: 0;
+  background: transparent;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 
 #diagnostics-panel {
@@ -90,5 +140,12 @@ body {
 }
 
 .xterm {
+  width: 100%;
   height: 100%;
+}
+
+.xterm-screen,
+.xterm-screen canvas {
+  width: 100% !important;
+  height: 100% !important;
 }

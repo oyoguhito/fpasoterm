@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.5
+
+- Added documented known issues for ChromeOS/Baguette window placement and transparent terminal limitations.
+- Removed unsupported window position CLI overrides after ChromeOS/Baguette testing showed the compositor keeps desktop runtime windows centered.
+- Kept window size persistence while avoiding aggressive position reapplication that could freeze the OS during resize.
+- Removed temporary transparency diagnostic CLI options and related runtime code.
+
 ## 0.0.4
 
 - macOS Dock and bundle icons now use the generated project assets.

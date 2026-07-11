@@ -17,4 +17,5 @@ contextBridge.exposeInMainWorld('fpasoterm', {
   copyDiagnostics: () => ipcRenderer.invoke('diagnostics:copy'),
   getDiagnosticsPath: () => ipcRenderer.invoke('diagnostics:path'),
   getConfig: () => ipcRenderer.invoke('config:get'),
+  closeWindow: () => ipcRenderer.invoke('window:close'),
 });
