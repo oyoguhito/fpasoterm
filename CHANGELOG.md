@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.0
+
+- Added a tag-driven GitHub Release workflow that builds `artifacts/` in GitHub Actions and attaches the generated files to the release.
+- Bumped the package version to `1.0.0` so release tag `v1.0.0` and generated artifact names match.
+
 ## 0.0.6
 
 - Replaced the desktop runtime with Tauri and moved the PTY bridge to Rust using portable-pty.

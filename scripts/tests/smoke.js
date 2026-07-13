@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '0.0.6');
+assert.equal(packageJson.version, '1.0.0');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -80,6 +80,7 @@ for (const file of [
   'src-tauri/tauri.conf.json',
   'src-tauri/src/main.rs',
   'extra/linux/io.github.oyoguhito.fpasoterm.desktop',
+  '.github/workflows/release.yml',
 ]) {
   assertFile(file);
 }
@@ -197,6 +198,10 @@ fs.rmSync(stateTestDir, { recursive: true, force: true });
 
 const runScript = read('scripts/run');
 assert.doesNotMatch(runScript, /--foreground/);
+
+const buildArtifacts = read('scripts/build-artifacts.js');
+assert.match(buildArtifacts, /--bundles', 'deb,rpm'/);
+assert.match(buildArtifacts, /entry\.name\.includes\(version\)/);
 
 const installDesktop = read('scripts/install-linux-desktop.js');
 assert.match(installDesktop, /XDG_BIN_HOME/);

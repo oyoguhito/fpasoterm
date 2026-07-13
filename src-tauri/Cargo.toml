@@ -1,6 +1,6 @@
 [package]
 name = "fpasoterm"
-version = "0.0.6"
+version = "1.0.0"
 description = "Cross-platform terminal with Japanese IME support."
 authors = ["oyoguhito"]
 edition = "2021"

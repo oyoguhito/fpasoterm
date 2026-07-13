@@ -85,7 +85,11 @@ if (fs.existsSync(bundleDir)) {
       const entryPath = path.join(directory, entry.name);
       if (entry.isDirectory()) {
         copyBundles(entryPath);
-      } else if (entry.isFile() && ['.deb', '.rpm'].includes(path.extname(entry.name))) {
+      } else if (
+        entry.isFile()
+        && ['.deb', '.rpm'].includes(path.extname(entry.name))
+        && entry.name.includes(version)
+      ) {
         fs.copyFileSync(entryPath, path.join(artifactsDir, entry.name));
       }
     }
