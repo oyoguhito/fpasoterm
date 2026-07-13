@@ -21,6 +21,6 @@ npm run build:artifacts
 
 ## Scope
 
-- Keep terminal behavior delegated to xterm.js and node-pty.
-- Keep IME switching delegated to Chromium and the operating system.
+- Keep terminal rendering delegated to xterm.js and shell integration delegated to the backend PTY.
+- Keep IME switching delegated to the platform webview and the operating system.
 - Keep public documentation in both English and Japanese when user-facing behavior changes.

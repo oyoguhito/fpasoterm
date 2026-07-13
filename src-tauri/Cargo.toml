@@ -1,0 +1,16 @@
+[package]
+name = "fpasoterm"
+version = "0.0.6"
+description = "Cross-platform terminal with Japanese IME support."
+authors = ["oyoguhito"]
+edition = "2021"
+license = "MIT"
+
+[build-dependencies]
+tauri-build = { version = "2.5.2", features = [] }
+
+[dependencies]
+portable-pty = "0.9.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tauri = { version = "2.9.2", features = [] }

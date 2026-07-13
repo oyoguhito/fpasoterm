@@ -77,6 +77,106 @@ body {
   -webkit-app-region: no-drag;
 }
 
+#terminal.terminal-error {
+  padding: 16px;
+  color: #ffb4b4;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+}
+
+#terminal-mirror {
+  position: fixed;
+  top: 42px;
+  right: 8px;
+  left: 8px;
+  z-index: 9;
+  max-height: min(34vh, 260px);
+  margin: 0;
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid #41546a;
+  border-radius: 6px;
+  background: rgba(10, 14, 18, 0.92);
+  color: #d6f6ff;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+
+#terminal-mirror[hidden] {
+  display: none;
+}
+
+.resize-edge,
+.resize-corner {
+  position: fixed;
+  z-index: 10001;
+  background: rgba(0, 0, 0, 0.001);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.resize-edge-top,
+.resize-edge-bottom {
+  right: 8px;
+  left: 8px;
+  height: 8px;
+  cursor: ns-resize;
+}
+
+.resize-edge-left,
+.resize-edge-right {
+  top: 8px;
+  bottom: 8px;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.resize-edge-top {
+  top: 0;
+}
+
+.resize-edge-right {
+  right: 0;
+}
+
+.resize-edge-bottom {
+  bottom: 0;
+}
+
+.resize-edge-left {
+  left: 0;
+}
+
+.resize-corner {
+  width: 16px;
+  height: 16px;
+}
+
+.resize-corner-top-left {
+  top: 0;
+  left: 0;
+  cursor: nwse-resize;
+}
+
+.resize-corner-top-right {
+  top: 0;
+  right: 0;
+  cursor: nesw-resize;
+}
+
+.resize-corner-bottom-right {
+  right: 0;
+  bottom: 0;
+  cursor: nwse-resize;
+}
+
+.resize-corner-bottom-left {
+  bottom: 0;
+  left: 0;
+  cursor: nesw-resize;
+}
+
 #diagnostics-panel {
   position: fixed;
   right: 8px;

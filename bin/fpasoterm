@@ -20,6 +20,7 @@ const helpText = `Usage: fpasoterm [options]
 
 Options:
   --help                    Show this help.
+  --dev                     Force Tauri dev runtime, ignoring built binaries.
   --foreground              Keep the launcher attached to the current console.
   --console-diagnostics     Print diagnostics to stderr as well as the log file.
   --config <path>           Use a specific config.toml for this launch.
@@ -32,8 +33,8 @@ Options:
   --height <px>             Override the configured window height for this launch.
   --size <width>x<height>   Override both window dimensions for this launch.
   --debug-keys              Enable key/composition diagnostics.
-  --ozone-platform <name>   Override Linux Ozone platform, for example x11 or wayland.
-  --disable-gpu             Disable GPU acceleration for diagnostics.
+  --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
+  --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
 Normal launches detach from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
@@ -42,10 +43,11 @@ Use --foreground when you want the command to wait for the app process.
 // Converts CLI options into environment variables consumed by the main process.
 function parseArgs(argv) {
   const env = {};
-  const electronArgs = [];
+  const runtimeArgs = [];
   const enablePlugins = [];
   const disablePlugins = [];
   let foreground = false;
+  let dev = false;
   let showConfig = false;
   let resetWindowState = false;
   let startCommand = '';
@@ -59,6 +61,11 @@ function parseArgs(argv) {
 
     if (arg === '--foreground') {
       foreground = true;
+      continue;
+    }
+
+    if (arg === '--dev') {
+      dev = true;
       continue;
     }
 
@@ -100,8 +107,14 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--disable-gpu') {
-      env.FPASOTERM_DISABLE_GPU = '1';
+    if (arg === '--debug-opaque-terminal') {
+      env.FPASOTERM_DEBUG_OPAQUE_TERMINAL = '1';
+      continue;
+    }
+
+    if (arg === '--disable-dmabuf') {
+      env.FPASOTERM_DISABLE_DMABUF = '1';
+      env.WEBKIT_DISABLE_DMABUF_RENDERER = '1';
       continue;
     }
 
@@ -135,18 +148,13 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--ozone-platform') {
-      env.FPASOTERM_OZONE_PLATFORM = requireValue(argv, index, arg);
-      index += 1;
-      continue;
-    }
-
-    electronArgs.push(arg);
+    runtimeArgs.push(arg);
   }
 
   return {
     help: false,
     foreground,
+    dev,
     showConfig,
     resetWindowState,
     env: {
@@ -156,7 +164,7 @@ function parseArgs(argv) {
     startCommand,
     enablePlugins,
     disablePlugins,
-    electronArgs,
+    runtimeArgs,
   };
 }
 
@@ -233,6 +241,7 @@ function updatePluginConfig(options) {
 function showConfig(options) {
   applyEnv(options.env);
   const runtimeConfig = loadConfig();
+  applyWindowRuntimeOverrides(runtimeConfig.config.window, options.env);
   const enabled = Array.isArray(runtimeConfig.config.plugins?.enabled) ? runtimeConfig.config.plugins.enabled : [];
 
   console.log(`Config path: ${runtimeConfig.configPath}`);
@@ -274,24 +283,64 @@ function printPluginList(targetPath, enabled, pluginUrls = []) {
   }
 }
 
-// Starts the desktop runtime. By default the child is detached so the shell prompt returns.
-function launch(options) {
-  const electron = require('electron');
-  const electronArgs = [];
-
-  if (process.platform === 'linux') {
-    const ozonePlatform = options.env.FPASOTERM_OZONE_PLATFORM || process.env.FPASOTERM_OZONE_PLATFORM || 'x11';
-    electronArgs.push(`--ozone-platform=${ozonePlatform}`);
+// Finds a built Tauri application binary when one is available locally.
+function findTauriBinary() {
+  if (process.env.FPASOTERM_TAURI_BIN) {
+    return process.env.FPASOTERM_TAURI_BIN;
   }
 
-  electronArgs.push(root, ...options.electronArgs);
+  const executable = process.platform === 'win32' ? 'fpasoterm.exe' : 'fpasoterm';
+  for (const profile of ['release', 'debug']) {
+    const candidate = path.join(root, 'src-tauri', 'target', profile, executable);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return undefined;
+}
 
-  const child = spawn(electron, electronArgs, {
+// Resolves config before launching so the Rust runtime can stay focused on
+// windowing and PTY work.
+function runtimeEnv(options) {
+  applyEnv(options.env);
+  const runtimeConfig = loadConfig();
+  applyWindowRuntimeOverrides(runtimeConfig.config.window, options.env);
+  runtimeConfig.diagnostics = {
+    debugKeys: options.env.FPASOTERM_DEBUG_KEYS === '1' || process.env.FPASOTERM_DEBUG_KEYS === '1',
+    consoleDiagnostics:
+      options.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1' || process.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1',
+    opaqueTerminal:
+      options.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1' ||
+      process.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1',
+  };
+  return {
+    ...process.env,
+    ...options.env,
+    FPASOTERM_RUNTIME_CONFIG_JSON: JSON.stringify(runtimeConfig),
+  };
+}
+
+// Applies one-shot CLI window overrides after config and saved state resolution.
+function applyWindowRuntimeOverrides(windowConfig, env) {
+  if (env.FPASOTERM_WINDOW_WIDTH) {
+    windowConfig.width = Number(env.FPASOTERM_WINDOW_WIDTH);
+  }
+  if (env.FPASOTERM_WINDOW_HEIGHT) {
+    windowConfig.height = Number(env.FPASOTERM_WINDOW_HEIGHT);
+  }
+}
+
+// Starts the desktop runtime. By default the child is detached so the shell prompt returns.
+function launch(options) {
+  const tauriBinary = options.dev ? undefined : findTauriBinary();
+  const command = tauriBinary || process.execPath;
+  const args = tauriBinary
+    ? options.runtimeArgs
+    : [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs];
+
+  const child = spawn(command, args, {
     detached: !options.foreground,
-    env: {
-      ...process.env,
-      ...options.env,
-    },
+    env: runtimeEnv(options),
     stdio: options.foreground ? 'inherit' : 'ignore',
     windowsHide: false,
   });
@@ -311,7 +360,7 @@ function launch(options) {
 
   child.on('exit', (code, signal) => {
     if (signal) {
-      console.error(`${electron} exited with signal ${signal}`);
+      console.error(`${command} exited with signal ${signal}`);
       process.exit(1);
     }
     process.exit(code ?? 0);

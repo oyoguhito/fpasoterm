@@ -2,21 +2,26 @@
 <html lang="ja">
   <head>
     <meta charset="utf-8">
-    <meta
-      http-equiv="Content-Security-Policy"
-      content="default-src 'self'; style-src 'self' 'unsafe-inline'; script-src 'self';"
-    >
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>fpasoterm</title>
-    <link rel="stylesheet" href="../../node_modules/@xterm/xterm/css/xterm.css">
+    <link rel="stylesheet" href="./vendor/xterm/xterm.css">
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <header id="drag-region">
+    <header id="drag-region" data-tauri-drag-region>
       <span>fpasoterm</span>
       <button id="close-window" type="button" aria-label="Close">x</button>
     </header>
     <main id="terminal"></main>
+    <pre id="terminal-mirror" hidden aria-label="Terminal data mirror"></pre>
+    <div class="resize-edge resize-edge-top" data-resize-direction="north"></div>
+    <div class="resize-edge resize-edge-right" data-resize-direction="east"></div>
+    <div class="resize-edge resize-edge-bottom" data-resize-direction="south"></div>
+    <div class="resize-edge resize-edge-left" data-resize-direction="west"></div>
+    <div class="resize-corner resize-corner-top-left" data-resize-direction="northWest"></div>
+    <div class="resize-corner resize-corner-top-right" data-resize-direction="northEast"></div>
+    <div class="resize-corner resize-corner-bottom-right" data-resize-direction="southEast"></div>
+    <div class="resize-corner resize-corner-bottom-left" data-resize-direction="southWest"></div>
     <section id="diagnostics-panel" hidden>
       <div class="diagnostics-toolbar">
         <span>Diagnostics</span>
@@ -25,8 +30,8 @@
       <textarea id="diagnostics" readonly aria-label="Diagnostics"></textarea>
       <div id="diagnostics-path"></div>
     </section>
-    <script src="../../node_modules/@xterm/xterm/lib/xterm.js"></script>
-    <script src="../../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+    <script src="./vendor/xterm/xterm.js"></script>
+    <script src="./vendor/addon-fit/addon-fit.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>
