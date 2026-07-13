@@ -23,8 +23,18 @@ jobs:
           node-version: '22'
           cache: npm
 
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
       - name: Install system tools
-        run: sudo apt-get update && sudo apt-get install -y desktop-file-utils
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            desktop-file-utils \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
 
       - name: Install dependencies
         run: npm ci

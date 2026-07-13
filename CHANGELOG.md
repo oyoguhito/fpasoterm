@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.0.6
+
+- Replaced the desktop runtime with Tauri and moved the PTY bridge to Rust using portable-pty.
+- Kept the existing xterm.js terminal renderer, TOML config loader, plugin support, and CLI configuration commands.
+- Added Linux/WebKitGTK transparency preparation and `--disable-dmabuf` diagnostics for ChromeOS/Baguette rendering issues.
+- Removed runtime-specific launch options and old preload/main process files.
+
 ## 0.0.5
 
 - Added documented known issues for ChromeOS/Baguette window placement and transparent terminal limitations.
@@ -15,8 +22,8 @@
 ## 0.0.3
 
 - Initial fpasoterm release.
-- Added xterm.js and node-pty based terminal.
-- Added Linux startup wrapper with `--ozone-platform=x11` by default.
+- Added xterm.js based terminal with a shell-backed PTY.
+- Added Linux startup wrapper for the desktop runtime.
 - Added npm binary `fpasoterm`.
 - Added GitHub Actions checks and release artifact generation.
 - Added application window icon wiring and close-on-shell-exit behavior.

@@ -8,6 +8,8 @@ const ignoredDirs = new Set([
   'artifacts',
   'node_modules',
   'diagnostics',
+  'target',
+  'gen',
 ]);
 
 const ignoredFiles = new Set([

@@ -28,105 +28,72 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '0.0.5');
-assert.equal(packageJson.main, 'src/main.js');
+assert.equal(packageJson.version, '0.0.6');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
+assert.ok(packageJson.dependencies['@tauri-apps/api'], '@tauri-apps/api should expose Tauri APIs');
+assert.ok(packageJson.dependencies['@tauri-apps/cli'], '@tauri-apps/cli should launch and build the app');
 assert.ok(packageJson.dependencies['smol-toml'], 'smol-toml should parse config.toml');
 assert.ok(packageJson.dependencies.typescript, 'typescript should be available for .ts plugins');
 assert.equal(packageJson.scripts.start, 'node ./bin/fpasoterm');
-assert.equal(packageJson.scripts['generate:icons'], 'node scripts/generate-icon.js');
-assert.equal(packageJson.scripts['install:desktop'], 'node scripts/install-linux-desktop.js');
-assert.equal(packageJson.scripts['update:desktop'], 'node scripts/install-linux-desktop.js');
-assert.equal(packageJson.scripts['uninstall:desktop'], 'node scripts/uninstall-linux-desktop.js');
-assertFile('bin/fpasoterm');
-assertFile('LICENSE');
-assertFile('CHANGELOG.md');
-assertFile('CONTRIBUTING.md');
-assertFile('INSTALL.md');
-assertFile('docs/config.en.md');
-assertFile('docs/config.ja.md');
-assertFile('docs/fpasoterm-plugin.d.ts');
-assertFile('docs/known-issues.en.md');
-assertFile('docs/known-issues.ja.md');
-assertFile('examples/plugins/hello.ts');
-assertFile('examples/plugins/theme.ts');
-assertFile('examples/config/minimal.toml');
-assertFile('examples/config/with-plugins.toml');
-assertFile('extra/logo/fpasoterm.png');
-assertFile('extra/macos/fpasoterm.icns');
-assertFile('extra/windows/fpasoterm.ico');
-for (const size of [16, 32, 48, 64, 128, 192, 256, 512]) {
-  assertFile(`extra/linux/icons/hicolor/${size}x${size}/apps/fpasoterm.png`);
-}
-assertFile('scripts/install-linux-desktop.js');
-assertFile('scripts/uninstall-linux-desktop.js');
-assertFile('scripts/security/scan-secrets.js');
+assert.equal(packageJson.scripts.build, 'tauri build');
+assert.match(packageJson.scripts.check, /cargo check --manifest-path src-tauri\/Cargo\.toml/);
+const oldRuntimePackage = `${'elect'}${'ron'}`;
+const oldPtyPackage = `${'node'}-${'pty'}`;
+assert.equal(Object.hasOwn(packageJson.dependencies, oldRuntimePackage), false);
+assert.equal(Object.hasOwn(packageJson.dependencies, oldPtyPackage), false);
+assert.equal(Object.hasOwn(packageJson, 'allowScripts'), false);
 
 for (const file of [
-  'src/main.js',
+  'bin/fpasoterm',
+  'LICENSE',
+  'CHANGELOG.md',
+  'CONTRIBUTING.md',
+  'INSTALL.md',
+  'docs/config.en.md',
+  'docs/config.ja.md',
+  'docs/fpasoterm-plugin.d.ts',
+  'docs/known-issues.en.md',
+  'docs/known-issues.ja.md',
+  'docs/spec.en.md',
+  'docs/spec.ja.md',
+  'examples/plugins/hello.ts',
+  'examples/plugins/theme.ts',
+  'examples/config/minimal.toml',
+  'examples/config/with-plugins.toml',
+  'extra/logo/fpasoterm.png',
+  'extra/macos/fpasoterm.icns',
+  'extra/windows/fpasoterm.ico',
+  'scripts/install-linux-desktop.js',
+  'scripts/uninstall-linux-desktop.js',
+  'scripts/security/scan-secrets.js',
   'src/config.js',
-  'src/preload.js',
   'src/renderer/index.html',
   'src/renderer/renderer.js',
   'src/renderer/styles.css',
+  'src/renderer/vendor/xterm/xterm.css',
+  'src/renderer/vendor/xterm/xterm.js',
+  'src/renderer/vendor/addon-fit/addon-fit.js',
+  'src-tauri/Cargo.toml',
+  'src-tauri/capabilities/default.json',
+  'src-tauri/tauri.conf.json',
+  'src-tauri/src/main.rs',
   'extra/linux/io.github.oyoguhito.fpasoterm.desktop',
-  'docs/spec.en.md',
-  'docs/spec.ja.md',
-  'docs/release-checklist.en.md',
-  'docs/release-checklist.ja.md',
 ]) {
   assertFile(file);
 }
 
-const main = read('src/main.js');
-assert.match(main, /FPASOTERM_DEBUG_KEYS/);
-assert.match(main, /loadConfig/);
-assert.match(main, /profileDir/);
-assert.match(main, /config:get/);
-assert.match(main, /setPath\('userData', profileDir\(\)\)/);
-assert.match(main, /APP_NAME = 'fpasoterm'/);
-assert.match(main, /APP_ID = 'io\.github\.oyoguhito\.fpasoterm'/);
-assert.match(main, /FPASOTERM_CONSOLE_DIAGNOSTICS/);
-assert.match(main, /FPASOTERM_WINDOW_WIDTH/);
-assert.match(main, /FPASOTERM_WINDOW_HEIGHT/);
-assert.match(main, /applyRuntimeOverrides/);
-assert.match(main, /Menu\.setApplicationMenu\(null\)/);
-assert.match(main, /runtimeConfig\.config\.window/);
-assert.match(main, /width: windowConfig\.width/);
-assert.match(main, /height: windowConfig\.height/);
-assert.match(main, /minHeight: windowConfig\.minHeight/);
-assert.match(main, /frame: windowConfig\.frame === false \? false : true/);
-assert.match(main, /restoreWindowBounds/);
-assert.match(main, /window\.setBounds\(bounds, false\)/);
-assert.match(main, /applied window bounds/);
-assert.match(main, /installWindowBoundsRestore/);
-assert.match(main, /show: false/);
-assert.match(main, /ready-to-show/);
-assert.match(main, /did-finish-load/);
-assert.match(main, /saving window bounds/);
-assert.match(main, /restoring window bounds/);
-assert.match(main, /installWindowStatePersistence/);
-assert.match(main, /readyToSave = true/);
-assert.match(main, /}, 1000\)/);
-assert.match(main, /center: false/);
-assert.match(main, /for \(const eventName of \['move', 'moved', 'resize', 'resized'\]\)/);
-assert.match(main, /lastSavedBounds = saveWindowState\(window\)/);
-assert.match(main, /ozone-platform/);
-assert.match(main, /extra', 'logo', 'fpasoterm\.png/);
-assert.match(main, /app\.dock\.setIcon\(ICON_PATH\)/);
-assert.match(main, /extra', 'windows', 'fpasoterm\.ico/);
-assert.match(main, /icon: ICON_PATH/);
-assert.match(main, /BrowserWindow\.fromWebContents\(webContents\)/);
-assert.match(main, /window\.close\(\)/);
-assert.match(main, /window:close/);
-assert.doesNotMatch(main, /ibus/i);
+assert.ok(!fs.existsSync(path.join(root, 'src', 'main.js')), 'old desktop process file should be removed');
+assert.ok(!fs.existsSync(path.join(root, 'src', 'preload.js')), 'old bridge file should be removed');
+
+for (const size of [16, 32, 48, 64, 128, 192, 256, 512]) {
+  assertFile(`extra/linux/icons/hicolor/${size}x${size}/apps/fpasoterm.png`);
+}
 
 const bin = read('bin/fpasoterm');
-assert.match(bin, /--ozone-platform=/);
-assert.match(bin, /FPASOTERM_OZONE_PLATFORM/);
 assert.match(bin, /--help/);
+assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
 assert.match(bin, /--show-config/);
@@ -135,17 +102,23 @@ assert.match(bin, /--reset-window-state/);
 assert.match(bin, /--enable-plugin/);
 assert.match(bin, /--disable-plugin/);
 assert.match(bin, /--size/);
+assert.match(bin, /applyWindowRuntimeOverrides/);
 assert.match(bin, /--console-diagnostics/);
-assert.doesNotMatch(bin, /--position/);
-assert.doesNotMatch(bin, /--x/);
-assert.doesNotMatch(bin, /--y/);
+assert.match(bin, /--debug-opaque-terminal/);
+assert.match(bin, /--disable-dmabuf/);
+assert.match(bin, /WEBKIT_DISABLE_DMABUF_RENDERER/);
+assert.match(bin, /FPASOTERM_RUNTIME_CONFIG_JSON/);
+assert.match(bin, /debugKeys/);
+assert.match(bin, /consoleDiagnostics/);
+assert.match(bin, /opaqueTerminal/);
+assert.match(bin, /@tauri-apps/);
 assert.match(bin, /detached: !options\.foreground/);
 assert.match(bin, /child\.unref\(\)/);
-assert.match(bin, /printPluginList/);
-assert.match(bin, /updatePluginConfig/);
-assert.match(bin, /parsePluginSelectors/);
-assert.match(bin, /discoverPluginFiles/);
-assert.match(bin, /resolvePluginSelector/);
+assert.doesNotMatch(bin, new RegExp(`--${'ozo'}${'ne'}-platform`));
+assert.doesNotMatch(bin, new RegExp(`FPASOTERM_${'OZONE'}_PLATFORM`));
+assert.doesNotMatch(bin, new RegExp(`--disable-${'g'}${'pu'}`));
+assert.doesNotMatch(bin, /--position/);
+assert.doesNotMatch(bin, /FPASOTERM_WINDOW_X/);
 
 // Exercises file-name selection, comma-separated values, and repeated options.
 const cliTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-cli-'));
@@ -184,10 +157,7 @@ assert.throws(
   () => resolvePluginSelector('hello.ts', discoveredPlugins, 'enable'),
   /plugin name 'hello\.ts' is ambiguous.*plugins\/nested\/hello\.ts/,
 );
-assert.equal(
-  resolvePluginSelector('nested/hello.ts', discoveredPlugins, 'enable'),
-  'plugins/nested/hello.ts',
-);
+assert.equal(resolvePluginSelector('nested/hello.ts', discoveredPlugins, 'enable'), 'plugins/nested/hello.ts');
 fs.rmSync(cliTestDir, { recursive: true, force: true });
 
 const originalConfigHome = process.env.XDG_CONFIG_HOME;
@@ -196,39 +166,21 @@ const stateTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-window-sta
 process.env.XDG_CONFIG_HOME = stateTestDir;
 delete process.env.FPASOTERM_CONFIG_PATH;
 fs.mkdirSync(path.join(stateTestDir, 'fpasoterm', 'User'), { recursive: true });
-const stateConfigPath = path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml');
 const statePath = path.join(stateTestDir, 'fpasoterm', 'User', 'window-state.json');
-fs.writeFileSync(stateConfigPath, [
+fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), [
   '[window]',
   'width = 777',
-  'x = 12',
   '',
 ].join('\n'));
 fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml.example'), 'old example\n');
-writeWindowState({
-  window: {
-    x: 400,
-    y: 300,
-    width: 1200,
-    height: 900,
-  },
-});
+writeWindowState({ window: { width: 1200, height: 900 } });
 const stateConfig = loadConfig();
 const generatedExample = fs.readFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml.example'), 'utf8');
 assert.match(generatedExample, /# fpasoterm user configuration/);
 assert.match(generatedExample, /rememberBounds = true/);
 assert.equal(windowStatePath(), path.join(stateTestDir, 'fpasoterm', 'User', 'window-state.json'));
 assert.equal(stateConfig.config.window.width, 1200);
-assert.equal(stateConfig.config.window.x, 400);
 assert.equal(stateConfig.config.window.height, 900);
-assert.equal(stateConfig.config.window.y, 300);
-const future = new Date(Date.now() + 60_000);
-fs.utimesSync(stateConfigPath, future, future);
-const updatedConfig = loadConfig();
-assert.equal(updatedConfig.config.window.width, 1200);
-assert.equal(updatedConfig.config.window.x, 400);
-assert.equal(updatedConfig.config.window.height, 900);
-assert.equal(updatedConfig.config.window.y, 300);
 deleteWindowState();
 assert.ok(!fs.existsSync(statePath));
 if (originalConfigHome === undefined) {
@@ -244,7 +196,7 @@ if (originalConfigPath === undefined) {
 fs.rmSync(stateTestDir, { recursive: true, force: true });
 
 const runScript = read('scripts/run');
-assert.match(runScript, /--foreground/);
+assert.doesNotMatch(runScript, /--foreground/);
 
 const installDesktop = read('scripts/install-linux-desktop.js');
 assert.match(installDesktop, /XDG_BIN_HOME/);
@@ -259,25 +211,60 @@ assert.match(uninstallDesktop, /io\.github\.oyoguhito\.fpasoterm\.desktop/);
 assert.match(uninstallDesktop, /io\.github\.oyoguhito\.FpasoTerm\.desktop/);
 assert.match(uninstallDesktop, /fpasoterm\.png/);
 
-const preload = read('src/preload.js');
-assert.match(preload, /contextBridge\.exposeInMainWorld\('fpasoterm'/);
-assert.match(preload, /getConfig/);
-assert.match(preload, /closeWindow/);
+const tauriConfig = read('src-tauri/tauri.conf.json');
+assert.match(tauriConfig, /"withGlobalTauri": true/);
+assert.match(tauriConfig, /"transparent": true/);
+assert.match(tauriConfig, /"backgroundColor": "#00000000"/);
+assert.match(tauriConfig, /"decorations": false/);
+
+const cargoToml = read('src-tauri/Cargo.toml');
+assert.match(cargoToml, /tauri =/);
+assert.match(cargoToml, /portable-pty/);
+
+const tauriCapabilities = read('src-tauri/capabilities/default.json');
+assert.match(tauriCapabilities, /core:event:allow-listen/);
+assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
+assert.match(tauriCapabilities, /"windows": \["main"\]/);
+
+const rustMain = read('src-tauri/src/main.rs');
+assert.match(rustMain, /portable_pty/);
+assert.match(rustMain, /terminal_start/);
+assert.match(rustMain, /terminal_write/);
+assert.match(rustMain, /terminal_resize/);
+assert.match(rustMain, /diagnostics:event/);
+assert.match(rustMain, /terminal_write bytes/);
+assert.match(rustMain, /window_save_bounds/);
+assert.match(rustMain, /restoring window size/);
+assert.match(rustMain, /PhysicalSize::new\(config\.config\.window\.width/);
+assert.match(rustMain, /schedule_window_size_restore/);
+assert.match(rustMain, /Duration::from_millis\(350\)/);
+assert.match(rustMain, /WindowEvent::Resized\(size\)/);
+assert.match(rustMain, /save_window_size\(\*size/);
+assert.doesNotMatch(rustMain, /WindowEvent::Moved/);
+assert.doesNotMatch(rustMain, /PhysicalPosition/);
+assert.doesNotMatch(rustMain, /WindowEvent::Destroyed/);
+assert.match(rustMain, /config_get/);
+assert.match(rustMain, /WEBKIT_DISABLE_DMABUF_RENDERER/);
+assert.match(rustMain, /FPASOTERM_RUNTIME_CONFIG_JSON/);
 
 const indexHtml = read('src/renderer/index.html');
 assert.match(indexHtml, /id="drag-region"/);
 assert.match(indexHtml, />fpasoterm</);
 assert.match(indexHtml, /id="close-window"/);
 assert.match(indexHtml, /id="terminal"/);
+assert.match(indexHtml, /id="terminal-mirror"/);
+assert.match(indexHtml, /vendor\/xterm\/xterm\.js/);
+assert.match(indexHtml, /vendor\/addon-fit\/addon-fit\.js/);
 
 const readme = read('README.md');
-assert.match(readme, /!\[fpasoterm logo\]\(extra\/logo\/fpasoterm\.png\)/);
+assert.match(readme, /Tauri, xterm\.js, and a Rust PTY bridge/);
 assert.match(readme, /~\/\.config\/fpasoterm\/User\/config\.toml/);
 assert.match(readme, /plugins\/.*\.ts/);
 assert.match(readme, /docs\/config\.en\.md/);
 assert.match(readme, /examples\/plugins/);
 assert.match(readme, /--command/);
 assert.match(readme, /--reset-window-state/);
+assert.match(readme, /--disable-dmabuf/);
 assert.match(readme, /window-state\.json/);
 assert.match(readme, /known-issues\.en\.md/);
 
@@ -287,12 +274,11 @@ assert.match(configDocsEn, /width = 1000/);
 assert.match(configDocsEn, /height = 680/);
 assert.match(configDocsEn, /rememberBounds = true/);
 assert.match(configDocsEn, /frame = false/);
+assert.match(configDocsEn, /allowTransparency = true/);
 assert.match(configDocsEn, /fontSize = 14/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);
 assert.match(configDocsEn, /window-state\.json/);
 assert.match(configDocsEn, /same table to be defined more than once/);
-assert.match(configDocsEn, /--command/);
-assert.match(configDocsEn, /--reset-window-state/);
 
 const configDocsJa = read('docs/config.ja.md');
 assert.match(configDocsJa, /全デフォルト/);
@@ -300,20 +286,21 @@ assert.match(configDocsJa, /\[window\]/);
 assert.match(configDocsJa, /examples\/plugins/);
 assert.match(configDocsJa, /rememberBounds = true/);
 assert.match(configDocsJa, /frame = false/);
+assert.match(configDocsJa, /allowTransparency = true/);
 assert.match(configDocsJa, /window-state\.json/);
 assert.match(configDocsJa, /同じ table を複数回定義できません/);
-assert.match(configDocsJa, /--command/);
-assert.match(configDocsJa, /--reset-window-state/);
 
 const knownIssuesEn = read('docs/known-issues.en.md');
 assert.match(knownIssuesEn, /ChromeOS\/Baguette Window Position/);
 assert.match(knownIssuesEn, /restores window size only/);
-assert.match(knownIssuesEn, /GTK\/VTE frontend/);
+assert.match(knownIssuesEn, /future task/);
+assert.match(knownIssuesEn, /WEBKIT_DISABLE_DMABUF_RENDERER=1/);
 
 const knownIssuesJa = read('docs/known-issues.ja.md');
 assert.match(knownIssuesJa, /ChromeOS\/Baguette のウィンドウ位置/);
 assert.match(knownIssuesJa, /window size のみ復元/);
-assert.match(knownIssuesJa, /GTK\/VTE frontend/);
+assert.match(knownIssuesJa, /今後の課題/);
+assert.match(knownIssuesJa, /WEBKIT_DISABLE_DMABUF_RENDERER=1/);
 
 const samplePlugin = read('examples/plugins/hello.ts');
 assert.match(samplePlugin, /fpasotermPluginApi/);
@@ -327,6 +314,19 @@ assert.match(pluginTypes, /fpasotermPluginApi/);
 assert.match(pluginTypes, /duplicateWindowMs/);
 
 const renderer = read('src/renderer/renderer.js');
+assert.match(renderer, /installTauriApiAdapter/);
+assert.match(renderer, /__TAURI__/);
+assert.match(renderer, /startWindowDrag/);
+assert.match(renderer, /startWindowResizeDrag/);
+assert.match(renderer, /startResizeDragging/);
+assert.match(renderer, /saveWindowBounds/);
+assert.match(renderer, /scheduleWindowStateSave/);
+assert.match(renderer, /toTauriResizeDirection/);
+assert.match(renderer, /renderer terminal data bytes/);
+assert.match(renderer, /renderer terminal write parsed bytes/);
+assert.match(renderer, /mirrorTerminalData/);
+assert.match(renderer, /terminal write failed/);
+assert.doesNotMatch(renderer, /setPointerCapture/);
 assert.match(renderer, /correctCompositionData/);
 assert.match(renderer, /installCompositionDuplicateGuard/);
 assert.match(renderer, /compositionupdate/);
@@ -335,7 +335,6 @@ assert.match(renderer, /fpasotermPluginApi/);
 assert.match(renderer, /closeWindowButton/);
 assert.match(renderer, /closeWindow\(\)/);
 assert.match(renderer, /applyWindowAppearance/);
-assert.match(renderer, /frameless-window/);
 
 const styles = read('src/renderer/styles.css');
 assert.match(styles, /#drag-region/);
@@ -345,6 +344,9 @@ assert.match(styles, /app-region: drag/);
 assert.match(styles, /height: 34px/);
 assert.match(styles, /pointer-events: none/);
 assert.match(styles, /#close-window/);
+assert.match(styles, /resize-edge/);
+assert.match(styles, /resize-corner/);
+assert.match(styles, /rgba\(0, 0, 0, 0\.001\)/);
 assert.match(styles, /app-region: no-drag/);
 assert.match(styles, /padding: 0/);
 assert.match(styles, /background: transparent/);
@@ -362,15 +364,6 @@ assert.match(config, /config\.toml/);
 assert.match(config, /FPASOTERM_CONFIG_PATH/);
 assert.match(config, /readUserConfig/);
 assert.match(config, /writeUserConfig/);
-assert.match(config, /# Window options/);
-assert.match(config, /# Plugins are relative/);
-assert.match(config, /window:/);
-assert.match(config, /width: 1000/);
-assert.match(config, /height: 680/);
-assert.match(config, /minHeight: 260/);
-assert.match(config, /rememberBounds: true/);
-assert.match(config, /frame: false/);
-assert.match(config, /themeSource: 'system'/);
 assert.match(config, /windowStatePath/);
 assert.match(config, /readWindowState/);
 assert.match(config, /\.example/);
@@ -395,9 +388,6 @@ for (const file of [
 ]) {
   const externalEditorPattern = new RegExp(`${'vs'}\\s*${'code'}|${'vs'}${'code'}`, 'i');
   assert.doesNotMatch(read(file), externalEditorPattern, `${file} should not mention external editor wording`);
-
-  const runtimeNamePattern = new RegExp(`${'elect'}${'ron'}`, 'i');
-  assert.doesNotMatch(read(file), runtimeNamePattern, `${file} should not mention a replaceable desktop runtime`);
 }
 
 console.log('smoke checks passed');

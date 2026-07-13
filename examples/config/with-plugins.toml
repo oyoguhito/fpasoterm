@@ -10,7 +10,7 @@ fontSize = 15
 scrollback = 3000
 
 [terminal.theme]
-background = "#101317"
+background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 

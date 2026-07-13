@@ -6,28 +6,16 @@ fpasoterm is a desktop terminal application focused on Japanese input in ChromeO
 
 ## Architecture
 
-- The desktop runtime owns the application window and Chromium input method path.
+- Tauri owns the application window and platform webview input method path.
 - xterm.js renders the terminal UI in the renderer process.
-- node-pty creates the shell-backed pseudoterminal in the main process.
-- The renderer communicates with the main process through a narrow preload IPC API.
+- portable-pty creates the shell-backed pseudoterminal in the Rust backend.
+- The renderer communicates with the backend through narrow Tauri commands and events.
 
 ## ChromeOS Linux Input Policy
 
-fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to Chromium and the operating system.
+fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to the platform webview and the operating system.
 
-On Linux, fpasoterm is launched with `--ozone-platform=x11` by default:
-
-```text
---ozone-platform=x11
-```
-
-The ozone platform can be overridden:
-
-```sh
-FPASOTERM_OZONE_PLATFORM=wayland fpasoterm
-```
-
-The npm binary name is `fpasoterm`. The binary passes Chromium switches before the app path so Ozone is initialized correctly.
+The npm binary name is `fpasoterm`. On Linux, `--disable-dmabuf` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` for WebKitGTK rendering diagnostics.
 By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
 
 Users can install the published npm package directly:
@@ -88,4 +76,4 @@ The debug panel also exposes a Copy button that uses the desktop runtime's clipb
 - fpasoterm does not manage IBus engines.
 - fpasoterm does not implement split panes or multiple-window management.
 - fpasoterm does not emulate OS-level Japanese input switching.
-- fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through node-pty.
+- fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through portable-pty.

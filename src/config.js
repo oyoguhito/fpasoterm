@@ -13,19 +13,20 @@ const defaultConfig = Object.freeze({
     height: 680,
     minWidth: 420,
     minHeight: 260,
-    backgroundColor: '#101317',
+    backgroundColor: 'rgba(0, 0, 0, 0)',
     themeSource: 'system',
     frame: false,
     rememberBounds: true,
   },
   terminal: {
+    allowTransparency: true,
     cursorBlink: true,
     cursorStyle: 'block',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
     scrollback: 1000,
     theme: {
-      background: '#101317',
+      background: 'rgba(16, 19, 23, 0.80)',
       foreground: '#e8edf2',
       cursor: '#f5d76e',
       selectionBackground: '#35506b',
@@ -69,7 +70,7 @@ width = 1000
 height = 680
 minWidth = 420
 minHeight = 260
-backgroundColor = "#101317"
+backgroundColor = "rgba(0, 0, 0, 0)"
 # themeSource can be "system", "light", or "dark".
 themeSource = "system"
 # frame controls whether the native window frame/titlebar is shown.
@@ -79,6 +80,7 @@ rememberBounds = true
 
 # Terminal options are passed to xterm.js when the terminal is created.
 [terminal]
+allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \\"Noto Sans Mono CJK JP\\", monospace"
@@ -87,7 +89,7 @@ scrollback = 1000
 
 # Terminal color palette.
 [terminal.theme]
-background = "#101317"
+background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
@@ -229,6 +231,19 @@ function writeWindowState(state, targetPath = windowStatePath()) {
   fs.writeFileSync(targetPath, `${JSON.stringify(state, null, 2)}\n`);
 }
 
+// Keeps only supported window state keys so older x/y entries are ignored.
+function sanitizeWindowState(state) {
+  const window = state.window && typeof state.window === 'object' ? state.window : {};
+  const sanitized = {};
+  if (Number.isInteger(window.width) && window.width > 0) {
+    sanitized.width = window.width;
+  }
+  if (Number.isInteger(window.height) && window.height > 0) {
+    sanitized.height = window.height;
+  }
+  return { window: sanitized };
+}
+
 // Deletes saved window bounds so configured/default bounds are used again.
 function deleteWindowState(targetPath = windowStatePath()) {
   if (fs.existsSync(targetPath)) {
@@ -348,7 +363,7 @@ function loadConfig() {
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {
-      config.window = mergeConfig(config.window, readWindowState(statePath).window || {});
+      config.window = mergeConfig(config.window, sanitizeWindowState(readWindowState(statePath)).window);
     }
   }
   const pluginUrls = resolvePluginUrls(config, dir);

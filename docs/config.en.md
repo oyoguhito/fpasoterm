@@ -63,11 +63,12 @@ width = 1000
 height = 680
 minWidth = 420
 minHeight = 260
-backgroundColor = "#101317"
+backgroundColor = "rgba(0, 0, 0, 0)"
 themeSource = "system"
 rememberBounds = true
 frame = false
 [terminal]
+allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
@@ -75,7 +76,7 @@ fontSize = 14
 scrollback = 1000
 
 [terminal.theme]
-background = "#101317"
+background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
