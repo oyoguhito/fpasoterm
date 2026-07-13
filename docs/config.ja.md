@@ -6,13 +6,13 @@ fpasoterm はユーザー編集用の設定を以下から読み込みます。
 ~/.config/fpasoterm/User/config.toml
 ```
 
-このファイルが存在しない場合、全デフォルト項目を含む example を以下へ書き出します。
+起動時に、全デフォルト項目を含む example を以下へ書き出し、古い場合は更新します。
 
 ```text
 ~/.config/fpasoterm/User/config.toml.example
 ```
 
-`config.toml.example` を `config.toml` にコピーし、変更したい値だけ編集してください。既存の `config.toml` は上書きしません。
+`config.toml.example` を `config.toml` にコピーし、変更したい値だけ編集してください。既存の `config.toml` は上書きしません。`config.toml.example` が無い場合や古い場合は、次回起動時に再生成されます。
 
 別の設定ファイルを一度だけ使う場合:
 
@@ -24,6 +24,18 @@ fpasoterm --config ~/.config/fpasoterm/User/work.toml
 
 ```sh
 fpasoterm --size 1200x760
+```
+
+起動後に shell でコマンドを実行する場合:
+
+```sh
+fpasoterm --command "tmux attach -t work"
+```
+
+保存済みウィンドウサイズを削除する場合:
+
+```sh
+fpasoterm --reset-window-state
 ```
 
 解決済み設定と plugin 状態を表示する場合:
@@ -53,7 +65,8 @@ minWidth = 420
 minHeight = 260
 backgroundColor = "#101317"
 themeSource = "system"
-
+rememberBounds = true
+frame = false
 [terminal]
 cursorBlink = true
 cursorStyle = "block"
@@ -94,10 +107,16 @@ enabled = []
 
 ## セクション
 
-- `window`: 初期ウィンドウサイズ、最小サイズ、背景色、native theme source。`themeSource` は `system`、`light`、`dark` を指定できます。
+- `window`: 初期ウィンドウサイズ、最小サイズ、背景色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。
 - `terminal`: terminal 作成時に渡す xterm.js options。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
+
+`window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
+
+window size は、デフォルト設定、`config.toml` に明示した `window.width` / `window.height`、保存済み `window-state.json`、最後に `--size` などの一時 CLI 指定、の順に解決されます。設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
+
+TOML では同じ table を複数回定義できません。`frame = true` などを試す場合は、既存の `[window]` section 内の値を編集してください。ファイル末尾へ新しく `[window]` を追加すると config parse error になります。
 
 ## Plugins
 

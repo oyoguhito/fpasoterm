@@ -1,9 +1,9 @@
-const { app, BrowserWindow, clipboard, dialog, ipcMain, nativeTheme } = require('electron');
+const { app, BrowserWindow, Menu, clipboard, dialog, ipcMain, nativeTheme } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const os = require('node:os');
 const pty = require('node-pty');
-const { loadConfig, profileDir } = require('./config');
+const { loadConfig, profileDir, writeWindowState } = require('./config');
 
 const APP_ID = 'io.github.oyoguhito.fpasoterm';
 const APP_NAME = 'fpasoterm';
@@ -14,6 +14,7 @@ const OZONE_PLATFORM = process.env.FPASOTERM_OZONE_PLATFORM || (process.platform
 const ENABLE_WAYLAND_IME = process.env.FPASOTERM_ENABLE_WAYLAND_IME === '1';
 const GTK_VERSION = process.env.FPASOTERM_GTK_VERSION;
 const ENABLE_FEATURES = process.env.FPASOTERM_ENABLE_FEATURES;
+const START_COMMAND = process.env.FPASOTERM_START_COMMAND;
 const ICON_PATH = process.platform === 'win32'
   ? path.join(__dirname, '..', 'extra', 'windows', 'fpasoterm.ico')
   : path.join(__dirname, '..', 'extra', 'logo', 'fpasoterm.png');
@@ -152,6 +153,14 @@ function spawnTerminal(webContents, options) {
     }
   });
 
+  if (START_COMMAND && START_COMMAND.trim()) {
+    setImmediate(() => {
+      if (!webContents.isDestroyed()) {
+        term.write(`${START_COMMAND}\r`);
+      }
+    });
+  }
+
   term.onExit(({ exitCode }) => {
     terminals.delete(webContents.id);
     if (!webContents.isDestroyed()) {
@@ -200,6 +209,99 @@ function applyApplicationIcon() {
   }
 }
 
+// Returns bounds that should be restored on the next normal launch.
+function restorableWindowBounds(window) {
+  return window.isMaximized() || window.isFullScreen()
+    ? window.getNormalBounds()
+    : window.getBounds();
+}
+
+// Compares bounds snapshots so polling does not rewrite state unnecessarily.
+function sameBounds(left, right) {
+  return Boolean(left && right) &&
+    left.x === right.x &&
+    left.y === right.y &&
+    left.width === right.width &&
+    left.height === right.height;
+}
+
+// Persists the latest window position and size unless disabled by config.
+function saveWindowState(window) {
+  if (runtimeConfig.config.window?.rememberBounds === false || window.isDestroyed()) {
+    return;
+  }
+
+  const bounds = restorableWindowBounds(window);
+  appendDiagnostic(`saving window bounds x=${bounds.x} y=${bounds.y} width=${bounds.width} height=${bounds.height}`);
+  writeWindowState({
+    window: {
+      width: bounds.width,
+      height: bounds.height,
+    },
+  });
+  return bounds;
+}
+
+// Applies saved/configured size explicitly after the window manager has created the window.
+function restoreWindowBounds(window, windowConfig) {
+  const bounds = {};
+  for (const key of ['width', 'height']) {
+    if (Number.isInteger(windowConfig[key])) {
+      bounds[key] = windowConfig[key];
+    }
+  }
+  if (Object.keys(bounds).length > 0) {
+    appendDiagnostic(`restoring window bounds ${JSON.stringify(bounds)}`);
+    window.setBounds(bounds, false);
+    const applied = window.getBounds();
+    appendDiagnostic(
+      `applied window bounds x=${applied.x} y=${applied.y} width=${applied.width} height=${applied.height}`,
+    );
+  }
+}
+
+// Reapplies size around first show because some Linux window managers adjust creation-time bounds.
+function installWindowBoundsRestore(window, windowConfig) {
+  const restore = () => restoreWindowBounds(window, windowConfig);
+
+  restore();
+  window.once('ready-to-show', () => {
+    restore();
+    window.show();
+  });
+  window.webContents.once('did-finish-load', restore);
+}
+
+// Saves bounds while the user moves or resizes the window, without writing per frame.
+function installWindowStatePersistence(window) {
+  let saveTimer;
+  let readyToSave = false;
+  let lastSavedBounds;
+  const scheduleSave = () => {
+    if (!readyToSave) {
+      return;
+    }
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(() => {
+      lastSavedBounds = saveWindowState(window);
+    }, 250);
+  };
+
+  for (const eventName of ['move', 'moved', 'resize', 'resized']) {
+    window.on(eventName, scheduleSave);
+  }
+
+  setTimeout(() => {
+    readyToSave = true;
+    lastSavedBounds = restorableWindowBounds(window);
+  }, 1000);
+
+  window.on('close', () => {
+    clearTimeout(saveTimer);
+    saveWindowState(window);
+  });
+}
+
 // Creates one application window using the resolved user configuration.
 function createWindow() {
   const windowConfig = runtimeConfig.config.window || {};
@@ -210,8 +312,11 @@ function createWindow() {
     height: windowConfig.height,
     minWidth: windowConfig.minWidth,
     minHeight: windowConfig.minHeight,
+    center: false,
     title: APP_NAME,
     icon: ICON_PATH,
+    show: false,
+    frame: windowConfig.frame === false ? false : true,
     backgroundColor: windowConfig.backgroundColor,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
@@ -223,6 +328,8 @@ function createWindow() {
 
   installInputMethodHooks(window);
   installRendererDiagnostics(window);
+  installWindowBoundsRestore(window, windowConfig);
+  installWindowStatePersistence(window);
   window.loadFile(path.join(__dirname, 'renderer', 'index.html'), {
     query: DEBUG_KEYS ? { debugKeys: '1' } : {},
   });
@@ -234,6 +341,7 @@ app.setPath('userData', profileDir());
 
 // Loads user configuration before creating the first window.
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   applyApplicationIcon();
 
   try {
@@ -308,3 +416,11 @@ ipcMain.handle('diagnostics:path', () => diagnosticsPath);
 
 // Sends resolved settings and plugin script URLs to the renderer.
 ipcMain.handle('config:get', () => runtimeConfig);
+
+// Closes the focused window from the custom titlebar close button.
+ipcMain.handle('window:close', (event) => {
+  const window = BrowserWindow.fromWebContents(event.sender);
+  if (window && !window.isDestroyed()) {
+    window.close();
+  }
+});

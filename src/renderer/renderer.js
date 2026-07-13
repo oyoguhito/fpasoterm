@@ -3,9 +3,13 @@ const diagnosticsPanel = document.getElementById('diagnostics-panel');
 const diagnosticsElement = document.getElementById('diagnostics');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
+const closeWindowButton = document.getElementById('close-window');
 const debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
 const fallbackConfig = {
+  window: {
+    backgroundColor: '#101317',
+  },
   terminal: {
     cursorBlink: true,
     cursorStyle: 'block',
@@ -74,6 +78,9 @@ function fitAndResize() {
 
 // Focuses both xterm.js and its hidden helper textarea used for IME input.
 function focusTerminalInput() {
+  if (!terminalElement || !term) {
+    return;
+  }
   term.focus();
 
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
@@ -234,8 +241,21 @@ async function loadRuntimeConfig() {
   }
 }
 
+// Applies window-level visual settings that affect the renderer surface.
+function applyWindowAppearance() {
+  const windowConfig = appConfig.window || {};
+  document.documentElement.classList.toggle('frameless-window', windowConfig.frame === false);
+  const background = windowConfig.backgroundColor || fallbackConfig.window.backgroundColor;
+  document.documentElement.style.background = background;
+  document.body.style.background = background;
+}
+
 // Creates xterm.js using the resolved terminal settings.
 function createTerminal() {
+  if (!terminalElement) {
+    return;
+  }
+
   term = new Terminal(appConfig.terminal);
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
@@ -297,10 +317,21 @@ copyDiagnosticsButton.addEventListener('click', async () => {
   }, 1200);
 });
 
+// Closes the frameless window from the custom titlebar.
+closeWindowButton.addEventListener('click', () => {
+  window.fpasoterm.closeWindow();
+});
+
 // Initializes config, terminal, plugin loading, IPC handlers, and first PTY startup.
 async function initialize() {
   await loadRuntimeConfig();
+  applyWindowAppearance();
   createTerminal();
+
+  if (!terminalElement || !term) {
+    showDiagnostic('terminal element missing');
+    return;
+  }
 
   window.addEventListener('resize', fitAndResize);
 

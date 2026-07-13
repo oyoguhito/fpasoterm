@@ -8,6 +8,7 @@ const toml = require('smol-toml');
 const root = path.resolve(__dirname, '..');
 const {
   configPath,
+  deleteWindowState,
   discoverPluginFiles,
   loadConfig,
   readUserConfig,
@@ -23,6 +24,8 @@ Options:
   --console-diagnostics     Print diagnostics to stderr as well as the log file.
   --config <path>           Use a specific config.toml for this launch.
   --show-config             Print resolved settings and plugin load status, then exit.
+  --command <command>       Send a command to the shell after launch.
+  --reset-window-state      Delete saved window size, then exit.
   --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
   --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
   --width <px>              Override the configured window width for this launch.
@@ -44,6 +47,8 @@ function parseArgs(argv) {
   const disablePlugins = [];
   let foreground = false;
   let showConfig = false;
+  let resetWindowState = false;
+  let startCommand = '';
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
@@ -59,6 +64,17 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--reset-window-state') {
+      resetWindowState = true;
+      continue;
+    }
+
+    if (arg === '--command') {
+      startCommand = requireValue(argv, index, arg);
+      index += 1;
       continue;
     }
 
@@ -132,9 +148,14 @@ function parseArgs(argv) {
     help: false,
     foreground,
     showConfig,
+    resetWindowState,
+    env: {
+      ...env,
+      ...(startCommand ? { FPASOTERM_START_COMMAND: startCommand } : {}),
+    },
+    startCommand,
     enablePlugins,
     disablePlugins,
-    env,
     electronArgs,
   };
 }
@@ -223,6 +244,14 @@ function showConfig(options) {
   printPluginList(runtimeConfig.configPath, enabled, runtimeConfig.pluginUrls);
 }
 
+// Clears remembered window bounds without touching config.toml.
+function resetWindowState(options) {
+  applyEnv(options.env);
+  const runtimeConfig = loadConfig();
+  deleteWindowState(runtimeConfig.windowStatePath);
+  console.log(`deleted ${runtimeConfig.windowStatePath}`);
+}
+
 // Prints plugin entries with simple status information.
 function printPluginList(targetPath, enabled, pluginUrls = []) {
   const configDir = path.dirname(targetPath);
@@ -295,6 +324,8 @@ try {
     process.stdout.write(helpText);
   } else if (updatePluginConfig(options)) {
     // The config command has completed without starting the desktop process.
+  } else if (options.resetWindowState) {
+    resetWindowState(options);
   } else if (options.showConfig) {
     showConfig(options);
   } else {

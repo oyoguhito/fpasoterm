@@ -15,6 +15,8 @@ const defaultConfig = Object.freeze({
     minHeight: 260,
     backgroundColor: '#101317',
     themeSource: 'system',
+    frame: false,
+    rememberBounds: true,
   },
   terminal: {
     cursorBlink: true,
@@ -70,6 +72,10 @@ minHeight = 260
 backgroundColor = "#101317"
 # themeSource can be "system", "light", or "dark".
 themeSource = "system"
+# frame controls whether the native window frame/titlebar is shown.
+frame = false
+# rememberBounds controls whether size is saved to User/window-state.json.
+rememberBounds = true
 
 # Terminal options are passed to xterm.js when the terminal is created.
 [terminal]
@@ -135,6 +141,16 @@ function profileDir() {
   return path.join(configHome, 'fpasoterm');
 }
 
+// Returns the local window state file used to remember bounds.
+function windowStatePath() {
+  return path.join(configDir(), 'window-state.json');
+}
+
+// Returns the old pre-User window state path for read-only migration.
+function legacyWindowStatePath() {
+  return path.join(profileDir(), 'window-state.json');
+}
+
 // Checks for plain objects so arrays and scalar TOML values are not merged recursively.
 function isObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -157,14 +173,14 @@ function mergeConfig(base, override) {
   return merged;
 }
 
-// Creates config.toml.example on first launch without overwriting config.toml.
-function writeDefaultConfigIfMissing(targetPath) {
-  if (fs.existsSync(targetPath)) {
-    return;
-  }
-
+// Keeps config.toml.example in sync without overwriting the user's config.toml.
+function writeDefaultConfigExample(targetPath) {
+  const examplePath = `${targetPath}.example`;
+  const example = defaultConfigExample();
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
-  fs.writeFileSync(`${targetPath}.example`, defaultConfigExample());
+  if (!fs.existsSync(examplePath) || fs.readFileSync(examplePath, 'utf8') !== example) {
+    fs.writeFileSync(examplePath, example);
+  }
 }
 
 // Parses the user's TOML config. Missing files are treated as an empty override.
@@ -180,6 +196,50 @@ function readUserConfig(targetPath = configPath()) {
 function writeUserConfig(config, targetPath = configPath()) {
   fs.mkdirSync(path.dirname(targetPath), { recursive: true });
   fs.writeFileSync(targetPath, `# fpasoterm user configuration.\n${toml.stringify(config)}`);
+}
+
+// Reads saved window bounds from the local profile directory.
+function readableWindowStatePath(targetPath = windowStatePath()) {
+  let statePath = targetPath;
+  if (!fs.existsSync(statePath)) {
+    const legacyPath = legacyWindowStatePath();
+    statePath = targetPath === windowStatePath() && fs.existsSync(legacyPath) ? legacyPath : targetPath;
+  }
+  return fs.existsSync(statePath) ? statePath : undefined;
+}
+
+// Reads saved window bounds from the local profile directory.
+function readWindowState(targetPath = windowStatePath()) {
+  const statePath = readableWindowStatePath(targetPath);
+
+  if (!statePath) {
+    return {};
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+// Writes the current window bounds so the next launch can restore them.
+function writeWindowState(state, targetPath = windowStatePath()) {
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.writeFileSync(targetPath, `${JSON.stringify(state, null, 2)}\n`);
+}
+
+// Deletes saved window bounds so configured/default bounds are used again.
+function deleteWindowState(targetPath = windowStatePath()) {
+  if (fs.existsSync(targetPath)) {
+    fs.rmSync(targetPath);
+  }
+  if (targetPath === windowStatePath()) {
+    const legacyPath = legacyWindowStatePath();
+    if (fs.existsSync(legacyPath)) {
+      fs.rmSync(legacyPath);
+    }
+  }
 }
 
 // Lists JavaScript and TypeScript plugin files below User/plugins.
@@ -281,10 +341,16 @@ function resolvePluginUrls(config, rootDir) {
 function loadConfig() {
   const file = configPath();
   const dir = path.dirname(file);
-  writeDefaultConfigIfMissing(file);
+  writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
   const config = mergeConfig(defaultConfig, userConfig);
+  if (config.window?.rememberBounds !== false) {
+    const statePath = readableWindowStatePath();
+    if (statePath) {
+      config.window = mergeConfig(config.window, readWindowState(statePath).window || {});
+    }
+  }
   const pluginUrls = resolvePluginUrls(config, dir);
 
   return {
@@ -292,6 +358,7 @@ function loadConfig() {
     configDir: dir,
     configPath: file,
     pluginUrls,
+    windowStatePath: windowStatePath(),
   };
 }
 
@@ -300,10 +367,14 @@ module.exports = {
   defaultConfigExample,
   configDir,
   configPath,
+  deleteWindowState,
   discoverPluginFiles,
   profileDir,
   readUserConfig,
   resolvePluginSelector,
   writeUserConfig,
+  readWindowState,
+  writeWindowState,
   loadConfig,
+  windowStatePath,
 };
