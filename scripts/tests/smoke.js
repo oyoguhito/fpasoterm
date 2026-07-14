@@ -202,6 +202,25 @@ assert.doesNotMatch(runScript, /--foreground/);
 const buildArtifacts = read('scripts/build-artifacts.js');
 assert.match(buildArtifacts, /--bundles', 'deb,rpm'/);
 assert.match(buildArtifacts, /entry\.name\.includes\(version\)/);
+assert.match(buildArtifacts, /--source-only/);
+assert.match(buildArtifacts, /--bundles-only/);
+assert.match(buildArtifacts, /FPASOTERM_ARTIFACT_LABEL/);
+assert.match(buildArtifacts, /labelArtifactName/);
+assert.match(buildArtifacts, /\.dmg/);
+assert.match(buildArtifacts, /\.msi/);
+assert.match(buildArtifacts, /\.exe/);
+assert.match(buildArtifacts, /\.app\.tar\.gz/);
+
+const releaseWorkflow = read('.github/workflows/release.yml');
+assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
+assert.match(releaseWorkflow, /macos-15-intel/);
+assert.match(releaseWorkflow, /macos-latest/);
+assert.match(releaseWorkflow, /windows-latest/);
+assert.match(releaseWorkflow, /FPASOTERM_ARTIFACT_LABEL/);
+assert.match(releaseWorkflow, /actions\/upload-artifact@v4/);
+assert.match(releaseWorkflow, /actions\/download-artifact@v4/);
+assert.match(releaseWorkflow, /gh release upload/);
+assert.match(releaseWorkflow, /--clobber/);
 
 const installDesktop = read('scripts/install-linux-desktop.js');
 assert.match(installDesktop, /XDG_BIN_HOME/);

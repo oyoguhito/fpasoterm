@@ -23,6 +23,17 @@ git push origin v1.0.0
 
 The `Release` workflow validates that the tag version matches `package.json`, builds `artifacts/`, and attaches the generated files to the GitHub Release.
 
+To rebuild assets for an existing tag, run the `Release` workflow manually and pass the tag name. The workflow uploads release assets with clobber enabled.
+
+Release assets are built on GitHub-hosted runners for:
+
+- source package and portable source archive
+- Linux x64 packages
+- Linux arm64 packages for ChromeOS/Baguette and other arm64 Linux systems
+- macOS x64 bundle
+- macOS arm64 bundle
+- Windows x64 bundle
+
 ## ChromeOS Linux Manual Checks
 
 ```sh
@@ -40,6 +51,7 @@ Verify:
 - If debugging, `diagnostics/fpasoterm-debug.log` is written.
 - `npm install -g fpasoterm` exposes the `fpasoterm` command after the package is published.
 - Artifacts include `fpasoterm-<version>.tgz` and `fpasoterm-<version>-source-portable.tar.gz`.
+- GitHub Release assets include Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64 bundles.
 - GitHub Actions `Check` and `Security` workflows pass.
 - Secret scanning reports no potential credentials.
 - Production dependency audit reports no known vulnerabilities.

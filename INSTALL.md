@@ -70,20 +70,29 @@ If ChromeOS/Baguette shows black, white, or flickering surfaces during transpare
 fpasoterm --disable-dmabuf
 ```
 
-## Release Bundles
+## Release Artifacts
 
-To create installable Linux bundles:
+To create artifacts for the current development machine:
 
 ```sh
 npm run build:artifacts
 ```
 
-Generated files are written to `artifacts/`, including `.deb`, `.rpm`, the npm-style source package, and the portable source archive on Linux.
+Generated files are written to `artifacts/`. Source archives are always generated. Platform bundles depend on the current OS, so a local Linux build creates Linux packages only.
+
+Tagged GitHub Releases build the broader release set in GitHub Actions:
+
+- source package and portable source archive
+- Linux x64 `.deb` / `.rpm`
+- Linux arm64 `.deb` / `.rpm` for ChromeOS/Baguette and other arm64 Linux environments
+- macOS x64 bundle
+- macOS arm64 bundle
+- Windows x64 bundle
 
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.0.0_arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.0.0_arm64-linux-arm64.deb
 ```
 
 ## 日本語
@@ -140,20 +149,29 @@ ChromeOS/Baguette で透過検証中に黒、白、ちらつきが出る場合:
 fpasoterm --disable-dmabuf
 ```
 
-## リリース用 bundle
+## リリース成果物
 
-Linux の installable bundle を作る場合:
+現在の開発環境向けの成果物を作る場合:
 
 ```sh
 npm run build:artifacts
 ```
 
-生成物は `artifacts/` に出力されます。Linux では `.deb`、`.rpm`、npm 形式の source package、portable source archive が生成されます。
+生成物は `artifacts/` に出力されます。source archive は常に生成されます。platform bundle は現在の OS 向けだけなので、Linux のローカルビルドでは Linux package だけが生成されます。
+
+tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成します。
+
+- source package と portable source archive
+- Linux x64 `.deb` / `.rpm`
+- ChromeOS/Baguette を含む arm64 Linux 向け `.deb` / `.rpm`
+- macOS x64 bundle
+- macOS arm64 bundle
+- Windows x64 bundle
 
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.0.0_arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.0.0_arm64-linux-arm64.deb
 ```
 
 ## Linux Desktop Entry

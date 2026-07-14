@@ -23,6 +23,17 @@ git push origin v1.0.0
 
 `Release` workflow は tag version と `package.json` の version が一致することを確認し、`artifacts/` を生成して GitHub Release に添付します。
 
+既存 tag の成果物を再生成する場合は、`Release` workflow を手動実行して tag 名を指定します。Release asset は上書き upload されます。
+
+Release asset は GitHub-hosted runner で次の対象を生成します。
+
+- source package と portable source archive
+- Linux x64 package
+- ChromeOS/Baguette を含む arm64 Linux 向け package
+- macOS x64 bundle
+- macOS arm64 bundle
+- Windows x64 bundle
+
 ## ChromeOS Linux 手動確認
 
 ```sh
@@ -40,6 +51,7 @@ FPASOTERM_DEBUG_KEYS=1 ./scripts/run
 - debug 時に `diagnostics/fpasoterm-debug.log` が書き出される。
 - package 公開後、`npm install -g fpasoterm` で `fpasoterm` コマンドが使える。
 - artifact に `fpasoterm-<version>.tgz` と `fpasoterm-<version>-source-portable.tar.gz` が含まれる。
+- GitHub Release asset に Linux x64、Linux arm64、macOS x64、macOS arm64、Windows x64 の bundle が含まれる。
 - GitHub Actions の `Check` と `Security` workflow が通る。
 - secret scan で credential 候補が検出されない。
 - production dependency audit で既知の脆弱性が検出されない。

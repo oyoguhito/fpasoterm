@@ -3,6 +3,7 @@
 ## 1.0.0
 
 - Added a tag-driven GitHub Release workflow that builds `artifacts/` in GitHub Actions and attaches the generated files to the release.
+- Expanded release artifact generation to Linux x64, Linux arm64, macOS x64, macOS arm64, and Windows x64.
 - Bumped the package version to `1.0.0` so release tag `v1.0.0` and generated artifact names match.
 
 ## 0.0.6
