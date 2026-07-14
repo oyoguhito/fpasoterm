@@ -832,7 +832,7 @@ dependencies = [
 
 [[package]]
 name = "fpasoterm"
-version = "0.0.6"
+version = "1.0.0"
 dependencies = [
  "portable-pty",
  "serde",

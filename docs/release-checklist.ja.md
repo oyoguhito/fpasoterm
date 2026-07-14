@@ -12,6 +12,17 @@ npm pack --dry-run
 npm run build:artifacts
 ```
 
+## GitHub Release
+
+release PR を merge した後、version tag を作成して push します。
+
+```sh
+git tag v1.0.0
+git push origin v1.0.0
+```
+
+`Release` workflow は tag version と `package.json` の version が一致することを確認し、`artifacts/` を生成して GitHub Release に添付します。
+
 ## ChromeOS Linux 手動確認
 
 ```sh

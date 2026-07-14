@@ -83,7 +83,7 @@ Generated files are written to `artifacts/`, including `.deb`, `.rpm`, the npm-s
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_0.0.6_arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.0.0_arm64.deb
 ```
 
 ## 日本語
@@ -153,7 +153,7 @@ npm run build:artifacts
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_0.0.6_arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.0.0_arm64.deb
 ```
 
 ## Linux Desktop Entry

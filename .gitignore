@@ -3,8 +3,8 @@ dist/
 out/
 artifacts/
 diagnostics/
-src-tauri/target/
 src-tauri/gen/
+src-tauri/target/
 SESSION.md
 *.log
 .DS_Store
