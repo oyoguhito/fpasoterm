@@ -223,7 +223,7 @@ assert.match(releaseWorkflow, /FPASOTERM_ARTIFACT_LABEL/);
 assert.match(releaseWorkflow, /actions\/checkout@v5/);
 assert.match(releaseWorkflow, /actions\/setup-node@v5/);
 assert.match(releaseWorkflow, /actions\/upload-artifact@v6/);
-assert.match(releaseWorkflow, /gh run download "\$\{GITHUB_RUN_ID\}" --dir release-artifacts/);
+assert.match(releaseWorkflow, /gh run download "\$\{GITHUB_RUN_ID\}" --repo "\$\{GITHUB_REPOSITORY\}" --dir release-artifacts/);
 assert.doesNotMatch(releaseWorkflow, /actions\/download-artifact@/);
 assert.match(releaseWorkflow, /gh release upload/);
 assert.match(releaseWorkflow, /--clobber/);
