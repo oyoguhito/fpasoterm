@@ -1,4 +1,5 @@
 :root {
+  --titlebar-height: 34px;
   color-scheme: dark;
   background: rgba(0, 0, 0, 0);
 }
@@ -9,29 +10,30 @@
 
 html,
 body {
+  width: 100%;
   height: 100%;
   margin: 0;
   background: rgba(0, 0, 0, 0);
 }
 
 body {
+  display: grid;
+  grid-template-rows: var(--titlebar-height) minmax(0, 1fr);
   overflow: hidden;
   color: #e8edf2;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
 #drag-region {
-  position: fixed;
-  top: 0;
-  right: 0;
-  left: 0;
+  position: relative;
   z-index: 10000;
-  height: 34px;
+  min-width: 0;
+  height: var(--titlebar-height);
   pointer-events: auto;
   background: #1565c0;
   color: #e8edf2;
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  line-height: 34px;
+  line-height: var(--titlebar-height);
   text-align: center;
   user-select: none;
   app-region: drag;
@@ -66,11 +68,10 @@ body {
 }
 
 #terminal {
-  position: fixed;
-  top: 34px;
-  right: 0;
-  bottom: 0;
-  left: 0;
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   padding: 0;
   background: transparent;
   app-region: no-drag;
@@ -86,7 +87,7 @@ body {
 
 #terminal-mirror {
   position: fixed;
-  top: 42px;
+  top: calc(var(--titlebar-height) + 8px);
   right: 8px;
   left: 8px;
   z-index: 9;
@@ -118,17 +119,17 @@ body {
 
 .resize-edge-top,
 .resize-edge-bottom {
-  right: 8px;
-  left: 8px;
-  height: 8px;
+  right: 12px;
+  left: 12px;
+  height: 10px;
   cursor: ns-resize;
 }
 
 .resize-edge-left,
 .resize-edge-right {
-  top: 8px;
-  bottom: 8px;
-  width: 8px;
+  top: var(--titlebar-height);
+  bottom: 12px;
+  width: 10px;
   cursor: ew-resize;
 }
 
@@ -149,8 +150,8 @@ body {
 }
 
 .resize-corner {
-  width: 16px;
-  height: 16px;
+  width: 18px;
+  height: 18px;
 }
 
 .resize-corner-top-left {
@@ -244,8 +245,39 @@ body {
   height: 100%;
 }
 
-.xterm-screen,
-.xterm-screen canvas {
-  width: 100% !important;
-  height: 100% !important;
+.xterm-viewport,
+.xterm-screen {
+  overflow: hidden;
+}
+
+.xterm .xterm-accessibility:not(.debug),
+.xterm .xterm-accessibility-tree:not(.debug),
+.xterm .xterm-accessibility-tree:not(.debug) *,
+.xterm .live-region,
+.xterm .xterm-message {
+  display: none !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  color: transparent !important;
+  background: transparent !important;
+  pointer-events: none !important;
+}
+
+.xterm .xterm-helper-textarea,
+.xterm .composition-view {
+  color: transparent !important;
+  background: transparent !important;
+  caret-color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
+  text-shadow: none !important;
+}
+
+.xterm .xterm-char-measure-element {
+  position: absolute !important;
+  left: -9999em !important;
+  top: -9999em !important;
+  z-index: -1 !important;
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
 }
