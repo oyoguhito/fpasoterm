@@ -11,7 +11,6 @@ const args = new Set(process.argv.slice(2));
 const sourceOnly = args.has('--source-only');
 const bundlesOnly = args.has('--bundles-only');
 const artifactLabel = process.env.FPASOTERM_ARTIFACT_LABEL || '';
-const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm';
 if (sourceOnly && bundlesOnly) {
   throw new Error('Use only one of --source-only or --bundles-only');
 }
@@ -34,9 +33,10 @@ const packageEntries = [
 
 // Runs packaging commands from the repository root with an artifact-local npm cache.
 function run(command, args, options = {}) {
-  childProcess.execFileSync(command, args, {
+  const result = childProcess.spawnSync(command, args, {
     cwd: root,
     stdio: 'inherit',
+    shell: process.platform === 'win32',
     env: {
       ...process.env,
       npm_config_cache: npmCacheDir,
@@ -47,6 +47,14 @@ function run(command, args, options = {}) {
     },
     ...options,
   });
+
+  if (result.error) {
+    throw result.error;
+  }
+
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} exited with status ${result.status}`);
+  }
 }
 
 // Copies source entries while excluding generated or dependency directories.
@@ -97,7 +105,7 @@ if (!sourceOnly) {
     // reproducible, and keep the source archives platform-independent.
     buildArgs.push('--', '--bundles', 'deb,rpm');
   }
-  run(npmCommand, buildArgs);
+  run('npm', buildArgs);
 
   const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
   if (fs.existsSync(bundleDir)) {
