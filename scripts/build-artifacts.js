@@ -7,6 +7,13 @@ const artifactsDir = path.join(root, 'artifacts');
 const npmCacheDir = path.join(artifactsDir, '.npm-cache');
 const packageJson = require(path.join(root, 'package.json'));
 const version = packageJson.version;
+const args = new Set(process.argv.slice(2));
+const sourceOnly = args.has('--source-only');
+const bundlesOnly = args.has('--bundles-only');
+const artifactLabel = process.env.FPASOTERM_ARTIFACT_LABEL || '';
+if (sourceOnly && bundlesOnly) {
+  throw new Error('Use only one of --source-only or --bundles-only');
+}
 const packageEntries = [
   'bin',
   'docs',
@@ -56,59 +63,85 @@ function copyEntry(entry, targetRoot) {
   });
 }
 
+// Adds the CI platform label to release assets so macOS/Windows bundle names do
+// not collide when every matrix artifact is uploaded to the same GitHub Release.
+function labelArtifactName(fileName) {
+  if (!artifactLabel) {
+    return fileName;
+  }
+  const parsed = path.parse(fileName);
+  return `${parsed.name}-${artifactLabel}${parsed.ext}`;
+}
+
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
 
-const npmPackageRoot = path.join(artifactsDir, 'package');
-fs.mkdirSync(npmPackageRoot, { recursive: true });
-for (const entry of packageEntries) {
-  copyEntry(entry, npmPackageRoot);
+if (!bundlesOnly) {
+  const npmPackageRoot = path.join(artifactsDir, 'package');
+  fs.mkdirSync(npmPackageRoot, { recursive: true });
+  for (const entry of packageEntries) {
+    copyEntry(entry, npmPackageRoot);
+  }
+  run('tar', ['-czf', `fpasoterm-${version}.tgz`, 'package'], {
+    cwd: artifactsDir,
+  });
+  fs.rmSync(npmPackageRoot, { recursive: true, force: true });
 }
-run('tar', ['-czf', `fpasoterm-${version}.tgz`, 'package'], {
-  cwd: artifactsDir,
-});
-fs.rmSync(npmPackageRoot, { recursive: true, force: true });
 
-const buildArgs = ['run', 'build'];
-if (process.platform === 'linux') {
-  // AppImage bundling is unstable in some ChromeOS/Baguette and CI
-  // environments. Build the Linux package formats that are currently
-  // reproducible, and keep the source archives platform-independent.
-  buildArgs.push('--', '--bundles', 'deb,rpm');
-}
-run('npm', buildArgs);
+if (!sourceOnly) {
+  const buildArgs = ['run', 'build'];
+  if (process.platform === 'linux') {
+    // AppImage bundling is unstable in some ChromeOS/Baguette and CI
+    // environments. Build the Linux package formats that are currently
+    // reproducible, and keep the source archives platform-independent.
+    buildArgs.push('--', '--bundles', 'deb,rpm');
+  }
+  run('npm', buildArgs);
 
-const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
-if (fs.existsSync(bundleDir)) {
-  const copyBundles = (directory) => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const entryPath = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        copyBundles(entryPath);
-      } else if (
-        entry.isFile()
-        && ['.deb', '.rpm'].includes(path.extname(entry.name))
-        && entry.name.includes(version)
-      ) {
-        fs.copyFileSync(entryPath, path.join(artifactsDir, entry.name));
+  const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
+  if (fs.existsSync(bundleDir)) {
+    const copyBundles = (directory) => {
+      for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isDirectory()) {
+          if (entry.name.endsWith('.app')) {
+            const appArchive = `${entry.name.replace(/\.app$/, '')}-${version}-${artifactLabel || process.arch}.app.tar.gz`;
+            run('tar', ['-czf', path.join(artifactsDir, appArchive), entry.name], {
+              cwd: directory,
+            });
+          } else {
+            copyBundles(entryPath);
+          }
+        } else if (
+          entry.isFile()
+          && ['.deb', '.rpm', '.dmg', '.msi', '.exe'].includes(path.extname(entry.name))
+          && entry.name.includes(version)
+        ) {
+          fs.copyFileSync(entryPath, path.join(artifactsDir, labelArtifactName(entry.name)));
+        }
       }
-    }
-  };
-  copyBundles(bundleDir);
+    };
+    copyBundles(bundleDir);
+  }
 }
 
-const portableName = `fpasoterm-${version}-source-portable`;
-const portableRoot = path.join(artifactsDir, portableName);
-fs.mkdirSync(portableRoot, { recursive: true });
+let portableRoot;
+if (!bundlesOnly) {
+  const portableName = `fpasoterm-${version}-source-portable`;
+  portableRoot = path.join(artifactsDir, portableName);
+  fs.mkdirSync(portableRoot, { recursive: true });
 
-for (const entry of packageEntries) {
-  copyEntry(entry, portableRoot);
+  for (const entry of packageEntries) {
+    copyEntry(entry, portableRoot);
+  }
+
+  run('tar', ['-czf', `${portableName}.tar.gz`, portableName], {
+    cwd: artifactsDir,
+  });
 }
 
-run('tar', ['-czf', `${portableName}.tar.gz`, portableName], {
-  cwd: artifactsDir,
-});
-
-fs.rmSync(portableRoot, { recursive: true, force: true });
+if (portableRoot) {
+  fs.rmSync(portableRoot, { recursive: true, force: true });
+}
 fs.rmSync(npmCacheDir, { recursive: true, force: true });
 console.log(`Artifacts written to ${artifactsDir}`);
