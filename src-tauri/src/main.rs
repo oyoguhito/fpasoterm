@@ -222,8 +222,10 @@ fn runtime_config() -> RuntimeConfig {
 fn default_runtime_config() -> RuntimeConfig {
     let home = home_dir();
     let config_dir = format!("{home}/.config/fpasoterm/User");
-    let config_path =
-        env::var("FPASOTERM_CONFIG_PATH").unwrap_or_else(|_| format!("{config_dir}/config.toml"));
+    let config_path = env::var("FPASOTERM_CONFIG_PATH")
+        .ok()
+        .or_else(|| cli_option_value("--config"))
+        .unwrap_or_else(|| format!("{config_dir}/config.toml"));
     let window_state_path = format!("{config_dir}/window-state.json");
     let mut window = WindowConfig {
         width: 1000,
@@ -294,6 +296,26 @@ fn read_configured_shell(config_path: &str) -> Option<String> {
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
+}
+
+fn cli_option_value(flag: &str) -> Option<String> {
+    let equals_prefix = format!("{flag}=");
+    let mut args = env::args().skip(1);
+    while let Some(arg) = args.next() {
+        if arg == flag {
+            return args
+                .next()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty());
+        }
+        if let Some(value) = arg.strip_prefix(&equals_prefix) {
+            let value = value.trim();
+            if !value.is_empty() {
+                return Some(value.to_string());
+            }
+        }
+    }
+    None
 }
 
 fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
@@ -369,6 +391,9 @@ fn shell_command(config: &Config) -> String {
         if !shell.trim().is_empty() {
             return shell;
         }
+    }
+    if let Some(shell) = cli_option_value("--shell") {
+        return shell;
     }
     if let Some(shell) = configured_shell(config) {
         return shell;
