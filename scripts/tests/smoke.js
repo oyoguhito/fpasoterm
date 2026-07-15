@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.0.2');
+assert.equal(packageJson.version, '1.0.3');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -273,6 +273,8 @@ assert.match(rustMain, /diagnostics:event/);
 assert.match(rustMain, /terminal_write bytes/);
 assert.match(rustMain, /macos_login_shell/);
 assert.match(rustMain, /dscl/);
+assert.match(rustMain, /read_saved_window_size/);
+assert.match(rustMain, /window-state\.json/);
 assert.match(rustMain, /UserShell/);
 assert.match(rustMain, /window_save_bounds/);
 assert.match(rustMain, /window_get_bounds/);
