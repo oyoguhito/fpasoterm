@@ -8,6 +8,9 @@ height = 680
 [terminal]
 fontSize = 14
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
+# Leave empty for the platform default shell.
+# Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
+shell = ""
 
 [ime]
 duplicateGuard = true

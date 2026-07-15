@@ -39,7 +39,7 @@ When the shell-backed PTY exits, fpasoterm closes the owning application window.
 ## Configuration and Plugins
 
 User configuration is read from `~/.config/fpasoterm/User/config.toml`, or from `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` when `XDG_CONFIG_HOME` is set.
-`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch. `--command <command>` sends a command to the shell after launch. `--reset-window-state` deletes the saved window size.
+`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch. `--shell <command>` selects another shell for one launch. `--command <command>` sends a command to the shell after launch. `--reset-window-state` deletes the saved window size.
 `--show-config` prints the resolved settings and plugin load status. `--enable-plugin` and `--disable-plugin` select one or more files below `User/plugins` by file name and edit `plugins.enabled`.
 
 On launch, fpasoterm writes or refreshes `config.toml.example` with the default settings. fpasoterm does not overwrite an existing user config. When `window.rememberBounds` is enabled, the last window size is saved locally to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch. Saved size overrides explicit `window.width` and `window.height` values in `config.toml`; one-shot CLI overrides are applied last.

@@ -32,6 +32,13 @@ Run a command in the shell after launch:
 fpasoterm --command "tmux attach -t work"
 ```
 
+Use another shell for one launch:
+
+```sh
+fpasoterm --shell pwsh.exe
+fpasoterm --shell cmd.exe
+```
+
 Delete the saved window size:
 
 ```sh
@@ -74,6 +81,7 @@ cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
 fontSize = 14
 scrollback = 1000
+shell = ""
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
@@ -109,7 +117,7 @@ enabled = []
 ## Sections
 
 - `window`: initial window size, minimum size, background color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`.
-- `terminal`: xterm.js options passed when the terminal is created.
+- `terminal`: xterm.js options passed when the terminal is created. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` overrides this for one launch.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 
