@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.3
+
+- Fixed window size restore when launching the macOS `.app` bundle directly.
+
 ## 1.0.2
 
 - Added ad-hoc macOS app signing and Release workflow verification for macOS `.app` and `.dmg` artifacts.

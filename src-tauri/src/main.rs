@@ -115,8 +115,7 @@ fn main() {
                     app.handle(),
                     &format!(
                         "restoring window size width={} height={}",
-                        config.config.window.width,
-                        config.config.window.height
+                        config.config.window.width, config.config.window.height
                     ),
                 );
                 let _ = window.set_min_size(Some(tauri::LogicalSize::new(
@@ -221,18 +220,25 @@ fn runtime_config() -> RuntimeConfig {
 fn default_runtime_config() -> RuntimeConfig {
     let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
     let config_dir = format!("{home}/.config/fpasoterm/User");
+    let window_state_path = format!("{config_dir}/window-state.json");
+    let mut window = WindowConfig {
+        width: 1000,
+        height: 680,
+        min_width: 420,
+        min_height: 260,
+        background_color: "rgba(0, 0, 0, 0)".to_string(),
+        theme_source: "system".to_string(),
+        frame: false,
+        remember_bounds: true,
+    };
+    if let Some((width, height)) = read_saved_window_size(&window_state_path) {
+        window.width = width;
+        window.height = height;
+    }
+
     RuntimeConfig {
         config: Config {
-            window: WindowConfig {
-                width: 1000,
-                height: 680,
-                min_width: 420,
-                min_height: 260,
-                background_color: "rgba(0, 0, 0, 0)".to_string(),
-                theme_source: "system".to_string(),
-                frame: false,
-                remember_bounds: true,
-            },
+            window,
             terminal: serde_json::json!({
                 "allowTransparency": true,
                 "cursorBlink": true,
@@ -257,13 +263,27 @@ fn default_runtime_config() -> RuntimeConfig {
         config_dir: config_dir.clone(),
         config_path: format!("{config_dir}/config.toml"),
         plugin_urls: Vec::new(),
-        window_state_path: format!("{config_dir}/window-state.json"),
+        window_state_path,
         diagnostics: Some(DiagnosticsConfig {
             debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1"),
             console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1"),
-            opaque_terminal: Some(env::var("FPASOTERM_DEBUG_OPAQUE_TERMINAL").as_deref() == Ok("1")),
+            opaque_terminal: Some(
+                env::var("FPASOTERM_DEBUG_OPAQUE_TERMINAL").as_deref() == Ok("1"),
+            ),
         }),
     }
+}
+
+fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(state_path).ok()?).ok()?;
+    let window = value.get("window")?;
+    let width = window.get("width")?.as_u64()?;
+    let height = window.get("height")?.as_u64()?;
+    if width == 0 || height == 0 || width > u32::MAX as u64 || height > u32::MAX as u64 {
+        return None;
+    }
+    Some((width as u32, height as u32))
 }
 
 fn append_diagnostic(app: &AppHandle, message: &str) {
