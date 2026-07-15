@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.4
+
+- Fixed Windows launch behavior so normal GUI launches do not open an extra console window.
+- Closed the application when the shell process exits, including `exit` from Windows shells.
+- Added `terminal.shell` and `--shell <command>` for selecting shells such as bash, fish, PowerShell, or cmd.
+- Avoided launching stale local Tauri target binaries after source changes.
+
 ## 1.0.3
 
 - Fixed window size restore when launching the macOS `.app` bundle directly.
