@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.0.1');
+assert.equal(packageJson.version, '1.0.2');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -227,6 +227,9 @@ assert.match(releaseWorkflow, /gh run download "\$\{GITHUB_RUN_ID\}" --repo "\$\
 assert.doesNotMatch(releaseWorkflow, /actions\/download-artifact@/);
 assert.match(releaseWorkflow, /gh release upload/);
 assert.match(releaseWorkflow, /--clobber/);
+assert.match(releaseWorkflow, /Verify macOS bundles/);
+assert.match(releaseWorkflow, /codesign --verify --deep --strict/);
+assert.match(releaseWorkflow, /hdiutil verify/);
 assert.doesNotMatch(releaseWorkflow, /ref: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.tag/);
 
 const installDesktop = read('scripts/install-linux-desktop.js');
@@ -245,6 +248,8 @@ assert.match(uninstallDesktop, /fpasoterm\.png/);
 const tauriConfig = read('src-tauri/tauri.conf.json');
 assert.match(tauriConfig, /"withGlobalTauri": true/);
 assert.match(tauriConfig, /"macOSPrivateApi": true/);
+assert.match(tauriConfig, /"macOS": \{/);
+assert.match(tauriConfig, /"signingIdentity": "-"/);
 assert.match(tauriConfig, /"transparent": true/);
 assert.match(tauriConfig, /"backgroundColor": "#00000000"/);
 assert.match(tauriConfig, /"decorations": false/);

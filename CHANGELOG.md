@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- Added ad-hoc macOS app signing and Release workflow verification for macOS `.app` and `.dmg` artifacts.
+- Documented that full Gatekeeper-friendly macOS distribution still requires Developer ID signing and notarization.
+
 ## 1.0.1
 
 - Included macOS Tauri rendering and resizing fixes in the release version.
