@@ -7,7 +7,7 @@ use std::io::{Read, Write};
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tauri::{AppHandle, Emitter, Manager, PhysicalSize, State, WindowEvent};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -64,6 +64,24 @@ struct TerminalSize {
 #[derive(Debug, Clone, Serialize)]
 struct TerminalExit {
     exit_code: Option<i32>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowBoundsRequest {
+    x: Option<i32>,
+    y: Option<i32>,
+    width: Option<u32>,
+    height: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct WindowBounds {
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
 }
 
 struct TerminalSession {
@@ -129,6 +147,8 @@ fn main() {
             window_close,
             window_start_drag,
             window_save_bounds,
+            window_get_bounds,
+            window_set_bounds,
         ])
         .run(tauri::generate_context!())
         .expect("failed to run fpasoterm");
@@ -281,17 +301,24 @@ fn chrono_like_timestamp() -> String {
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
 }
 
+fn macos_login_shell() -> Option<String> {
+    let user = env::var("USER").ok()?;
+    Command::new("dscl")
+        .args([".", "-read", &format!("/Users/{user}"), "UserShell"])
+        .output()
+        .ok()
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|value| value.split_whitespace().last().map(str::to_string))
+        .filter(|value| value.starts_with('/'))
+}
+
 fn shell_command() -> String {
     if cfg!(windows) {
         env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
+    } else if cfg!(target_os = "macos") {
+        macos_login_shell().unwrap_or_else(|| "/bin/zsh".to_string())
     } else {
-        env::var("SHELL").unwrap_or_else(|_| {
-            if cfg!(target_os = "macos") {
-                "/bin/zsh".to_string()
-            } else {
-                "/bin/bash".to_string()
-            }
-        })
+        env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
 }
 
@@ -468,6 +495,39 @@ fn window_save_bounds(app: AppHandle) -> Result<(), String> {
         .get_webview_window("main")
         .ok_or_else(|| "main window is not available".to_string())?;
     save_window_state(&window, &window_state_path())
+}
+
+#[tauri::command]
+fn window_get_bounds(app: AppHandle) -> Result<WindowBounds, String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    let position = window.outer_position().map_err(|error| error.to_string())?;
+    let size = window.outer_size().map_err(|error| error.to_string())?;
+    Ok(WindowBounds {
+        x: position.x,
+        y: position.y,
+        width: size.width,
+        height: size.height,
+    })
+}
+
+#[tauri::command]
+fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    if let (Some(width), Some(height)) = (bounds.width, bounds.height) {
+        window
+            .set_size(PhysicalSize::new(width, height))
+            .map_err(|error| error.to_string())?;
+    }
+    if let (Some(x), Some(y)) = (bounds.x, bounds.y) {
+        window
+            .set_position(PhysicalPosition::new(x, y))
+            .map_err(|error| error.to_string())?;
+    }
+    Ok(())
 }
 
 impl Drop for TerminalSession {

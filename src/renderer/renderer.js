@@ -63,6 +63,8 @@ let recentCompositionCommit = null;
 let recentPlainTextWrite = null;
 let compositionRecentlyActiveUntil = 0;
 let windowStateSaveTimer = null;
+let terminalResizeTimer = null;
+let xtermOverlayObserver = null;
 
 // Provides the renderer API shape expected by the rest of this file when the
 // backend is injected by Tauri.
@@ -99,7 +101,7 @@ function installTauriApiAdapter() {
     startWindowResizeDrag: (direction) => window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction),
     saveWindowBounds: () => invoke('window_save_bounds'),
     getWindowBounds: () => invoke('window_get_bounds'),
-    setWindowBounds: (bounds) => invoke('window_set_bounds', bounds),
+    setWindowBounds: (bounds) => invoke('window_set_bounds', { bounds }),
   };
 }
 
@@ -118,6 +120,25 @@ function fitAndResize() {
   fitAddon.fit();
   window.fpasoterm.resizeTerminal({ cols: term.cols, rows: term.rows }).catch((error) => {
     showDiagnostic(`terminal resize failed: ${error}`);
+  });
+}
+
+// Coalesces rapid webview resize events so shells do not redraw prompts repeatedly.
+function scheduleFitAndResize() {
+  if (terminalResizeTimer) {
+    clearTimeout(terminalResizeTimer);
+  }
+  terminalResizeTimer = setTimeout(() => {
+    fitAndResize();
+  }, 80);
+}
+
+// Waits for the webview to finish layout before measuring the terminal.
+function afterNextPaint() {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(resolve);
+    });
   });
 }
 
@@ -269,13 +290,6 @@ function showDebugDiagnostic(message) {
   }
 }
 
-// Allows Tauri event listener registration to settle without blocking startup.
-function delay(milliseconds) {
-  return new Promise((resolve) => {
-    setTimeout(resolve, milliseconds);
-  });
-}
-
 // Converts control characters into visible markers for diagnostics output.
 function printableDiagnosticData(data) {
   return data
@@ -375,16 +389,107 @@ function applyWindowAppearance() {
   document.body.style.background = background;
 }
 
+// Removes xterm.js visual-only overlay DOM that can appear as fixed garbled text on macOS.
+function removeXtermVisualOverlays() {
+  if (!terminalElement) {
+    return;
+  }
+
+  for (const element of terminalElement.querySelectorAll('.xterm-accessibility, .xterm-message')) {
+    element.remove();
+  }
+}
+
+// Emits canvas layout information when key/debug diagnostics are enabled.
+function logXtermCanvasDiagnostics() {
+  if (!debugKeys || !terminalElement) {
+    return;
+  }
+
+  const canvases = [...terminalElement.querySelectorAll('canvas')].map((canvas, index) => {
+    const rect = canvas.getBoundingClientRect();
+    const style = window.getComputedStyle(canvas);
+    return [
+      `canvas[${index}]`,
+      `class=${canvas.className || '(none)'}`,
+      `width=${canvas.width}`,
+      `height=${canvas.height}`,
+      `rect=${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.left)},${Math.round(rect.top)}`,
+      `display=${style.display}`,
+      `visibility=${style.visibility}`,
+      `opacity=${style.opacity}`,
+      `z=${style.zIndex}`,
+    ].join(' ');
+  });
+  showDebugDiagnostic(`xterm canvas diagnostics count=${canvases.length} ${canvases.join(' | ')}`);
+}
+
+// Emits visible DOM nodes containing repeated W text when diagnostics are enabled.
+function logXtermTextDiagnostics() {
+  if (!debugKeys || !terminalElement) {
+    return;
+  }
+
+  const matches = [];
+  const walker = document.createTreeWalker(terminalElement, NodeFilter.SHOW_TEXT);
+  while (matches.length < 12) {
+    const node = walker.nextNode();
+    if (!node) {
+      break;
+    }
+    const text = node.textContent || '';
+    if (!/W{3,}/.test(text)) {
+      continue;
+    }
+    const parent = node.parentElement;
+    const rect = parent?.getBoundingClientRect();
+    const style = parent ? window.getComputedStyle(parent) : undefined;
+    matches.push([
+      `tag=${parent?.tagName || '(none)'}`,
+      `class=${parent?.className || '(none)'}`,
+      `text=${text.slice(0, 80)}`,
+      `rect=${rect ? `${Math.round(rect.width)}x${Math.round(rect.height)}@${Math.round(rect.left)},${Math.round(rect.top)}` : '(none)'}`,
+      `display=${style?.display || '(none)'}`,
+      `visibility=${style?.visibility || '(none)'}`,
+      `opacity=${style?.opacity || '(none)'}`,
+      `z=${style?.zIndex || '(none)'}`,
+    ].join(' '));
+  }
+  showDebugDiagnostic(`xterm text diagnostics repeated-w count=${matches.length} ${matches.join(' | ')}`);
+}
+
+// Keeps xterm accessibility/message overlays out of the DOM if xterm recreates them.
+function installXtermOverlayPruner() {
+  removeXtermVisualOverlays();
+  if (!terminalElement || xtermOverlayObserver) {
+    return;
+  }
+
+  xtermOverlayObserver = new MutationObserver(() => {
+    removeXtermVisualOverlays();
+  });
+  xtermOverlayObserver.observe(terminalElement, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 // Creates xterm.js using the resolved terminal settings.
 function createTerminal() {
   if (!terminalElement) {
     return;
   }
 
-  term = new Terminal(appConfig.terminal);
+  term = new Terminal({
+    ...appConfig.terminal,
+    screenReaderMode: false,
+  });
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
   term.open(terminalElement);
+  installXtermOverlayPruner();
+  logXtermCanvasDiagnostics();
+  logXtermTextDiagnostics();
   showDebugDiagnostic(`terminal opened cols=${term.cols} rows=${term.rows}`);
 }
 
@@ -461,6 +566,83 @@ function toTauriResizeDirection(direction) {
     .join('');
 }
 
+// Resizes frameless windows without relying on platform-specific native hit testing.
+async function startManualWindowResize(event, direction) {
+  const initialBounds = await window.fpasoterm.getWindowBounds();
+  const startX = event.screenX;
+  const startY = event.screenY;
+  const minWidth = Number(appConfig.window?.minWidth) || 420;
+  const minHeight = Number(appConfig.window?.minHeight) || 260;
+  let latestEvent = event;
+  let applying = false;
+
+  const applyResize = () => {
+    applying = false;
+    const deltaX = latestEvent.screenX - startX;
+    const deltaY = latestEvent.screenY - startY;
+    let x = initialBounds.x;
+    let y = initialBounds.y;
+    let width = initialBounds.width;
+    let height = initialBounds.height;
+
+    if (direction.includes('East')) {
+      width = initialBounds.width + deltaX;
+    }
+    if (direction.includes('South')) {
+      height = initialBounds.height + deltaY;
+    }
+    if (direction.includes('West')) {
+      width = initialBounds.width - deltaX;
+      x = initialBounds.x + deltaX;
+    }
+    if (direction.includes('North')) {
+      height = initialBounds.height - deltaY;
+      y = initialBounds.y + deltaY;
+    }
+
+    if (width < minWidth) {
+      if (direction.includes('West')) {
+        x = initialBounds.x + initialBounds.width - minWidth;
+      }
+      width = minWidth;
+    }
+    if (height < minHeight) {
+      if (direction.includes('North')) {
+        y = initialBounds.y + initialBounds.height - minHeight;
+      }
+      height = minHeight;
+    }
+
+    window.fpasoterm.setWindowBounds({
+      x: Math.round(x),
+      y: Math.round(y),
+      width: Math.round(width),
+      height: Math.round(height),
+    }).catch((error) => {
+      showDiagnostic(`manual window resize failed direction=${direction}: ${error}`);
+    });
+  };
+
+  const onPointerMove = (moveEvent) => {
+    latestEvent = moveEvent;
+    if (!applying) {
+      applying = true;
+      requestAnimationFrame(applyResize);
+    }
+  };
+  const stopResize = () => {
+    window.removeEventListener('pointermove', onPointerMove);
+    window.removeEventListener('pointerup', stopResize);
+    window.removeEventListener('pointercancel', stopResize);
+    scheduleWindowStateSave();
+    fitAndResize();
+  };
+
+  window.addEventListener('pointermove', onPointerMove);
+  window.addEventListener('pointerup', stopResize, { once: true });
+  window.addEventListener('pointercancel', stopResize, { once: true });
+}
+
 // Adds native resize hit targets for the frameless transparent Tauri window.
 for (const handle of document.querySelectorAll('[data-resize-direction]')) {
   handle.addEventListener('pointerdown', (event) => {
@@ -470,8 +652,11 @@ for (const handle of document.querySelectorAll('[data-resize-direction]')) {
 
     event.preventDefault();
     const direction = toTauriResizeDirection(handle.getAttribute('data-resize-direction'));
-    window.fpasoterm.startWindowResizeDrag?.(direction).catch((error) => {
-      showDiagnostic(`window resize drag failed direction=${direction}: ${error}`);
+    startManualWindowResize(event, direction).catch((error) => {
+      showDiagnostic(`manual window resize setup failed direction=${direction}: ${error}`);
+      window.fpasoterm.startWindowResizeDrag?.(direction).catch((nativeError) => {
+        showDiagnostic(`window resize drag failed direction=${direction}: ${nativeError}`);
+      });
     });
   });
 }
@@ -498,7 +683,7 @@ async function initialize() {
   }
 
   window.addEventListener('resize', () => {
-    fitAndResize();
+    scheduleFitAndResize();
     scheduleWindowStateSave();
   });
 
@@ -525,6 +710,9 @@ async function initialize() {
     showDebugDiagnostic(`renderer terminal data bytes=${data.length} preview=${printableDiagnosticData(data).slice(0, 160)}`);
     mirrorTerminalData(data);
     term.write(data, () => {
+      removeXtermVisualOverlays();
+      logXtermCanvasDiagnostics();
+      logXtermTextDiagnostics();
       showDebugDiagnostic(`renderer terminal write parsed bytes=${data.length}`);
     });
   })).catch((error) => {
@@ -563,10 +751,12 @@ async function initialize() {
   });
 
   await loadPlugins();
+  await afterNextPaint();
   fitAddon.fit();
-  await delay(250);
   try {
     await window.fpasoterm.startTerminal({ cols: term.cols, rows: term.rows });
+    await afterNextPaint();
+    fitAndResize();
   } catch (error) {
     showTerminalError(`failed to start terminal backend: ${error.stack || error.message || error}`);
     return;
