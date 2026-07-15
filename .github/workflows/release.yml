@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to build, for example v1.0.1'
+        description: 'Release tag to build, for example v1.0.2'
         required: true
         type: string
 
@@ -148,6 +148,19 @@ jobs:
         run: npm run build:artifacts -- --bundles-only
         env:
           FPASOTERM_ARTIFACT_LABEL: ${{ matrix.label }}
+
+      - name: Verify macOS bundles
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r -d '' app; do
+            codesign --verify --deep --strict --verbose=2 "${app}"
+            codesign --display --verbose=2 "${app}"
+          done < <(find src-tauri/target/release/bundle/macos -name '*.app' -print0)
+          while IFS= read -r -d '' dmg; do
+            hdiutil verify "${dmg}"
+          done < <(find artifacts -name '*.dmg' -print0)
 
       - name: Upload platform artifacts
         uses: actions/upload-artifact@v6
