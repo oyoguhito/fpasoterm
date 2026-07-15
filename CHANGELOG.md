@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.5
+
+- Fixed direct packaged app argument parsing so `fpasoterm.exe --shell pwsh.exe` selects the requested shell.
+- Added direct app support for `--shell=value`, `--config <path>`, and `--config=<path>`.
+
 ## 1.0.4
 
 - Fixed Windows launch behavior so normal GUI launches do not open an extra console window.
