@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.0.1
+
+- Included macOS Tauri rendering and resizing fixes in the release version.
+
 ## 1.0.0
 
 - Added a tag-driven GitHub Release workflow that builds `artifacts/` in GitHub Actions and attaches the generated files to the release.
