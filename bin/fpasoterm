@@ -25,6 +25,7 @@ Options:
   --console-diagnostics     Print diagnostics to stderr as well as the log file.
   --config <path>           Use a specific config.toml for this launch.
   --show-config             Print resolved settings and plugin load status, then exit.
+  --shell <command>         Override the configured shell for this launch.
   --command <command>       Send a command to the shell after launch.
   --reset-window-state      Delete saved window size, then exit.
   --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
@@ -81,6 +82,12 @@ function parseArgs(argv) {
 
     if (arg === '--command') {
       startCommand = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--shell') {
+      env.FPASOTERM_SHELL = requireValue(argv, index, arg);
       index += 1;
       continue;
     }
@@ -242,6 +249,7 @@ function showConfig(options) {
   applyEnv(options.env);
   const runtimeConfig = loadConfig();
   applyWindowRuntimeOverrides(runtimeConfig.config.window, options.env);
+  applyTerminalRuntimeOverrides(runtimeConfig.config.terminal, options.env);
   const enabled = Array.isArray(runtimeConfig.config.plugins?.enabled) ? runtimeConfig.config.plugins.enabled : [];
 
   console.log(`Config path: ${runtimeConfig.configPath}`);
@@ -292,11 +300,29 @@ function findTauriBinary() {
   const executable = process.platform === 'win32' ? 'fpasoterm.exe' : 'fpasoterm';
   for (const profile of ['release', 'debug']) {
     const candidate = path.join(root, 'src-tauri', 'target', profile, executable);
-    if (fs.existsSync(candidate)) {
+    if (fs.existsSync(candidate) && isBuiltBinaryCurrent(candidate)) {
       return candidate;
     }
   }
   return undefined;
+}
+
+// Avoids launching stale local target binaries after source checkout edits.
+function isBuiltBinaryCurrent(candidate) {
+  const binaryMtime = fs.statSync(candidate).mtimeMs;
+  return binaryMtime >= latestRuntimeSourceMtime();
+}
+
+// Tracks source files that require rebuilding the Tauri binary when changed.
+function latestRuntimeSourceMtime() {
+  return [
+    'src-tauri/src/main.rs',
+    'src-tauri/Cargo.toml',
+    'src-tauri/tauri.conf.json',
+  ]
+    .map((relativePath) => path.join(root, relativePath))
+    .filter((sourcePath) => fs.existsSync(sourcePath))
+    .reduce((latest, sourcePath) => Math.max(latest, fs.statSync(sourcePath).mtimeMs), 0);
 }
 
 // Resolves config before launching so the Rust runtime can stay focused on
@@ -305,6 +331,7 @@ function runtimeEnv(options) {
   applyEnv(options.env);
   const runtimeConfig = loadConfig();
   applyWindowRuntimeOverrides(runtimeConfig.config.window, options.env);
+  applyTerminalRuntimeOverrides(runtimeConfig.config.terminal, options.env);
   runtimeConfig.diagnostics = {
     debugKeys: options.env.FPASOTERM_DEBUG_KEYS === '1' || process.env.FPASOTERM_DEBUG_KEYS === '1',
     consoleDiagnostics:
@@ -318,6 +345,13 @@ function runtimeEnv(options) {
     ...options.env,
     FPASOTERM_RUNTIME_CONFIG_JSON: JSON.stringify(runtimeConfig),
   };
+}
+
+// Applies one-shot CLI terminal overrides after config resolution.
+function applyTerminalRuntimeOverrides(terminalConfig, env) {
+  if (env.FPASOTERM_SHELL) {
+    terminalConfig.shell = env.FPASOTERM_SHELL;
+  }
 }
 
 // Applies one-shot CLI window overrides after config and saved state resolution.
@@ -342,7 +376,7 @@ function launch(options) {
     detached: !options.foreground,
     env: runtimeEnv(options),
     stdio: options.foreground ? 'inherit' : 'ignore',
-    windowsHide: false,
+    windowsHide: !options.foreground,
   });
 
   if (!options.foreground) {

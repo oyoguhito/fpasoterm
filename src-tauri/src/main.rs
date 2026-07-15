@@ -1,4 +1,6 @@
-use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+#![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
+
+use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
@@ -87,7 +89,7 @@ struct WindowBounds {
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
-    child: Box<dyn Child + Send + Sync>,
+    killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
 }
 
 #[derive(Default)]
@@ -218,8 +220,10 @@ fn runtime_config() -> RuntimeConfig {
 }
 
 fn default_runtime_config() -> RuntimeConfig {
-    let home = env::var("HOME").unwrap_or_else(|_| ".".to_string());
+    let home = home_dir();
     let config_dir = format!("{home}/.config/fpasoterm/User");
+    let config_path =
+        env::var("FPASOTERM_CONFIG_PATH").unwrap_or_else(|_| format!("{config_dir}/config.toml"));
     let window_state_path = format!("{config_dir}/window-state.json");
     let mut window = WindowConfig {
         width: 1000,
@@ -246,6 +250,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace",
                 "fontSize": 14,
                 "scrollback": 1000,
+                "shell": read_configured_shell(&config_path).unwrap_or_default(),
                 "theme": {
                     "background": "rgba(16, 19, 23, 0.80)",
                     "foreground": "#e8edf2",
@@ -261,7 +266,7 @@ fn default_runtime_config() -> RuntimeConfig {
             plugins: serde_json::json!({ "enabled": [] }),
         },
         config_dir: config_dir.clone(),
-        config_path: format!("{config_dir}/config.toml"),
+        config_path,
         plugin_urls: Vec::new(),
         window_state_path,
         diagnostics: Some(DiagnosticsConfig {
@@ -272,6 +277,23 @@ fn default_runtime_config() -> RuntimeConfig {
             ),
         }),
     }
+}
+
+fn home_dir() -> String {
+    env::var("HOME")
+        .or_else(|_| env::var("USERPROFILE"))
+        .unwrap_or_else(|_| ".".to_string())
+}
+
+fn read_configured_shell(config_path: &str) -> Option<String> {
+    let value: toml::Value = toml::from_str(&fs::read_to_string(config_path).ok()?).ok()?;
+    value
+        .get("terminal")?
+        .get("shell")?
+        .as_str()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
 }
 
 fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
@@ -332,7 +354,25 @@ fn macos_login_shell() -> Option<String> {
         .filter(|value| value.starts_with('/'))
 }
 
-fn shell_command() -> String {
+fn configured_shell(config: &Config) -> Option<String> {
+    config
+        .terminal
+        .get("shell")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn shell_command(config: &Config) -> String {
+    if let Ok(shell) = env::var("FPASOTERM_SHELL") {
+        if !shell.trim().is_empty() {
+            return shell;
+        }
+    }
+    if let Some(shell) = configured_shell(config) {
+        return shell;
+    }
     if cfg!(windows) {
         env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
     } else if cfg!(target_os = "macos") {
@@ -363,7 +403,8 @@ fn terminal_start(
         })
         .map_err(|error| error.to_string())?;
 
-    let shell = shell_command();
+    let config = runtime_config();
+    let shell = shell_command(&config.config);
     append_diagnostic(
         &app,
         &format!(
@@ -375,13 +416,14 @@ fn terminal_start(
     if !cfg!(windows) {
         command.arg("-i");
     }
-    command.cwd(env::var("HOME").unwrap_or_else(|_| ".".to_string()));
+    command.cwd(home_dir());
     command.env("TERM_PROGRAM", "fpasoterm");
 
-    let child = pair
+    let mut child = pair
         .slave
         .spawn_command(command)
         .map_err(|error| error.to_string())?;
+    let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -393,6 +435,7 @@ fn terminal_start(
     ));
     let writer_for_state = Arc::clone(&writer);
     let app_for_reader = app.clone();
+    let app_for_wait = app.clone();
 
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
@@ -412,8 +455,19 @@ fn terminal_start(
                 }
             }
         }
-        let _ = app_for_reader.emit("terminal:exit", TerminalExit { exit_code: None });
-        if let Some(window) = app_for_reader.get_webview_window("main") {
+        append_diagnostic(&app_for_reader, "terminal reader ended");
+    });
+
+    std::thread::spawn(move || {
+        let exit_code = match child.wait() {
+            Ok(status) => Some(status.exit_code() as i32),
+            Err(error) => {
+                append_diagnostic(&app_for_wait, &format!("terminal wait error: {error}"));
+                None
+            }
+        };
+        let _ = app_for_wait.emit("terminal:exit", TerminalExit { exit_code });
+        if let Some(window) = app_for_wait.get_webview_window("main") {
             let _ = window.close();
         }
     });
@@ -429,7 +483,7 @@ fn terminal_start(
     *terminal = Some(TerminalSession {
         master: pair.master,
         writer: writer_for_state,
-        child,
+        killer,
     });
     Ok(())
 }
@@ -552,6 +606,8 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
 
 impl Drop for TerminalSession {
     fn drop(&mut self) {
-        let _ = self.child.kill();
+        if let Ok(mut killer) = self.killer.lock() {
+            let _ = killer.kill();
+        }
     }
 }

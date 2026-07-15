@@ -127,6 +127,7 @@ Useful one-shot overrides:
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm --size 1200x760
 fpasoterm --width 1200 --height 760
+fpasoterm --shell pwsh.exe
 fpasoterm --command "tmux attach -t work"
 fpasoterm --reset-window-state
 ```

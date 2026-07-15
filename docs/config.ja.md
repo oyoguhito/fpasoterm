@@ -32,6 +32,13 @@ fpasoterm --size 1200x760
 fpasoterm --command "tmux attach -t work"
 ```
 
+一度だけ別の shell を使う場合:
+
+```sh
+fpasoterm --shell pwsh.exe
+fpasoterm --shell cmd.exe
+```
+
 保存済みウィンドウサイズを削除する場合:
 
 ```sh
@@ -74,6 +81,7 @@ cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
 fontSize = 14
 scrollback = 1000
+shell = ""
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
@@ -109,7 +117,7 @@ enabled = []
 ## セクション
 
 - `window`: 初期ウィンドウサイズ、最小サイズ、背景色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。
-- `terminal`: terminal 作成時に渡す xterm.js options。
+- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` は一度だけこの設定を上書きします。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 

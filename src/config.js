@@ -25,6 +25,7 @@ const defaultConfig = Object.freeze({
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
     scrollback: 1000,
+    shell: '',
     theme: {
       background: 'rgba(16, 19, 23, 0.80)',
       foreground: '#e8edf2',
@@ -86,6 +87,9 @@ cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \\"Noto Sans Mono CJK JP\\", monospace"
 fontSize = 14
 scrollback = 1000
+# shell overrides the platform default when non-empty.
+# Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
+shell = ""
 
 # Terminal color palette.
 [terminal.theme]
