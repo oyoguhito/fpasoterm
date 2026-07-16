@@ -129,7 +129,15 @@ fpasoterm --size 1200x760
 fpasoterm --width 1200 --height 760
 fpasoterm --shell pwsh.exe
 fpasoterm --command "tmux attach -t work"
+fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm --reset-window-state
+```
+
+Short options are available for common one-shot overrides:
+
+```sh
+fpasoterm -t work -b '#2e7d32' -z 1200x760 -s pwsh.exe
+fpasoterm -e "tmux attach -t work"
 ```
 
 Inspect the resolved settings and plugin load status without launching:
@@ -219,7 +227,7 @@ The IME duplicate guard can be adjusted from `config.toml`. If a specific enviro
 
 When `window.rememberBounds` is enabled, fpasoterm stores the last window size locally in `~/.config/fpasoterm/User/window-state.json`.
 
-Window size is resolved in this order: default settings, explicit `window.width` / `window.height` values in `config.toml`, saved `window-state.json`, then one-shot CLI overrides such as `--size`.
+Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`.
 
 To return to the configured or default size manually, set `window.rememberBounds = false`, or run:
 
@@ -353,6 +361,16 @@ fpasoterm --help
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm --size 1200x760
 fpasoterm --width 1200 --height 760
+fpasoterm --shell /bin/fish
+fpasoterm --command "tmux attach -t work"
+fpasoterm --title work --titlebar-color '#2e7d32'
+```
+
+よく使う一時指定には短縮形も使えます。
+
+```sh
+fpasoterm -t work -b '#2e7d32' -z 1200x760 -s /bin/fish
+fpasoterm -e "tmux attach -t work"
 ```
 
 起動せずに解決済み設定と plugin 読み込み状況を確認:

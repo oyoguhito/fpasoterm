@@ -2,8 +2,10 @@
 # Copy this to ~/.config/fpasoterm/User/config.toml and edit as needed.
 
 [window]
+title = "fpasoterm"
 width = 1000
 height = 680
+titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 14
