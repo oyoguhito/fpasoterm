@@ -92,7 +92,7 @@ Tagged GitHub Releases build the broader release set in GitHub Actions:
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.0.5_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.1.0_arm64-linux-arm64.deb
 ```
 
 ## 日本語
@@ -171,7 +171,7 @@ tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.0.5_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.1.0_arm64-linux-arm64.deb
 ```
 
 ## Linux Desktop Entry

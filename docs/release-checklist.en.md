@@ -17,8 +17,8 @@ npm run build:artifacts
 Create and push a version tag after the release PR is merged:
 
 ```sh
-git tag v1.0.5
-git push origin v1.0.5
+git tag v1.1.0
+git push origin v1.1.0
 ```
 
 The `Release` workflow validates that the tag version matches `package.json`, builds `artifacts/`, and attaches the generated files to the GitHub Release.

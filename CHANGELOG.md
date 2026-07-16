@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.1.0
+
+- Added configurable custom titlebar titles and colors via config and one-shot CLI options.
+- Added short CLI aliases for common launch options.
+- Added custom titlebar minimize and maximize/restore controls.
+- Documented titlebar options in English and Japanese.
+
 ## 1.0.5
 
 - Fixed direct packaged app argument parsing so `fpasoterm.exe --shell pwsh.exe` selects the requested shell.
