@@ -13,6 +13,7 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, 
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Complete runtime configuration shared with the renderer.
 struct RuntimeConfig {
     config: Config,
     config_dir: String,
@@ -23,6 +24,7 @@ struct RuntimeConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+// User-facing configuration grouped by the TOML sections.
 struct Config {
     window: WindowConfig,
     terminal: serde_json::Value,
@@ -32,18 +34,22 @@ struct Config {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Window settings that Tauri must know before the renderer is fully ready.
 struct WindowConfig {
+    title: String,
     width: u32,
     height: u32,
     min_width: u32,
     min_height: u32,
     background_color: String,
+    titlebar_color: String,
     theme_source: String,
     frame: bool,
     remember_bounds: bool,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+// Resolved plugin script URL exposed to the renderer.
 struct PluginUrl {
     name: String,
     url: String,
@@ -51,6 +57,7 @@ struct PluginUrl {
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Diagnostics switches passed from the launcher to the backend and renderer.
 struct DiagnosticsConfig {
     debug_keys: bool,
     console_diagnostics: bool,
@@ -58,18 +65,21 @@ struct DiagnosticsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+// Current xterm.js grid size reported by the renderer.
 struct TerminalSize {
     cols: u16,
     rows: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
+// Terminal exit payload emitted to the renderer before the window closes.
 struct TerminalExit {
     exit_code: Option<i32>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
+// Optional window bounds requested by the renderer.
 struct WindowBoundsRequest {
     x: Option<i32>,
     y: Option<i32>,
@@ -79,6 +89,7 @@ struct WindowBoundsRequest {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+// Current window bounds returned to the renderer.
 struct WindowBounds {
     x: i32,
     y: i32,
@@ -86,6 +97,7 @@ struct WindowBounds {
     height: u32,
 }
 
+// Owns the native PTY session and child shell handles.
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
@@ -93,11 +105,13 @@ struct TerminalSession {
 }
 
 #[derive(Default)]
+// Shared runtime state for the active PTY session and recent diagnostics.
 struct AppState {
     terminal: Mutex<Option<TerminalSession>>,
     diagnostics: Mutex<VecDeque<String>>,
 }
 
+// Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     if env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
         && env::var("FPASOTERM_DISABLE_DMABUF").as_deref() == Ok("1")
@@ -112,6 +126,7 @@ fn main() {
             if let Some(window) = app.get_webview_window("main") {
                 let restore_size =
                     PhysicalSize::new(config.config.window.width, config.config.window.height);
+                let _ = window.set_title(&config.config.window.title);
                 let _ = window.set_size(restore_size);
                 append_diagnostic(
                     app.handle(),
@@ -146,6 +161,8 @@ fn main() {
             diagnostics_log,
             config_get,
             window_close,
+            window_minimize,
+            window_toggle_maximize,
             window_start_drag,
             window_save_bounds,
             window_get_bounds,
@@ -155,6 +172,7 @@ fn main() {
         .expect("failed to run fpasoterm");
 }
 
+// Re-applies the requested startup size after the webview has settled.
 fn schedule_window_size_restore(
     app: AppHandle,
     window: tauri::WebviewWindow,
@@ -168,6 +186,7 @@ fn schedule_window_size_restore(
     });
 }
 
+// Persists window size whenever Tauri reports a resize event.
 fn install_window_state_persistence(
     window: tauri::WebviewWindow,
     state_path: String,
@@ -186,11 +205,13 @@ fn install_window_state_persistence(
     });
 }
 
+// Reads current native window size and writes it to the user state file.
 fn save_window_state(window: &tauri::WebviewWindow, state_path: &str) -> Result<(), String> {
     let size = window.outer_size().map_err(|error| error.to_string())?;
     save_window_size(size, state_path)
 }
 
+// Stores only width and height so unsupported historical x/y state is ignored.
 fn save_window_size(size: PhysicalSize<u32>, state_path: &str) -> Result<(), String> {
     let state = serde_json::json!({
         "window": {
@@ -208,10 +229,12 @@ fn save_window_size(size: PhysicalSize<u32>, state_path: &str) -> Result<(), Str
     .map_err(|error| error.to_string())
 }
 
+// Returns the window state path from the resolved runtime config.
 fn window_state_path() -> String {
     runtime_config().window_state_path
 }
 
+// Loads launcher-provided JSON config, falling back to direct binary parsing.
 fn runtime_config() -> RuntimeConfig {
     env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
         .ok()
@@ -219,20 +242,31 @@ fn runtime_config() -> RuntimeConfig {
         .unwrap_or_else(default_runtime_config)
 }
 
+// Builds a minimal config when the Tauri binary is started without the Node launcher.
 fn default_runtime_config() -> RuntimeConfig {
     let home = home_dir();
     let config_dir = format!("{home}/.config/fpasoterm/User");
     let config_path = env::var("FPASOTERM_CONFIG_PATH")
         .ok()
-        .or_else(|| cli_option_value("--config"))
+        .or_else(|| cli_option_value_any(&["--config", "-c"]))
         .unwrap_or_else(|| format!("{config_dir}/config.toml"));
     let window_state_path = format!("{config_dir}/window-state.json");
     let mut window = WindowConfig {
+        title: env::var("FPASOTERM_WINDOW_TITLE")
+            .ok()
+            .or_else(|| cli_option_value_any(&["--title", "-t"]))
+            .or_else(|| read_configured_string(&config_path, "window", "title"))
+            .unwrap_or_else(|| "fpasoterm".to_string()),
         width: 1000,
         height: 680,
         min_width: 420,
         min_height: 260,
         background_color: "rgba(0, 0, 0, 0)".to_string(),
+        titlebar_color: env::var("FPASOTERM_TITLEBAR_COLOR")
+            .ok()
+            .or_else(|| cli_option_value_any(&["--titlebar-color", "-b"]))
+            .or_else(|| read_configured_string(&config_path, "window", "titlebarColor"))
+            .unwrap_or_else(|| "#1565c0".to_string()),
         theme_source: "system".to_string(),
         frame: false,
         remember_bounds: true,
@@ -281,23 +315,36 @@ fn default_runtime_config() -> RuntimeConfig {
     }
 }
 
+// Resolves the user's home directory on Unix-like systems and Windows.
 fn home_dir() -> String {
     env::var("HOME")
         .or_else(|_| env::var("USERPROFILE"))
         .unwrap_or_else(|_| ".".to_string())
 }
 
-fn read_configured_shell(config_path: &str) -> Option<String> {
+// Reads a non-empty string from a specific TOML section and key.
+fn read_configured_string(config_path: &str, section: &str, key: &str) -> Option<String> {
     let value: toml::Value = toml::from_str(&fs::read_to_string(config_path).ok()?).ok()?;
     value
-        .get("terminal")?
-        .get("shell")?
+        .get(section)?
+        .get(key)?
         .as_str()
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .map(str::to_string)
 }
 
+// Reads terminal.shell from config.toml.
+fn read_configured_shell(config_path: &str) -> Option<String> {
+    read_configured_string(config_path, "terminal", "shell")
+}
+
+// Returns the first value found for a set of equivalent long and short flags.
+fn cli_option_value_any(flags: &[&str]) -> Option<String> {
+    flags.iter().find_map(|flag| cli_option_value(flag))
+}
+
+// Parses both `--flag value` and `--flag=value` direct binary arguments.
 fn cli_option_value(flag: &str) -> Option<String> {
     let equals_prefix = format!("{flag}=");
     let mut args = env::args().skip(1);
@@ -318,6 +365,7 @@ fn cli_option_value(flag: &str) -> Option<String> {
     None
 }
 
+// Reads saved window width and height, rejecting zero or out-of-range values.
 fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
     let value: serde_json::Value =
         serde_json::from_str(&fs::read_to_string(state_path).ok()?).ok()?;
@@ -330,6 +378,7 @@ fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
     Some((width as u32, height as u32))
 }
 
+// Adds one diagnostic message to memory, optional stderr, and the renderer event stream.
 fn append_diagnostic(app: &AppHandle, message: &str) {
     let line = format!("{} {}", chrono_like_timestamp(), message);
     if let Some(state) = app.try_state::<AppState>() {
@@ -353,6 +402,7 @@ fn append_diagnostic(app: &AppHandle, message: &str) {
     );
 }
 
+// Produces a UTC timestamp without pulling in an additional Rust time crate.
 fn chrono_like_timestamp() -> String {
     Command::new("date")
         .arg("-u")
@@ -365,6 +415,7 @@ fn chrono_like_timestamp() -> String {
         .unwrap_or_else(|| "1970-01-01T00:00:00Z".to_string())
 }
 
+// Reads the configured macOS login shell from the local directory service.
 fn macos_login_shell() -> Option<String> {
     let user = env::var("USER").ok()?;
     Command::new("dscl")
@@ -376,6 +427,7 @@ fn macos_login_shell() -> Option<String> {
         .filter(|value| value.starts_with('/'))
 }
 
+// Extracts a non-empty terminal.shell value from the resolved JSON config.
 fn configured_shell(config: &Config) -> Option<String> {
     config
         .terminal
@@ -386,13 +438,14 @@ fn configured_shell(config: &Config) -> Option<String> {
         .map(str::to_string)
 }
 
+// Chooses the shell in environment, CLI, config, then platform-default order.
 fn shell_command(config: &Config) -> String {
     if let Ok(shell) = env::var("FPASOTERM_SHELL") {
         if !shell.trim().is_empty() {
             return shell;
         }
     }
-    if let Some(shell) = cli_option_value("--shell") {
+    if let Some(shell) = cli_option_value_any(&["--shell", "-s"]) {
         return shell;
     }
     if let Some(shell) = configured_shell(config) {
@@ -408,6 +461,7 @@ fn shell_command(config: &Config) -> String {
 }
 
 #[tauri::command]
+// Creates the PTY, starts the configured shell, and bridges output to the renderer.
 fn terminal_start(
     app: AppHandle,
     state: State<AppState>,
@@ -514,6 +568,7 @@ fn terminal_start(
 }
 
 #[tauri::command]
+// Writes renderer keyboard/input data into the active PTY.
 fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
     let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
@@ -530,6 +585,7 @@ fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Resizes the active PTY to match the xterm.js grid.
 fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), String> {
     let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
@@ -550,6 +606,7 @@ fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), Str
 }
 
 #[tauri::command]
+// Returns recent diagnostics as plain text for copying from the UI.
 fn diagnostics_copy(state: State<AppState>) -> Result<String, String> {
     let diagnostics = state
         .diagnostics
@@ -559,21 +616,25 @@ fn diagnostics_copy(state: State<AppState>) -> Result<String, String> {
 }
 
 #[tauri::command]
+// Keeps the renderer's diagnostics path display compatible with the old UI.
 fn diagnostics_path() -> String {
     "diagnostics are kept in memory by the Tauri runtime".to_string()
 }
 
 #[tauri::command]
+// Lets the renderer append messages to the backend diagnostics ring buffer.
 fn diagnostics_log(app: AppHandle, message: String) {
     append_diagnostic(&app, &message);
 }
 
 #[tauri::command]
+// Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
     runtime_config()
 }
 
 #[tauri::command]
+// Closes the main application window.
 fn window_close(app: AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
         let _ = window.close();
@@ -581,6 +642,29 @@ fn window_close(app: AppHandle) {
 }
 
 #[tauri::command]
+// Minimizes the main application window from the custom titlebar.
+fn window_minimize(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    window.minimize().map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+// Toggles the main window between maximized and restored states.
+fn window_toggle_maximize(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    if window.is_maximized().map_err(|error| error.to_string())? {
+        window.unmaximize().map_err(|error| error.to_string())
+    } else {
+        window.maximize().map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
+// Starts native dragging from the custom titlebar.
 fn window_start_drag(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -589,6 +673,7 @@ fn window_start_drag(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Explicitly saves current window size when requested by the renderer.
 fn window_save_bounds(app: AppHandle) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -597,6 +682,7 @@ fn window_save_bounds(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Returns current native window bounds to the renderer.
 fn window_get_bounds(app: AppHandle) -> Result<WindowBounds, String> {
     let window = app
         .get_webview_window("main")
@@ -612,6 +698,7 @@ fn window_get_bounds(app: AppHandle) -> Result<WindowBounds, String> {
 }
 
 #[tauri::command]
+// Applies renderer-requested size or position changes to the native window.
 fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), String> {
     let window = app
         .get_webview_window("main")
@@ -630,6 +717,7 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
 }
 
 impl Drop for TerminalSession {
+    // Terminates the child shell when the session is dropped.
     fn drop(&mut self) {
         if let Ok(mut killer) = self.killer.lock() {
             let _ = killer.kill();

@@ -19,23 +19,25 @@ const {
 const helpText = `Usage: fpasoterm [options]
 
 Options:
-  --help                    Show this help.
-  --dev                     Force Tauri dev runtime, ignoring built binaries.
-  --foreground              Keep the launcher attached to the current console.
-  --console-diagnostics     Print diagnostics to stderr as well as the log file.
-  --config <path>           Use a specific config.toml for this launch.
-  --show-config             Print resolved settings and plugin load status, then exit.
-  --shell <command>         Override the configured shell for this launch.
-  --command <command>       Send a command to the shell after launch.
-  --reset-window-state      Delete saved window size, then exit.
-  --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
-  --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
-  --width <px>              Override the configured window width for this launch.
-  --height <px>             Override the configured window height for this launch.
-  --size <width>x<height>   Override both window dimensions for this launch.
-  --debug-keys              Enable key/composition diagnostics.
-  --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
-  --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
+  -h, --help                    Show this help.
+  -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
+  -F, --foreground              Keep the launcher attached to the current console.
+  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
+  -c, --config <path>           Use a specific config.toml for this launch.
+      --show-config             Print resolved settings and plugin load status, then exit.
+  -s, --shell <command>         Override the configured shell for this launch.
+  -e, --command <command>       Send a command to the shell after launch.
+  -t, --title <text>            Override the titlebar title for this launch.
+  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.
+  -r, --reset-window-state      Delete saved window size, then exit.
+      --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
+      --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
+  -W, --width <px>              Override the configured window width for this launch.
+  -H, --height <px>             Override the configured window height for this launch.
+  -z, --size <width>x<height>   Override both window dimensions for this launch.
+  -k, --debug-keys              Enable key/composition diagnostics.
+      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
+      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
 Normal launches detach from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
@@ -60,12 +62,12 @@ function parseArgs(argv) {
       return { help: true };
     }
 
-    if (arg === '--foreground') {
+    if (arg === '--foreground' || arg === '-F') {
       foreground = true;
       continue;
     }
 
-    if (arg === '--dev') {
+    if (arg === '--dev' || arg === '-d') {
       dev = true;
       continue;
     }
@@ -75,19 +77,31 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--reset-window-state') {
+    if (arg === '--reset-window-state' || arg === '-r') {
       resetWindowState = true;
       continue;
     }
 
-    if (arg === '--command') {
+    if (arg === '--command' || arg === '-e') {
       startCommand = requireValue(argv, index, arg);
       index += 1;
       continue;
     }
 
-    if (arg === '--shell') {
+    if (arg === '--shell' || arg === '-s') {
       env.FPASOTERM_SHELL = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--title' || arg === '-t') {
+      env.FPASOTERM_WINDOW_TITLE = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--titlebar-color' || arg === '-b') {
+      env.FPASOTERM_TITLEBAR_COLOR = requireValue(argv, index, arg);
       index += 1;
       continue;
     }
@@ -104,12 +118,12 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--console-diagnostics') {
+    if (arg === '--console-diagnostics' || arg === '-C') {
       env.FPASOTERM_CONSOLE_DIAGNOSTICS = '1';
       continue;
     }
 
-    if (arg === '--debug-keys') {
+    if (arg === '--debug-keys' || arg === '-k') {
       env.FPASOTERM_DEBUG_KEYS = '1';
       continue;
     }
@@ -125,25 +139,25 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--config') {
+    if (arg === '--config' || arg === '-c') {
       env.FPASOTERM_CONFIG_PATH = requireValue(argv, index, arg);
       index += 1;
       continue;
     }
 
-    if (arg === '--width') {
+    if (arg === '--width' || arg === '-W') {
       env.FPASOTERM_WINDOW_WIDTH = requirePositiveInteger(requireValue(argv, index, arg), arg);
       index += 1;
       continue;
     }
 
-    if (arg === '--height') {
+    if (arg === '--height' || arg === '-H') {
       env.FPASOTERM_WINDOW_HEIGHT = requirePositiveInteger(requireValue(argv, index, arg), arg);
       index += 1;
       continue;
     }
 
-    if (arg === '--size') {
+    if (arg === '--size' || arg === '-z') {
       const value = requireValue(argv, index, arg);
       const match = value.match(/^(\d+)x(\d+)$/i);
       if (!match) {
@@ -356,6 +370,12 @@ function applyTerminalRuntimeOverrides(terminalConfig, env) {
 
 // Applies one-shot CLI window overrides after config and saved state resolution.
 function applyWindowRuntimeOverrides(windowConfig, env) {
+  if (env.FPASOTERM_WINDOW_TITLE) {
+    windowConfig.title = env.FPASOTERM_WINDOW_TITLE;
+  }
+  if (env.FPASOTERM_TITLEBAR_COLOR) {
+    windowConfig.titlebarColor = env.FPASOTERM_TITLEBAR_COLOR;
+  }
   if (env.FPASOTERM_WINDOW_WIDTH) {
     windowConfig.width = Number(env.FPASOTERM_WINDOW_WIDTH);
   }

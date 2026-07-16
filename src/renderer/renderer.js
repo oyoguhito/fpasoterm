@@ -4,6 +4,9 @@ const diagnosticsElement = document.getElementById('diagnostics');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
 const closeWindowButton = document.getElementById('close-window');
+const minimizeWindowButton = document.getElementById('minimize-window');
+const maximizeWindowButton = document.getElementById('maximize-window');
+const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
@@ -11,6 +14,8 @@ let terminalMirrorText = '';
 const fallbackConfig = {
   window: {
     backgroundColor: 'rgba(0, 0, 0, 0)',
+    title: 'fpasoterm',
+    titlebarColor: '#1565c0',
   },
   terminal: {
     allowTransparency: true,
@@ -97,6 +102,8 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     getConfig: () => invoke('config_get'),
     closeWindow: () => invoke('window_close'),
+    minimizeWindow: () => invoke('window_minimize'),
+    toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
     startWindowDrag: () => invoke('window_start_drag'),
     startWindowResizeDrag: (direction) => window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction),
     saveWindowBounds: () => invoke('window_save_bounds'),
@@ -385,8 +392,15 @@ function applyWindowAppearance() {
   const windowConfig = appConfig.window || {};
   document.documentElement.classList.toggle('frameless-window', windowConfig.frame === false);
   const background = windowConfig.backgroundColor || fallbackConfig.window.backgroundColor;
+  const title = windowConfig.title || fallbackConfig.window.title;
+  const titlebarColor = windowConfig.titlebarColor || fallbackConfig.window.titlebarColor;
   document.documentElement.style.background = background;
   document.body.style.background = background;
+  document.title = title;
+  if (windowTitleElement) {
+    windowTitleElement.textContent = title;
+  }
+  document.documentElement.style.setProperty('--titlebar-background', titlebarColor);
 }
 
 // Removes xterm.js visual-only overlay DOM that can appear as fixed garbled text on macOS.
@@ -547,9 +561,23 @@ closeWindowButton.addEventListener('click', () => {
   window.fpasoterm.closeWindow();
 });
 
+// Minimizes the frameless window from the custom titlebar.
+minimizeWindowButton.addEventListener('click', () => {
+  window.fpasoterm.minimizeWindow?.().catch((error) => {
+    showDiagnostic(`window minimize failed: ${error}`);
+  });
+});
+
+// Toggles maximized state from the custom titlebar.
+maximizeWindowButton.addEventListener('click', () => {
+  window.fpasoterm.toggleMaximizeWindow?.().catch((error) => {
+    showDiagnostic(`window maximize failed: ${error}`);
+  });
+});
+
 // Starts native window dragging from the custom titlebar on Tauri.
 document.getElementById('drag-region').addEventListener('pointerdown', (event) => {
-  if (event.button !== 0 || event.target === closeWindowButton) {
+  if (event.button !== 0 || event.target.closest('#window-controls')) {
     return;
   }
   event.preventDefault();

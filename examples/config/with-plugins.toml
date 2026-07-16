@@ -2,8 +2,10 @@
 # The plugin paths are relative to ~/.config/fpasoterm/User/.
 
 [window]
+title = "fpasoterm plugins"
 width = 1200
 height = 760
+titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 15

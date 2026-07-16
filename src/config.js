@@ -9,11 +9,13 @@ const ts = require('typescript');
 // fill missing keys when a user provides a partial config.toml.
 const defaultConfig = Object.freeze({
   window: {
+    title: 'fpasoterm',
     width: 1000,
     height: 680,
     minWidth: 420,
     minHeight: 260,
     backgroundColor: 'rgba(0, 0, 0, 0)',
+    titlebarColor: '#1565c0',
     themeSource: 'system',
     frame: false,
     rememberBounds: true,
@@ -67,11 +69,14 @@ function defaultConfigExample() {
 
 # Window options are applied when the application window is created.
 [window]
+title = "fpasoterm"
 width = 1000
 height = 680
 minWidth = 420
 minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
+# titlebarColor controls the custom titlebar background when frame is false.
+titlebarColor = "#1565c0"
 # themeSource can be "system", "light", or "dark".
 themeSource = "system"
 # frame controls whether the native window frame/titlebar is shown.

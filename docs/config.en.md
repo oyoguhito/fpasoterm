@@ -18,18 +18,28 @@ Use another config file for one launch:
 
 ```sh
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
+fpasoterm -c ~/.config/fpasoterm/User/work.toml
 ```
 
 Temporarily override the configured window size:
 
 ```sh
 fpasoterm --size 1200x760
+fpasoterm -z 1200x760
+```
+
+Temporarily override the titlebar title or color. This is useful when multiple fpasoterm windows are open:
+
+```sh
+fpasoterm --title work --titlebar-color '#2e7d32'
+fpasoterm -t logs -b '#6a1b9a'
 ```
 
 Run a command in the shell after launch:
 
 ```sh
 fpasoterm --command "tmux attach -t work"
+fpasoterm -e "tmux attach -t work"
 ```
 
 Use another shell for one launch:
@@ -37,6 +47,7 @@ Use another shell for one launch:
 ```sh
 fpasoterm --shell pwsh.exe
 fpasoterm --shell cmd.exe
+fpasoterm -s /usr/bin/fish
 ```
 
 Delete the saved window size:
@@ -66,11 +77,13 @@ one subdirectory, specify its plugins-relative path, such as `group/hello.ts`.
 
 ```toml
 [window]
+title = "fpasoterm"
 width = 1000
 height = 680
 minWidth = 420
 minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
+titlebarColor = "#1565c0"
 themeSource = "system"
 rememberBounds = true
 frame = false
@@ -116,14 +129,14 @@ enabled = []
 
 ## Sections
 
-- `window`: initial window size, minimum size, background color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`.
-- `terminal`: xterm.js options passed when the terminal is created. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` overrides this for one launch.
+- `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
+- `terminal`: xterm.js options passed when the terminal is created. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
-Window size is resolved in this order: default settings, explicit `window.width` / `window.height` values in `config.toml`, saved `window-state.json`, then one-shot CLI overrides such as `--size`. If you want config changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
+Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
 TOML does not allow the same table to be defined more than once. To test values such as `frame = true`, edit the existing `[window]` section. Adding another `[window]` section at the end of the file causes a config parse error.
 

@@ -18,18 +18,28 @@ fpasoterm はユーザー編集用の設定を以下から読み込みます。
 
 ```sh
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
+fpasoterm -c ~/.config/fpasoterm/User/work.toml
 ```
 
 設定済みウィンドウサイズを一時的に上書きする場合:
 
 ```sh
 fpasoterm --size 1200x760
+fpasoterm -z 1200x760
+```
+
+titlebar の表示名や色を一時的に上書きする場合。複数ウィンドウを開いた時の識別に使えます。
+
+```sh
+fpasoterm --title work --titlebar-color '#2e7d32'
+fpasoterm -t logs -b '#6a1b9a'
 ```
 
 起動後に shell でコマンドを実行する場合:
 
 ```sh
 fpasoterm --command "tmux attach -t work"
+fpasoterm -e "tmux attach -t work"
 ```
 
 一度だけ別の shell を使う場合:
@@ -37,6 +47,7 @@ fpasoterm --command "tmux attach -t work"
 ```sh
 fpasoterm --shell pwsh.exe
 fpasoterm --shell cmd.exe
+fpasoterm -s /usr/bin/fish
 ```
 
 保存済みウィンドウサイズを削除する場合:
@@ -66,11 +77,13 @@ plugin 操作は `User/plugins` 配下のファイル名で選択します。複
 
 ```toml
 [window]
+title = "fpasoterm"
 width = 1000
 height = 680
 minWidth = 420
 minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
+titlebarColor = "#1565c0"
 themeSource = "system"
 rememberBounds = true
 frame = false
@@ -116,14 +129,14 @@ enabled = []
 
 ## セクション
 
-- `window`: 初期ウィンドウサイズ、最小サイズ、背景色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。
-- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` は一度だけこの設定を上書きします。
+- `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
+- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 
-window size は、デフォルト設定、`config.toml` に明示した `window.width` / `window.height`、保存済み `window-state.json`、最後に `--size` などの一時 CLI 指定、の順に解決されます。設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
+window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
 TOML では同じ table を複数回定義できません。`frame = true` などを試す場合は、既存の `[window]` section 内の値を編集してください。ファイル末尾へ新しく `[window]` を追加すると config parse error になります。
 
