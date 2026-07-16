@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.1.0');
+assert.equal(packageJson.version, '1.2.0');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -58,9 +58,13 @@ for (const file of [
   'docs/known-issues.ja.md',
   'docs/spec.en.md',
   'docs/spec.ja.md',
+  'examples/apply-default-appearance.sh',
+  'examples/apply-runtime-appearance.sh',
   'examples/plugins/hello.ts',
   'examples/plugins/theme.ts',
+  'examples/config/default-appearance.toml',
   'examples/config/minimal.toml',
+  'examples/config/runtime-appearance.toml',
   'examples/config/with-plugins.toml',
   'extra/logo/fpasoterm.png',
   'extra/macos/fpasoterm.icns',
@@ -117,6 +121,8 @@ assert.match(bin, /--debug-opaque-terminal/);
 assert.match(bin, /--disable-dmabuf/);
 assert.match(bin, /WEBKIT_DISABLE_DMABUF_RENDERER/);
 assert.match(bin, /FPASOTERM_RUNTIME_CONFIG_JSON/);
+assert.match(bin, /FPASOTERM_LAUNCHER_LOG/);
+assert.match(bin, /appendLauncherLog/);
 assert.match(bin, /debugKeys/);
 assert.match(bin, /consoleDiagnostics/);
 assert.match(bin, /opaqueTerminal/);
@@ -250,6 +256,20 @@ const installDesktop = read('scripts/install-linux-desktop.js');
 assert.match(installDesktop, /XDG_BIN_HOME/);
 assert.match(installDesktop, /fpasoterm command/);
 assert.match(installDesktop, /APP_ROOT=/);
+assert.match(installDesktop, /buildLocalBinary/);
+assert.match(installDesktop, /cargo',\s*\[/);
+assert.match(installDesktop, /FPASOTERM_SKIP_DESKTOP_BUILD/);
+assert.match(installDesktop, /installDesktopEntry/);
+assert.match(installDesktop, /desktopExec/);
+assert.doesNotMatch(installDesktop, /TryExec=/);
+assert.match(installDesktop, /currentNodePath/);
+assert.match(installDesktop, /INSTALL_NODE=/);
+assert.match(installDesktop, /launcher\.log/);
+assert.match(installDesktop, /XDG_CACHE_HOME/);
+assert.match(installDesktop, /\.cargo\/bin/);
+assert.match(installDesktop, /FPASOTERM_LAUNCHER_LOG/);
+assert.match(installDesktop, /\/usr\/bin\/node/);
+assert.doesNotMatch(installDesktop, /mise exec node/);
 assert.match(installDesktop, /io\.github\.oyoguhito\.FpasoTerm\.desktop/);
 
 const uninstallDesktop = read('scripts/uninstall-linux-desktop.js');
@@ -258,9 +278,14 @@ assert.match(uninstallDesktop, /removed:/);
 assert.match(uninstallDesktop, /io\.github\.oyoguhito\.fpasoterm\.desktop/);
 assert.match(uninstallDesktop, /io\.github\.oyoguhito\.FpasoTerm\.desktop/);
 assert.match(uninstallDesktop, /fpasoterm\.png/);
+assert.match(uninstallDesktop, /XDG_CONFIG_HOME/);
+assert.match(uninstallDesktop, /XDG_CACHE_HOME/);
+assert.match(uninstallDesktop, /io\.github\.oyoguhito\.fpasoterm/);
+assert.match(uninstallDesktop, /removeDir/);
 
 const tauriConfig = read('src-tauri/tauri.conf.json');
 assert.match(tauriConfig, /"withGlobalTauri": true/);
+assert.match(tauriConfig, /"enableGTKAppId": true/);
 assert.match(tauriConfig, /"macOSPrivateApi": true/);
 assert.match(tauriConfig, /"macOS": \{/);
 assert.match(tauriConfig, /"signingIdentity": "-"/);
@@ -287,6 +312,12 @@ assert.match(rustMain, /terminal_start/);
 assert.match(rustMain, /terminal_write/);
 assert.match(rustMain, /terminal_resize/);
 assert.match(rustMain, /diagnostics:event/);
+assert.match(rustMain, /command\.env\("TERM", "xterm-256color"\)/);
+assert.match(rustMain, /TERM_PROGRAM/);
+assert.match(rustMain, /config_apply_path/);
+assert.match(rustMain, /runtime_config_from_path/);
+assert.match(rustMain, /merge_json_value/);
+assert.match(rustMain, /applied runtime config/);
 assert.match(rustMain, /terminal_write bytes/);
 assert.match(rustMain, /read_configured_shell/);
 assert.match(rustMain, /FPASOTERM_SHELL/);
@@ -313,11 +344,15 @@ assert.match(rustMain, /\.minimize\(\)/);
 assert.match(rustMain, /\.maximize\(\)/);
 assert.match(rustMain, /\.unmaximize\(\)/);
 assert.match(rustMain, /set_title/);
+assert.match(rustMain, /set_window_icon/);
+assert.match(rustMain, /default_window_icon/);
+assert.match(rustMain, /\.set_icon\(icon\.clone\(\)\)/);
 assert.match(rustMain, /PhysicalPosition/);
 assert.match(rustMain, /restoring window size/);
 assert.match(rustMain, /PhysicalSize::new\(config\.config\.window\.width/);
-assert.match(rustMain, /schedule_window_size_restore/);
-assert.match(rustMain, /Duration::from_millis\(350\)/);
+assert.match(rustMain, /schedule_startup_size_restore/);
+assert.match(rustMain, /Duration::from_millis\(650\)/);
+assert.match(rustMain, /startup window size restore requested/);
 assert.match(rustMain, /WindowEvent::Resized\(size\)/);
 assert.match(rustMain, /save_window_size\(\*size/);
 assert.doesNotMatch(rustMain, /WindowEvent::Moved/);
@@ -348,6 +383,11 @@ assert.match(readme, /--shell/);
 assert.match(readme, /--command/);
 assert.match(readme, /--reset-window-state/);
 assert.match(readme, /--disable-dmabuf/);
+assert.match(readme, /OSC 777|033\]777/);
+assert.match(readme, /examples\/config\/runtime-appearance\.toml/);
+assert.match(readme, /apply-runtime-appearance\.sh/);
+assert.match(readme, /\\a\\r\\n/);
+assert.match(readme, /Runtime config application keeps the current shell session running/);
 assert.match(readme, /window-state\.json/);
 assert.match(readme, /known-issues\.en\.md/);
 
@@ -360,12 +400,24 @@ assert.match(configDocsEn, /titlebarColor = "#1565c0"/);
 assert.match(configDocsEn, /rememberBounds = true/);
 assert.match(configDocsEn, /frame = false/);
 assert.match(configDocsEn, /allowTransparency = true/);
+assert.match(configDocsEn, /backgroundOpacity = 0\.8/);
+assert.match(configDocsEn, /termName = "xterm-256color"/);
 assert.match(configDocsEn, /fontSize = 14/);
 assert.match(configDocsEn, /shell = ""/);
 assert.match(configDocsEn, /pwsh\.exe/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);
 assert.match(configDocsEn, /window-state\.json/);
 assert.match(configDocsEn, /same table to be defined more than once/);
+assert.match(configDocsEn, /OSC 777/);
+assert.match(configDocsEn, /titlebarColor=#2e7d32/);
+assert.match(configDocsEn, /opacity=0\.65/);
+assert.match(configDocsEn, /examples\/config\/runtime-appearance\.toml/);
+assert.match(configDocsEn, /apply-runtime-appearance\.sh/);
+assert.match(configDocsEn, /RUNTIME SAMPLE ACTIVE/);
+assert.match(configDocsEn, /apply-default-appearance\.sh/);
+assert.match(configDocsEn, /\\a\\r\\n/);
+assert.match(configDocsEn, /Settings that require a new PTY/);
+assert.match(configDocsEn, /TERM=xterm-256color/);
 
 const configDocsJa = read('docs/config.ja.md');
 assert.match(configDocsJa, /全デフォルト/);
@@ -376,10 +428,22 @@ assert.match(configDocsJa, /titlebarColor = "#1565c0"/);
 assert.match(configDocsJa, /rememberBounds = true/);
 assert.match(configDocsJa, /frame = false/);
 assert.match(configDocsJa, /allowTransparency = true/);
+assert.match(configDocsJa, /backgroundOpacity = 0\.8/);
+assert.match(configDocsJa, /termName = "xterm-256color"/);
 assert.match(configDocsJa, /shell = ""/);
 assert.match(configDocsJa, /pwsh\.exe/);
 assert.match(configDocsJa, /window-state\.json/);
 assert.match(configDocsJa, /同じ table を複数回定義できません/);
+assert.match(configDocsJa, /OSC 777/);
+assert.match(configDocsJa, /titlebarColor=#2e7d32/);
+assert.match(configDocsJa, /opacity=0\.65/);
+assert.match(configDocsJa, /examples\/config\/runtime-appearance\.toml/);
+assert.match(configDocsJa, /apply-runtime-appearance\.sh/);
+assert.match(configDocsJa, /RUNTIME SAMPLE ACTIVE/);
+assert.match(configDocsJa, /apply-default-appearance\.sh/);
+assert.match(configDocsJa, /\\a\\r\\n/);
+assert.match(configDocsJa, /現在の shell session は維持されます/);
+assert.match(configDocsJa, /TERM=xterm-256color/);
 
 const knownIssuesEn = read('docs/known-issues.en.md');
 assert.match(knownIssuesEn, /ChromeOS\/Baguette Window Position/);
@@ -401,6 +465,34 @@ assert.match(sampleConfig, /\[plugins\]/);
 assert.match(sampleConfig, /plugins\/hello\.ts/);
 assert.match(sampleConfig, /shell = ""/);
 assert.match(sampleConfig, /titlebarColor = "#1565c0"/);
+assert.match(sampleConfig, /backgroundOpacity = 0\.8/);
+assert.match(sampleConfig, /termName = "xterm-256color"/);
+
+const runtimeConfig = read('examples/config/runtime-appearance.toml');
+assert.match(runtimeConfig, /title = "RUNTIME SAMPLE ACTIVE"/);
+assert.match(runtimeConfig, /titlebarColor = "#d81b60"/);
+assert.match(runtimeConfig, /# fontSize = 18/);
+assert.match(runtimeConfig, /# width = 1180/);
+assert.match(runtimeConfig, /backgroundOpacity = 0\.95/);
+assert.match(runtimeConfig, /background = "#32004f"/);
+assert.match(runtimeConfig, /foreground = "#fff176"/);
+assert.match(runtimeConfig, /cursor = "#00e5ff"/);
+
+const runtimeApplyScript = read('examples/apply-runtime-appearance.sh');
+assert.match(runtimeApplyScript, /runtime-appearance\.toml/);
+assert.match(runtimeApplyScript, /printf '\\033\]777;config=%s\\a\\r\\n'/);
+
+const defaultConfig = read('examples/config/default-appearance.toml');
+assert.match(defaultConfig, /title = "fpasoterm"/);
+assert.match(defaultConfig, /titlebarColor = "#1565c0"/);
+assert.match(defaultConfig, /backgroundOpacity = 0\.8/);
+assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.80\)"/);
+assert.match(defaultConfig, /foreground = "#e8edf2"/);
+assert.match(defaultConfig, /cursor = "#f5d76e"/);
+
+const defaultApplyScript = read('examples/apply-default-appearance.sh');
+assert.match(defaultApplyScript, /default-appearance\.toml/);
+assert.match(defaultApplyScript, /printf '\\033\]777;config=%s\\a\\r\\n'/);
 
 const pluginTypes = read('docs/fpasoterm-plugin.d.ts');
 assert.match(pluginTypes, /fpasotermPluginApi/);
@@ -412,6 +504,7 @@ assert.match(renderer, /__TAURI__/);
 assert.match(renderer, /startWindowDrag/);
 assert.match(renderer, /minimizeWindow/);
 assert.match(renderer, /toggleMaximizeWindow/);
+assert.match(renderer, /startWindowResize/);
 assert.match(renderer, /startWindowResizeDrag/);
 assert.match(renderer, /startResizeDragging/);
 assert.match(renderer, /saveWindowBounds/);
@@ -419,6 +512,7 @@ assert.match(renderer, /getWindowBounds/);
 assert.match(renderer, /setWindowBounds/);
 assert.match(renderer, /scheduleWindowStateSave/);
 assert.match(renderer, /scheduleFitAndResize/);
+assert.match(renderer, /scheduleDeferredFitAndResize/);
 assert.match(renderer, /afterNextPaint/);
 assert.match(renderer, /removeXtermVisualOverlays/);
 assert.match(renderer, /installXtermOverlayPruner/);
@@ -445,6 +539,23 @@ assert.match(renderer, /minimizeWindowButton/);
 assert.match(renderer, /maximizeWindowButton/);
 assert.match(renderer, /closeWindow\(\)/);
 assert.match(renderer, /applyWindowAppearance/);
+assert.match(renderer, /applyTerminalAppearance/);
+assert.match(renderer, /normalizeOpacity/);
+assert.match(renderer, /colorWithOpacity/);
+assert.match(renderer, /terminalThemeWithOpacity/);
+assert.match(renderer, /applyRuntimeConfig/);
+assert.match(renderer, /applyRuntimeConfigPath/);
+assert.match(renderer, /await afterNextPaint\(\);\s*fitAndResize\(\);/s);
+assert.match(renderer, /applyConfigPath/);
+assert.match(renderer, /setRuntimeWindowTitle/);
+assert.match(renderer, /setRuntimeTitlebarColor/);
+assert.match(renderer, /applyFpasotermOsc/);
+assert.match(renderer, /processRuntimeOsc/);
+assert.match(renderer, /onTitleChange/);
+assert.match(renderer, /\\x1b\\\]777;/);
+assert.match(renderer, /key === 'config'/);
+assert.match(renderer, /key === 'opacity'/);
+assert.match(renderer, /CSS\.supports\('color'/);
 assert.match(renderer, /titlebarColor/);
 assert.match(renderer, /--titlebar-background/);
 
@@ -482,6 +593,8 @@ assert.match(config, /defaultConfig/);
 assert.match(config, /defaultConfigExample/);
 assert.match(config, /title: 'fpasoterm'/);
 assert.match(config, /titlebarColor: '#1565c0'/);
+assert.match(config, /backgroundOpacity: 0\.8/);
+assert.match(config, /termName: 'xterm-256color'/);
 assert.match(config, /shell: ''/);
 assert.match(config, /writeDefaultConfigExample/);
 assert.match(config, /profileDir/);

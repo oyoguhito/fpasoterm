@@ -93,7 +93,9 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
 fontSize = 14
+backgroundOpacity = 0.8
 scrollback = 1000
+termName = "xterm-256color"
 shell = ""
 
 [terminal.theme]
@@ -130,13 +132,45 @@ enabled = []
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch.
+- `terminal`: xterm.js options passed when the terminal is created. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
+
+The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance:
+
+```sh
+printf '\033]0;work\a\r\n'
+printf '\033]777;titlebarColor=#2e7d32\a\r\n'
+printf '\033]777;opacity=0.65\a\r\n'
+printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
+```
+
+The runtime config sample can be applied with:
+
+```sh
+./examples/apply-runtime-appearance.sh
+```
+
+This sample changes the title to `RUNTIME SAMPLE ACTIVE`, switches the titlebar to pink, and changes the terminal background and text colors.
+
+To return the running window to the default appearance:
+
+```sh
+./examples/apply-default-appearance.sh
+```
+
+Or, if you need to specify the path manually:
+
+```sh
+config_path="$(pwd)/examples/config/runtime-appearance.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+Runtime config application keeps the current shell session running. It applies live window and terminal appearance settings such as `window.title`, `window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`, `terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`. Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
 
 TOML does not allow the same table to be defined more than once. To test values such as `frame = true`, edit the existing `[window]` section. Adding another `[window]` section at the end of the file causes a config parse error.
 

@@ -5,8 +5,13 @@ const path = require('node:path');
 
 const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
 const binHome = process.env.XDG_BIN_HOME || path.join(os.homedir(), '.local', 'bin');
+const configHome = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
 const applicationsDir = path.join(dataHome, 'applications');
 const iconsDir = path.join(dataHome, 'icons', 'hicolor');
+const appDataDir = path.join(dataHome, 'io.github.oyoguhito.fpasoterm');
+const configDir = path.join(configHome, 'fpasoterm');
+const cacheDir = path.join(cacheHome, 'fpasoterm');
 const iconSizes = [16, 32, 48, 64, 128, 192, 256, 512];
 
 // Removes a file if it was installed by fpasoterm or a legacy version.
@@ -30,6 +35,17 @@ function removeEmptyDir(target) {
       throw error;
     }
   }
+}
+
+// Removes a private fpasoterm directory such as config, cache, or WebKit data.
+function removeDir(target) {
+  if (!fs.existsSync(target)) {
+    console.log(`not found: ${target}`);
+    return;
+  }
+
+  fs.rmSync(target, { recursive: true, force: true });
+  console.log(`removed: ${target}`);
 }
 
 // Checks whether the applications directory still contains desktop entries.
@@ -65,6 +81,10 @@ for (const size of iconSizes) {
 
 runOptional('update-desktop-database', [applicationsDir]);
 runOptional('gtk-update-icon-cache', ['-q', iconsDir]);
+
+removeDir(configDir);
+removeDir(cacheDir);
+removeDir(appDataDir);
 
 if (!hasDesktopEntries(applicationsDir)) {
   removeFile(path.join(applicationsDir, 'mimeinfo.cache'));

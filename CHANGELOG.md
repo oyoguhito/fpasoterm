@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.2.0
+
+- Added runtime config application from inside a running terminal via OSC 777.
+- Added visible runtime appearance examples and a default-appearance reset script.
+- Added `terminal.termName = "xterm-256color"` and exported `TERM=xterm-256color` for tmux and other terminal multiplexers.
+- Improved runtime terminal resizing after appearance and window setting changes.
+- Improved ChromeOS launcher wrapper installation, update, and uninstall behavior.
+
 ## 1.1.0
 
 - Added configurable custom titlebar titles and colors via config and one-shot CLI options.

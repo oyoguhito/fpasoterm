@@ -127,6 +127,7 @@ fn main() {
                 let restore_size =
                     PhysicalSize::new(config.config.window.width, config.config.window.height);
                 let _ = window.set_title(&config.config.window.title);
+                set_window_icon(&window, app.default_window_icon());
                 let _ = window.set_size(restore_size);
                 append_diagnostic(
                     app.handle(),
@@ -139,12 +140,13 @@ fn main() {
                     config.config.window.min_width,
                     config.config.window.min_height,
                 )));
-                install_window_state_persistence(
-                    window.clone(),
+                schedule_startup_size_restore(
+                    app.handle().clone(),
+                    window,
                     config.window_state_path.clone(),
                     config.config.window.remember_bounds,
+                    restore_size,
                 );
-                schedule_window_size_restore(app.handle().clone(), window, restore_size);
             }
             append_diagnostic(
                 app.handle(),
@@ -160,6 +162,7 @@ fn main() {
             diagnostics_path,
             diagnostics_log,
             config_get,
+            config_apply_path,
             window_close,
             window_minimize,
             window_toggle_maximize,
@@ -172,22 +175,45 @@ fn main() {
         .expect("failed to run fpasoterm");
 }
 
-// Re-applies the requested startup size after the webview has settled.
-fn schedule_window_size_restore(
+// Applies the runtime icon shown by Linux shelves, task switchers, and window managers.
+fn set_window_icon(window: &tauri::WebviewWindow, icon: Option<&tauri::image::Image<'_>>) {
+    if let Some(icon) = icon {
+        if let Err(error) = window.set_icon(icon.clone()) {
+            eprintln!("failed to set window icon: {error}");
+        }
+    }
+}
+
+// Re-applies startup size after the webview settles, then starts persisting user resizes.
+fn schedule_startup_size_restore(
     app: AppHandle,
     window: tauri::WebviewWindow,
+    state_path: String,
+    remember: bool,
     size: PhysicalSize<u32>,
 ) {
     std::thread::spawn(move || {
-        std::thread::sleep(Duration::from_millis(350));
+        std::thread::sleep(Duration::from_millis(650));
+        let event_app = app.clone();
         let _ = app.run_on_main_thread(move || {
+            let before = window.outer_size().ok();
             let _ = window.set_size(size);
+            let after = window.outer_size().ok();
+            append_diagnostic(
+                &event_app,
+                &format!(
+                    "startup window size restore requested width={} height={} before={:?} after={:?}",
+                    size.width, size.height, before, after
+                ),
+            );
+            install_window_state_persistence(event_app, window, state_path, remember);
         });
     });
 }
 
 // Persists window size whenever Tauri reports a resize event.
 fn install_window_state_persistence(
+    app: AppHandle,
     window: tauri::WebviewWindow,
     state_path: String,
     remember: bool,
@@ -200,6 +226,14 @@ fn install_window_state_persistence(
         if let WindowEvent::Resized(size) = event {
             if let Err(error) = save_window_size(*size, &state_path) {
                 eprintln!("failed to save window size: {error}");
+            } else {
+                append_diagnostic(
+                    &app,
+                    &format!(
+                        "saved window size width={} height={}",
+                        size.width, size.height
+                    ),
+                );
             }
         }
     });
@@ -240,6 +274,52 @@ fn runtime_config() -> RuntimeConfig {
         .ok()
         .and_then(|value| serde_json::from_str(&value).ok())
         .unwrap_or_else(default_runtime_config)
+}
+
+// Loads a TOML config file on demand and merges it over the current runtime config.
+fn runtime_config_from_path(config_path: &str) -> Result<RuntimeConfig, String> {
+    let mut config = runtime_config();
+    let path = std::path::Path::new(config_path);
+    let absolute_path = if path.is_absolute() {
+        path.to_path_buf()
+    } else {
+        env::current_dir()
+            .map_err(|error| error.to_string())?
+            .join(path)
+    };
+    let text = fs::read_to_string(&absolute_path).map_err(|error| error.to_string())?;
+    let toml_value: toml::Value = toml::from_str(&text).map_err(|error| error.to_string())?;
+    let override_value = serde_json::to_value(toml_value).map_err(|error| error.to_string())?;
+    let mut config_value =
+        serde_json::to_value(&config.config).map_err(|error| error.to_string())?;
+    merge_json_value(&mut config_value, override_value);
+    config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
+    config.config_path = absolute_path.to_string_lossy().to_string();
+    config.config_dir = absolute_path
+        .parent()
+        .map(|parent| parent.to_string_lossy().to_string())
+        .unwrap_or_else(|| ".".to_string());
+    config.window_state_path = format!("{}/window-state.json", config.config_dir);
+    Ok(config)
+}
+
+// Recursively overlays object keys while replacing scalar and array values.
+fn merge_json_value(base: &mut serde_json::Value, override_value: serde_json::Value) {
+    match (base, override_value) {
+        (serde_json::Value::Object(base_map), serde_json::Value::Object(override_map)) => {
+            for (key, value) in override_map {
+                match base_map.get_mut(&key) {
+                    Some(base_value) => merge_json_value(base_value, value),
+                    None => {
+                        base_map.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base_value, value) => {
+            *base_value = value;
+        }
+    }
 }
 
 // Builds a minimal config when the Tauri binary is started without the Node launcher.
@@ -496,6 +576,7 @@ fn terminal_start(
         command.arg("-i");
     }
     command.cwd(home_dir());
+    command.env("TERM", "xterm-256color");
     command.env("TERM_PROGRAM", "fpasoterm");
 
     let mut child = pair
@@ -631,6 +712,17 @@ fn diagnostics_log(app: AppHandle, message: String) {
 // Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
     runtime_config()
+}
+
+#[tauri::command]
+// Loads and returns a config file requested by an in-terminal OSC command.
+fn config_apply_path(app: AppHandle, path: String) -> Result<RuntimeConfig, String> {
+    let config = runtime_config_from_path(&path)?;
+    append_diagnostic(
+        &app,
+        &format!("applied runtime config {}", config.config_path),
+    );
+    Ok(config)
 }
 
 #[tauri::command]
