@@ -74,7 +74,7 @@ To update the local command, launcher entry, and icons after pulling a newer che
 npm run update:desktop
 ```
 
-To cleanly remove the local command, launcher entry, and installed launcher icons:
+To cleanly remove the local command, launcher entry, installed launcher icons, user config, runtime cache, and Tauri/WebKit app data:
 
 ```sh
 npm run uninstall:desktop
@@ -139,6 +139,43 @@ Short options are available for common one-shot overrides:
 fpasoterm -t work -b '#2e7d32' -z 1200x760 -s pwsh.exe
 fpasoterm -e "tmux attach -t work"
 ```
+
+The running window can also be renamed from inside the terminal:
+
+```sh
+printf '\033]0;work\a\r\n'
+printf '\033]777;titlebarColor=#2e7d32\a\r\n'
+printf '\033]777;opacity=0.65\a\r\n'
+printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
+```
+
+The runtime config sample can be applied with:
+
+```sh
+./examples/apply-runtime-appearance.sh
+```
+
+This sample changes the title to `RUNTIME SAMPLE ACTIVE`, switches the titlebar
+to pink, and changes the terminal background and text colors.
+
+To return the running window to the default appearance:
+
+```sh
+./examples/apply-default-appearance.sh
+```
+
+Or, if you need to specify the path manually:
+
+```sh
+config_path="$(pwd)/examples/config/runtime-appearance.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+Runtime config application keeps the current shell session running. It applies
+live window and terminal appearance settings such as `window.title`,
+`window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`,
+`terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`.
+Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
 
 Inspect the resolved settings and plugin load status without launching:
 
@@ -252,6 +289,13 @@ The desktop entry uses `Icon=fpasoterm`; ChromeOS/Linux launchers resolve that n
 ```text
 extra/linux/icons/hicolor/
 ```
+
+For unpacked checkout installs, `npm run install:desktop` writes the installed
+desktop entry with an absolute `Exec=` path to the local wrapper and no
+`TryExec`. The wrapper records the Node.js executable used during installation
+and also falls back to common `node` paths. This lets the ChromeOS launcher
+start fpasoterm from the icon even when it does not inherit the user's shell
+`PATH`.
 
 When packaging a macOS `.app` bundle, use the generated icon at:
 
@@ -372,6 +416,42 @@ fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm -t work -b '#2e7d32' -z 1200x760 -s /bin/fish
 fpasoterm -e "tmux attach -t work"
 ```
+
+起動中の window は terminal 内の command からも変更できます。
+
+```sh
+printf '\033]0;work\a\r\n'
+printf '\033]777;titlebarColor=#2e7d32\a\r\n'
+printf '\033]777;opacity=0.65\a\r\n'
+printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
+```
+
+runtime config sample は次で適用できます。
+
+```sh
+./examples/apply-runtime-appearance.sh
+```
+
+この sample は title を `RUNTIME SAMPLE ACTIVE` にし、titlebar をピンク、
+terminal 背景と文字色を分かりやすく変更します。
+
+起動中の window を標準の見た目へ戻す場合:
+
+```sh
+./examples/apply-default-appearance.sh
+```
+
+path を手動指定する場合:
+
+```sh
+config_path="$(pwd)/examples/config/runtime-appearance.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+runtime config 適用では、現在の shell session は維持されます。
+`window.title`、`window.titlebarColor`、`window.width`、`window.height`、
+`terminal.fontSize`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。
+`terminal.shell` のように新しい PTY が必要な設定は次回起動時に反映されます。
 
 起動せずに解決済み設定と plugin 読み込み状況を確認:
 

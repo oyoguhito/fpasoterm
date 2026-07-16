@@ -43,6 +43,20 @@ Normal launches detach from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
 `;
 
+// Appends diagnostics for launcher/icon starts where stdout and stderr are hidden.
+function appendLauncherLog(message) {
+  const logPath = process.env.FPASOTERM_LAUNCHER_LOG;
+  if (!logPath) {
+    return;
+  }
+  try {
+    fs.mkdirSync(path.dirname(logPath), { recursive: true });
+    fs.appendFileSync(logPath, `${message}\n`);
+  } catch {
+    // Launcher diagnostics must never prevent the app from starting.
+  }
+}
+
 // Converts CLI options into environment variables consumed by the main process.
 function parseArgs(argv) {
   const env = {};
@@ -391,15 +405,45 @@ function launch(options) {
   const args = tauriBinary
     ? options.runtimeArgs
     : [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs];
+  const env = runtimeEnv(options);
+  appendLauncherLog(`launcher command=${command}`);
+  appendLauncherLog(`launcher args=${JSON.stringify(args)}`);
+  appendLauncherLog(`launcher mode=${tauriBinary ? 'binary' : 'tauri-dev'}`);
+  appendLauncherLog(`launcher cwd=${root}`);
+
+  let logFd;
+  let stdio = options.foreground ? 'inherit' : 'ignore';
+  if (!options.foreground && process.env.FPASOTERM_LAUNCHER_LOG) {
+    try {
+      logFd = fs.openSync(process.env.FPASOTERM_LAUNCHER_LOG, 'a');
+      stdio = ['ignore', logFd, logFd];
+    } catch (error) {
+      appendLauncherLog(`launcher log fd error=${error.message}`);
+    }
+  }
 
   const child = spawn(command, args, {
     detached: !options.foreground,
-    env: runtimeEnv(options),
-    stdio: options.foreground ? 'inherit' : 'ignore',
+    env,
+    stdio,
     windowsHide: !options.foreground,
   });
 
+  appendLauncherLog(`launcher child pid=${child.pid ?? 'unknown'}`);
+  child.on('error', (error) => {
+    appendLauncherLog(`launcher child error=${error.message}`);
+    if (logFd !== undefined) {
+      fs.closeSync(logFd);
+    }
+  });
+
   if (!options.foreground) {
+    child.on('exit', (code, signal) => {
+      appendLauncherLog(`launcher child exit code=${code ?? ''} signal=${signal ?? ''}`);
+      if (logFd !== undefined) {
+        fs.closeSync(logFd);
+      }
+    });
     child.unref();
     return;
   }

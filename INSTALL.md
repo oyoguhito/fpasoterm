@@ -51,7 +51,8 @@ npm run update:desktop
 
 Run `npm run update:desktop` after changing the checkout path, launcher icon, or installed command wrapper. It is not required for `./bin/fpasoterm --dev ...`.
 
-Remove the local command, launcher entry, and installed launcher icons:
+Remove the local command, launcher entry, installed launcher icons, user config,
+runtime cache, and Tauri/WebKit app data:
 
 ```sh
 npm run uninstall:desktop
@@ -92,7 +93,7 @@ Tagged GitHub Releases build the broader release set in GitHub Actions:
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.1.0_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.0_arm64-linux-arm64.deb
 ```
 
 ## 日本語
@@ -137,7 +138,7 @@ checkout path、launcher icon、installed command wrapper を更新した場合:
 npm run update:desktop
 ```
 
-完全に削除する場合:
+local command、launcher entry、icon、ユーザー設定、runtime cache、Tauri/WebKit app data を完全に削除する場合:
 
 ```sh
 npm run uninstall:desktop
@@ -171,7 +172,7 @@ tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.1.0_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.0_arm64-linux-arm64.deb
 ```
 
 ## Linux Desktop Entry
@@ -205,6 +206,12 @@ Install the desktop entry and hicolor launcher icons into the current user's dat
 ```sh
 npm run install:desktop
 ```
+
+For unpacked checkout installs, the installed desktop entry rewrites `Exec=` to
+the absolute `~/.local/bin/fpasoterm` wrapper path and does not set `TryExec`.
+The wrapper records the Node.js executable used during installation and also
+falls back to common `node` paths. This avoids ChromeOS launcher failures when
+the launcher environment does not include the user's shell `PATH`.
 
 Regenerate launcher icon sizes after replacing `extra/logo/fpasoterm.png`:
 

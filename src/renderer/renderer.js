@@ -23,7 +23,9 @@ const fallbackConfig = {
     cursorStyle: 'block',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
+    backgroundOpacity: 0.8,
     scrollback: 1000,
+    termName: 'xterm-256color',
     theme: {
       background: 'rgba(16, 19, 23, 0.80)',
       foreground: '#e8edf2',
@@ -69,7 +71,9 @@ let recentPlainTextWrite = null;
 let compositionRecentlyActiveUntil = 0;
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
+let terminalDeferredResizeTimer = null;
 let xtermOverlayObserver = null;
+let pendingOscData = '';
 
 // Provides the renderer API shape expected by the rest of this file when the
 // backend is injected by Tauri.
@@ -101,6 +105,7 @@ function installTauriApiAdapter() {
     getDiagnosticsPath: () => invoke('diagnostics_path'),
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     getConfig: () => invoke('config_get'),
+    applyConfigPath: (path) => invoke('config_apply_path', { path }),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
@@ -124,7 +129,14 @@ window.addEventListener('unhandledrejection', (event) => {
 
 // Fits xterm.js to the available element size and resizes the PTY.
 function fitAndResize() {
+  if (!fitAddon || !term) {
+    return;
+  }
+
+  const beforeCols = term.cols;
+  const beforeRows = term.rows;
   fitAddon.fit();
+  showDebugDiagnostic(`terminal fit cols=${beforeCols}->${term.cols} rows=${beforeRows}->${term.rows}`);
   window.fpasoterm.resizeTerminal({ cols: term.cols, rows: term.rows }).catch((error) => {
     showDiagnostic(`terminal resize failed: ${error}`);
   });
@@ -138,6 +150,18 @@ function scheduleFitAndResize() {
   terminalResizeTimer = setTimeout(() => {
     fitAndResize();
   }, 80);
+}
+
+// Re-runs fit after layout-affecting runtime changes have settled in the webview.
+function scheduleDeferredFitAndResize() {
+  scheduleFitAndResize();
+  if (terminalDeferredResizeTimer) {
+    clearTimeout(terminalDeferredResizeTimer);
+  }
+  terminalDeferredResizeTimer = setTimeout(async () => {
+    await afterNextPaint();
+    fitAndResize();
+  }, 220);
 }
 
 // Waits for the webview to finish layout before measuring the terminal.
@@ -403,6 +427,180 @@ function applyWindowAppearance() {
   document.documentElement.style.setProperty('--titlebar-background', titlebarColor);
 }
 
+// Normalizes opacity values to the CSS alpha range.
+function normalizeOpacity(value) {
+  const opacity = Number(value);
+  if (!Number.isFinite(opacity)) {
+    return undefined;
+  }
+  return Math.max(0, Math.min(1, opacity));
+}
+
+// Returns a color with the requested alpha for common rgb/rgba/hex config values.
+function colorWithOpacity(color, opacity) {
+  const alpha = normalizeOpacity(opacity);
+  const source = String(color || '').trim();
+  if (alpha === undefined || !source) {
+    return source;
+  }
+
+  const rgbMatch = source.match(/^rgba?\(\s*([0-9.]+)\s*,\s*([0-9.]+)\s*,\s*([0-9.]+)(?:\s*,\s*[0-9.]+)?\s*\)$/i);
+  if (rgbMatch) {
+    return `rgba(${Number(rgbMatch[1])}, ${Number(rgbMatch[2])}, ${Number(rgbMatch[3])}, ${alpha})`;
+  }
+
+  const shortHex = source.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i);
+  if (shortHex) {
+    const red = parseInt(`${shortHex[1]}${shortHex[1]}`, 16);
+    const green = parseInt(`${shortHex[2]}${shortHex[2]}`, 16);
+    const blue = parseInt(`${shortHex[3]}${shortHex[3]}`, 16);
+    return `rgba(${red}, ${green}, ${blue}, ${alpha})`;
+  }
+
+  const hex = source.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i);
+  if (hex) {
+    return `rgba(${parseInt(hex[1], 16)}, ${parseInt(hex[2], 16)}, ${parseInt(hex[3], 16)}, ${alpha})`;
+  }
+
+  return source;
+}
+
+// Builds a terminal theme whose background alpha follows terminal.backgroundOpacity.
+function terminalThemeWithOpacity(terminalConfig) {
+  const theme = { ...(terminalConfig.theme || {}) };
+  if (terminalConfig.backgroundOpacity !== undefined && theme.background) {
+    theme.background = colorWithOpacity(theme.background, terminalConfig.backgroundOpacity);
+  }
+  return theme;
+}
+
+// Applies runtime terminal options that xterm.js supports changing after open.
+function applyTerminalAppearance() {
+  if (!term) {
+    return;
+  }
+
+  const terminalConfig = appConfig.terminal || {};
+  for (const key of ['cursorBlink', 'cursorStyle', 'fontFamily', 'fontSize', 'scrollback']) {
+    if (terminalConfig[key] !== undefined) {
+      term.options[key] = terminalConfig[key];
+    }
+  }
+  term.options.theme = terminalThemeWithOpacity(terminalConfig);
+  scheduleDeferredFitAndResize();
+}
+
+// Applies a freshly loaded config to the live window and terminal.
+async function applyRuntimeConfig(runtimeConfig) {
+  appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
+  pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
+  imeDuplicateWindowMs = Number(appConfig.ime.duplicateWindowMs) || fallbackConfig.ime.duplicateWindowMs;
+  imeRepeatedTextWindowMs =
+    Number(appConfig.ime.repeatedTextWindowMs) || fallbackConfig.ime.repeatedTextWindowMs;
+  imeDuplicateGuardEnabled = appConfig.ime.duplicateGuard !== false;
+  applyWindowAppearance();
+  applyTerminalAppearance();
+
+  const width = Number(appConfig.window?.width);
+  const height = Number(appConfig.window?.height);
+  if (Number.isInteger(width) && Number.isInteger(height) && width > 0 && height > 0) {
+    await window.fpasoterm.setWindowBounds({ width, height });
+    await afterNextPaint();
+    fitAndResize();
+    scheduleWindowStateSave();
+  }
+
+  showDiagnostic(`runtime config applied ${runtimeConfig.configPath}`);
+}
+
+// Loads and applies a config.toml path while the current terminal session keeps running.
+async function applyRuntimeConfigPath(configPath) {
+  const normalizedPath = String(configPath || '').trim();
+  if (!normalizedPath) {
+    showDiagnostic('ignored empty runtime config path');
+    return;
+  }
+
+  try {
+    const runtimeConfig = await window.fpasoterm.applyConfigPath(normalizedPath);
+    await applyRuntimeConfig(runtimeConfig);
+  } catch (error) {
+    showDiagnostic(`runtime config apply failed path=${normalizedPath}: ${error}`);
+  }
+}
+
+// Updates both the browser document title and the visible custom titlebar text.
+function setRuntimeWindowTitle(title) {
+  const normalizedTitle = String(title || '').trim();
+  if (!normalizedTitle) {
+    return;
+  }
+
+  document.title = normalizedTitle;
+  if (windowTitleElement) {
+    windowTitleElement.textContent = normalizedTitle;
+  }
+}
+
+// Applies a runtime titlebar color when the value is a valid CSS color.
+function setRuntimeTitlebarColor(color) {
+  const normalizedColor = String(color || '').trim();
+  if (!normalizedColor || !CSS.supports('color', normalizedColor)) {
+    showDiagnostic(`ignored invalid titlebar color: ${normalizedColor}`);
+    return;
+  }
+
+  document.documentElement.style.setProperty('--titlebar-background', normalizedColor);
+}
+
+// Applies fpasoterm-specific OSC 777 commands emitted by shell scripts.
+function applyFpasotermOsc(command) {
+  const fields = String(command || '').split(';');
+  for (const field of fields) {
+    const separator = field.indexOf('=');
+    if (separator === -1) {
+      continue;
+    }
+
+    const key = field.slice(0, separator).trim();
+    const value = field.slice(separator + 1).trim();
+    if (key === 'title') {
+      setRuntimeWindowTitle(value);
+    } else if (key === 'titlebarColor') {
+      setRuntimeTitlebarColor(value);
+    } else if (key === 'opacity' || key === 'backgroundOpacity' || key === 'terminalOpacity') {
+      const opacity = normalizeOpacity(value);
+      if (opacity === undefined) {
+        showDiagnostic(`ignored invalid terminal opacity: ${value}`);
+      } else {
+        appConfig = mergeConfig(appConfig, { terminal: { backgroundOpacity: opacity } });
+        applyTerminalAppearance();
+      }
+    } else if (key === 'config' || key === 'configPath') {
+      applyRuntimeConfigPath(value);
+    }
+  }
+}
+
+// Watches PTY output for custom runtime appearance commands before xterm draws it.
+function processRuntimeOsc(data) {
+  pendingOscData = `${pendingOscData}${data}`;
+  const oscPattern = /\x1b\]777;([\s\S]*?)(?:\x07|\x1b\\)/g;
+  let match;
+  let lastMatchEnd = 0;
+  while ((match = oscPattern.exec(pendingOscData)) !== null) {
+    applyFpasotermOsc(match[1]);
+    lastMatchEnd = oscPattern.lastIndex;
+  }
+
+  if (lastMatchEnd > 0) {
+    pendingOscData = pendingOscData.slice(lastMatchEnd);
+  }
+  if (pendingOscData.length > 4096 || !pendingOscData.includes('\x1b]777;')) {
+    pendingOscData = pendingOscData.slice(-64);
+  }
+}
+
 // Removes xterm.js visual-only overlay DOM that can appear as fixed garbled text on macOS.
 function removeXtermVisualOverlays() {
   if (!terminalElement) {
@@ -496,8 +694,12 @@ function createTerminal() {
 
   term = new Terminal({
     ...appConfig.terminal,
+    theme: terminalThemeWithOpacity(appConfig.terminal || {}),
     screenReaderMode: false,
   });
+  if (typeof term.onTitleChange === 'function') {
+    term.onTitleChange(setRuntimeWindowTitle);
+  }
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
   term.open(terminalElement);
@@ -594,6 +796,16 @@ function toTauriResizeDirection(direction) {
     .join('');
 }
 
+// Uses the platform-native resize loop first so the window manager owns pointer capture.
+async function startWindowResize(event, direction) {
+  try {
+    await window.fpasoterm.startWindowResizeDrag?.(direction);
+  } catch (error) {
+    showDiagnostic(`native window resize failed direction=${direction}: ${error}`);
+    await startManualWindowResize(event, direction);
+  }
+}
+
 // Resizes frameless windows without relying on platform-specific native hit testing.
 async function startManualWindowResize(event, direction) {
   const initialBounds = await window.fpasoterm.getWindowBounds();
@@ -662,6 +874,9 @@ async function startManualWindowResize(event, direction) {
     window.removeEventListener('pointermove', onPointerMove);
     window.removeEventListener('pointerup', stopResize);
     window.removeEventListener('pointercancel', stopResize);
+    if (latestEvent !== event) {
+      applyResize();
+    }
     scheduleWindowStateSave();
     fitAndResize();
   };
@@ -680,11 +895,8 @@ for (const handle of document.querySelectorAll('[data-resize-direction]')) {
 
     event.preventDefault();
     const direction = toTauriResizeDirection(handle.getAttribute('data-resize-direction'));
-    startManualWindowResize(event, direction).catch((error) => {
+    startWindowResize(event, direction).catch((error) => {
       showDiagnostic(`manual window resize setup failed direction=${direction}: ${error}`);
-      window.fpasoterm.startWindowResizeDrag?.(direction).catch((nativeError) => {
-        showDiagnostic(`window resize drag failed direction=${direction}: ${nativeError}`);
-      });
     });
   });
 }
@@ -736,6 +948,7 @@ async function initialize() {
 
   Promise.resolve(window.fpasoterm.onTerminalData((data) => {
     showDebugDiagnostic(`renderer terminal data bytes=${data.length} preview=${printableDiagnosticData(data).slice(0, 160)}`);
+    processRuntimeOsc(data);
     mirrorTerminalData(data);
     term.write(data, () => {
       removeXtermVisualOverlays();

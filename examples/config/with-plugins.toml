@@ -9,7 +9,9 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 15
+backgroundOpacity = 0.8
 scrollback = 3000
+termName = "xterm-256color"
 # Leave empty for the platform default shell.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""

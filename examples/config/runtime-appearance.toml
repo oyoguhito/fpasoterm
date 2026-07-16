@@ -1,0 +1,23 @@
+# Runtime appearance test config.
+# Apply from a running fpasoterm terminal:
+# printf '\033]777;config=/path/to/fpasoterm/examples/config/runtime-appearance.toml\a\r\n'
+
+[window]
+title = "RUNTIME SAMPLE ACTIVE"
+titlebarColor = "#d81b60"
+
+# Uncomment these only when testing live window resizing.
+# width = 1180
+# height = 720
+
+[terminal]
+backgroundOpacity = 0.95
+
+# Uncomment this only when testing live font resizing.
+# fontSize = 18
+
+[terminal.theme]
+background = "#32004f"
+foreground = "#fff176"
+cursor = "#00e5ff"
+selectionBackground = "#7b1fa2"

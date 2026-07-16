@@ -26,7 +26,9 @@ const defaultConfig = Object.freeze({
     cursorStyle: 'block',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
+    backgroundOpacity: 0.8,
     scrollback: 1000,
+    termName: 'xterm-256color',
     shell: '',
     theme: {
       background: 'rgba(16, 19, 23, 0.80)',
@@ -91,7 +93,12 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \\"Noto Sans Mono CJK JP\\", monospace"
 fontSize = 14
+# backgroundOpacity changes only the terminal background alpha, not text opacity.
+backgroundOpacity = 0.8
 scrollback = 1000
+# termName is the terminal type used by xterm.js. The backend PTY exports
+# TERM=xterm-256color so terminal multiplexers such as tmux can use terminfo.
+termName = "xterm-256color"
 # shell overrides the platform default when non-empty.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
