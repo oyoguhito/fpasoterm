@@ -111,10 +111,26 @@ struct AppState {
     diagnostics: Mutex<VecDeque<String>>,
 }
 
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
+    if cli_has_flag(&["--help", "-h"]) {
+        print_cli_text(HELP_TEXT);
+        return;
+    }
+    if cli_has_flag(&["--show-config"]) {
+        print_show_config();
+        return;
+    }
+    if cli_has_flag(&["--reset-window-state", "-r"]) {
+        reset_window_state_cli();
+        return;
+    }
+
     if env::var("WEBKIT_DISABLE_DMABUF_RENDERER").is_err()
-        && env::var("FPASOTERM_DISABLE_DMABUF").as_deref() == Ok("1")
+        && (env::var("FPASOTERM_DISABLE_DMABUF").as_deref() == Ok("1")
+            || cli_has_flag(&["--disable-dmabuf"]))
     {
         env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
     }
@@ -123,6 +139,15 @@ fn main() {
         .manage(AppState::default())
         .setup(|app| {
             let config = runtime_config();
+            append_diagnostic(
+                app.handle(),
+                &format!(
+                    "resolved startup config title={} titlebarColor={} shell={}",
+                    config.config.window.title,
+                    config.config.window.titlebar_color,
+                    configured_shell(&config.config).unwrap_or_default()
+                ),
+            );
             if let Some(window) = app.get_webview_window("main") {
                 let restore_size =
                     PhysicalSize::new(config.config.window.width, config.config.window.height);
@@ -270,15 +295,36 @@ fn window_state_path() -> String {
 
 // Loads launcher-provided JSON config, falling back to direct binary parsing.
 fn runtime_config() -> RuntimeConfig {
-    env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
+    let mut config = env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
         .ok()
         .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_else(default_runtime_config)
+        .unwrap_or_else(direct_runtime_config);
+    apply_direct_cli_overrides(&mut config);
+    config
+}
+
+// Builds direct-binary config by applying the user's TOML over built-in defaults.
+fn direct_runtime_config() -> RuntimeConfig {
+    let mut config = default_runtime_config();
+    if fs::metadata(&config.config_path).is_ok() {
+        let config_path = config.config_path.clone();
+        config = merge_runtime_config_from_path(config, &config_path)
+            .unwrap_or_else(|_| default_runtime_config());
+    }
+    apply_direct_cli_overrides(&mut config);
+    config
 }
 
 // Loads a TOML config file on demand and merges it over the current runtime config.
 fn runtime_config_from_path(config_path: &str) -> Result<RuntimeConfig, String> {
-    let mut config = runtime_config();
+    merge_runtime_config_from_path(runtime_config(), config_path)
+}
+
+// Applies one TOML file to an existing runtime config.
+fn merge_runtime_config_from_path(
+    mut config: RuntimeConfig,
+    config_path: &str,
+) -> Result<RuntimeConfig, String> {
     let path = std::path::Path::new(config_path);
     let absolute_path = if path.is_absolute() {
         path.to_path_buf()
@@ -355,6 +401,16 @@ fn default_runtime_config() -> RuntimeConfig {
         window.width = width;
         window.height = height;
     }
+    if let Some((width, height)) = cli_size_option() {
+        window.width = width;
+        window.height = height;
+    }
+    if let Some(width) = cli_positive_u32_option_any(&["--width", "-W"]) {
+        window.width = width;
+    }
+    if let Some(height) = cli_positive_u32_option_any(&["--height", "-H"]) {
+        window.height = height;
+    }
 
     RuntimeConfig {
         config: Config {
@@ -386,10 +442,13 @@ fn default_runtime_config() -> RuntimeConfig {
         plugin_urls: Vec::new(),
         window_state_path,
         diagnostics: Some(DiagnosticsConfig {
-            debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1"),
-            console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1"),
+            debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1")
+                || cli_has_flag(&["--debug-keys", "-k"]),
+            console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
+                || cli_has_flag(&["--console-diagnostics", "-C"]),
             opaque_terminal: Some(
-                env::var("FPASOTERM_DEBUG_OPAQUE_TERMINAL").as_deref() == Ok("1"),
+                env::var("FPASOTERM_DEBUG_OPAQUE_TERMINAL").as_deref() == Ok("1")
+                    || cli_has_flag(&["--debug-opaque-terminal"]),
             ),
         }),
     }
@@ -419,6 +478,38 @@ fn read_configured_shell(config_path: &str) -> Option<String> {
     read_configured_string(config_path, "terminal", "shell")
 }
 
+// Re-applies direct CLI overrides after config.toml and saved state are resolved.
+fn apply_direct_cli_overrides(runtime: &mut RuntimeConfig) {
+    if let Some(title) = cli_option_value_any(&["--title", "-t"]) {
+        runtime.config.window.title = title;
+    }
+    if let Some(color) = cli_option_value_any(&["--titlebar-color", "-b"]) {
+        runtime.config.window.titlebar_color = color;
+    }
+    if let Some((width, height)) = cli_size_option() {
+        runtime.config.window.width = width;
+        runtime.config.window.height = height;
+    }
+    if let Some(width) = cli_positive_u32_option_any(&["--width", "-W"]) {
+        runtime.config.window.width = width;
+    }
+    if let Some(height) = cli_positive_u32_option_any(&["--height", "-H"]) {
+        runtime.config.window.height = height;
+    }
+    if let Some(shell) = cli_option_value_any(&["--shell", "-s"]) {
+        if let Some(terminal) = runtime.config.terminal.as_object_mut() {
+            terminal.insert("shell".to_string(), serde_json::Value::String(shell));
+        }
+    }
+}
+
+// Returns true when a direct binary argument includes any of the provided flags.
+fn cli_has_flag(flags: &[&str]) -> bool {
+    env::args()
+        .skip(1)
+        .any(|arg| flags.iter().any(|flag| arg == *flag))
+}
+
 // Returns the first value found for a set of equivalent long and short flags.
 fn cli_option_value_any(flags: &[&str]) -> Option<String> {
     flags.iter().find_map(|flag| cli_option_value(flag))
@@ -445,6 +536,108 @@ fn cli_option_value(flag: &str) -> Option<String> {
     None
 }
 
+// Parses a positive integer option, ignoring invalid values so the UI can still start.
+fn cli_positive_u32_option_any(flags: &[&str]) -> Option<u32> {
+    cli_option_value_any(flags)
+        .and_then(|value| value.parse::<u32>().ok().filter(|number| *number > 0))
+}
+
+// Resolves direct binary width/height overrides from --size.
+fn cli_size_option() -> Option<(u32, u32)> {
+    cli_option_value_any(&["--size", "-z"])
+        .and_then(|value| {
+            let (width, height) = value.split_once('x').or_else(|| value.split_once('X'))?;
+            Some((
+                width.trim().parse::<u32>().ok()?,
+                height.trim().parse::<u32>().ok()?,
+            ))
+        })
+        .filter(|(width, height)| *width > 0 && *height > 0)
+}
+
+// Writes CLI text for both console-subsystem and Windows GUI-subsystem builds.
+fn print_cli_text(text: &str) {
+    #[cfg(windows)]
+    {
+        print_cli_text_windows(text);
+    }
+    #[cfg(not(windows))]
+    {
+        print!("{text}");
+    }
+}
+
+// Prints the resolved direct-binary config without opening the application window.
+fn print_show_config() {
+    match serde_json::to_string_pretty(&runtime_config()) {
+        Ok(config) => print_cli_text(&(config + "\n")),
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: failed to serialize config: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Deletes the remembered window state without opening the application window.
+fn reset_window_state_cli() {
+    let path = window_state_path();
+    match fs::remove_file(&path) {
+        Ok(()) => print_cli_text(&format!("deleted {path}\n")),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            print_cli_text(&format!("no saved window state at {path}\n"));
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: failed to delete {path}: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Writes CLI errors through the same console-aware path used for normal output.
+fn print_cli_error(text: &str) {
+    print_cli_text(text);
+}
+
+#[cfg(windows)]
+// Attaches to the parent console because release builds use windows_subsystem="windows".
+fn print_cli_text_windows(text: &str) {
+    use std::ptr::{null, null_mut};
+    use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
+    use windows_sys::Win32::Storage::FileSystem::{
+        CreateFileA, WriteFile, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
+    };
+    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+
+    const GENERIC_WRITE: u32 = 0x4000_0000;
+
+    unsafe {
+        AttachConsole(ATTACH_PARENT_PROCESS);
+        let handle = CreateFileA(
+            b"CONOUT$\0".as_ptr(),
+            GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            null(),
+            OPEN_EXISTING,
+            0,
+            null_mut(),
+        );
+        if handle != INVALID_HANDLE_VALUE {
+            let mut written = 0;
+            let _ = WriteFile(
+                handle,
+                text.as_ptr().cast(),
+                text.len() as u32,
+                &mut written,
+                null_mut(),
+            );
+            CloseHandle(handle);
+            return;
+        }
+    }
+
+    print!("{text}");
+}
+
 // Reads saved window width and height, rejecting zero or out-of-range values.
 fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
     let value: serde_json::Value =
@@ -469,7 +662,7 @@ fn append_diagnostic(app: &AppHandle, message: &str) {
             }
         }
     }
-    if env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1") {
+    if console_diagnostics_enabled() {
         eprintln!("{message}");
     }
 
@@ -480,6 +673,12 @@ fn append_diagnostic(app: &AppHandle, message: &str) {
             "message": message,
         }),
     );
+}
+
+// Returns true when diagnostics should be mirrored to the parent console.
+fn console_diagnostics_enabled() -> bool {
+    env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
+        || cli_has_flag(&["--console-diagnostics", "-C"])
 }
 
 // Produces a UTC timestamp without pulling in an additional Rust time crate.
@@ -513,23 +712,22 @@ fn configured_shell(config: &Config) -> Option<String> {
         .terminal
         .get("shell")
         .and_then(|value| value.as_str())
-        .map(str::trim)
+        .map(sanitize_shell_value)
         .filter(|value| !value.is_empty())
-        .map(str::to_string)
 }
 
 // Chooses the shell in environment, CLI, config, then platform-default order.
 fn shell_command(config: &Config) -> String {
     if let Ok(shell) = env::var("FPASOTERM_SHELL") {
         if !shell.trim().is_empty() {
-            return shell;
+            return resolve_shell_command(&shell);
         }
     }
     if let Some(shell) = cli_option_value_any(&["--shell", "-s"]) {
-        return shell;
+        return resolve_shell_command(&shell);
     }
     if let Some(shell) = configured_shell(config) {
-        return shell;
+        return resolve_shell_command(&shell);
     }
     if cfg!(windows) {
         env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
@@ -538,6 +736,77 @@ fn shell_command(config: &Config) -> String {
     } else {
         env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
+}
+
+// Resolves known shell aliases that are not always available through PATH.
+fn resolve_shell_command(shell: &str) -> String {
+    let sanitized = sanitize_shell_value(shell);
+    if cfg!(windows) {
+        return resolve_windows_shell(&sanitized);
+    }
+    sanitized
+}
+
+// Removes accidental C-string terminators and surrounding whitespace from shell values.
+fn sanitize_shell_value(shell: &str) -> String {
+    shell
+        .trim_matches(|character: char| character.is_whitespace() || character == '\0')
+        .replace('\0', "")
+}
+
+// Finds PowerShell 7 when `pwsh.exe` is installed but not available on PATH.
+#[cfg(windows)]
+fn resolve_windows_shell(shell: &str) -> String {
+    let trimmed = sanitize_shell_value(shell);
+    if !trimmed.eq_ignore_ascii_case("pwsh") && !trimmed.eq_ignore_ascii_case("pwsh.exe") {
+        return trimmed;
+    }
+
+    for candidate in windows_pwsh_candidates() {
+        if fs::metadata(&candidate).is_ok() {
+            return candidate;
+        }
+    }
+    trimmed
+}
+
+#[cfg(not(windows))]
+fn resolve_windows_shell(shell: &str) -> String {
+    shell.to_string()
+}
+
+#[cfg(windows)]
+// Builds common PowerShell 7 install paths from Windows environment variables.
+fn windows_pwsh_candidates() -> Vec<String> {
+    let mut candidates = Vec::new();
+    if let Some(path_candidate) = windows_path_executable("pwsh.exe") {
+        candidates.push(path_candidate);
+    }
+    if let Ok(program_files) = env::var("ProgramFiles") {
+        candidates.push(format!("{program_files}\\PowerShell\\7\\pwsh.exe"));
+    }
+    if let Ok(program_files_x86) = env::var("ProgramFiles(x86)") {
+        candidates.push(format!("{program_files_x86}\\PowerShell\\7\\pwsh.exe"));
+    }
+    if let Ok(local_app_data) = env::var("LOCALAPPDATA") {
+        candidates.push(format!(
+            "{local_app_data}\\Microsoft\\powershell\\7\\pwsh.exe"
+        ));
+    }
+    candidates
+}
+
+#[cfg(windows)]
+// Resolves an executable through PATH before falling back to well-known install paths.
+fn windows_path_executable(name: &str) -> Option<String> {
+    let path = env::var_os("PATH")?;
+    for directory in env::split_paths(&path) {
+        let candidate = directory.join(name);
+        if candidate.is_file() {
+            return Some(candidate.to_string_lossy().to_string());
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -603,7 +872,7 @@ fn terminal_start(
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
-                    if env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1") {
+                    if console_diagnostics_enabled() {
                         eprintln!("terminal_read bytes={read}");
                     }
                     let data = String::from_utf8_lossy(&buffer[..read]).to_string();
@@ -632,11 +901,14 @@ fn terminal_start(
         }
     });
 
-    if let Ok(command) = env::var("FPASOTERM_START_COMMAND") {
-        if !command.trim().is_empty() {
-            if let Ok(mut writer) = writer.lock() {
-                let _ = writeln!(writer, "{command}\r");
-            }
+    let start_command = env::var("FPASOTERM_START_COMMAND")
+        .ok()
+        .or_else(|| cli_option_value_any(&["--command", "-e"]))
+        .map(|command| command.trim().to_string())
+        .filter(|command| !command.is_empty());
+    if let Some(command) = start_command {
+        if let Ok(mut writer) = writer.lock() {
+            let _ = writeln!(writer, "{command}\r");
         }
     }
 
@@ -670,7 +942,7 @@ fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
 fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), String> {
     let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
-        if env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1") {
+        if console_diagnostics_enabled() {
             eprintln!("terminal_resize cols={} rows={}", size.cols, size.rows);
         }
         session
@@ -711,7 +983,16 @@ fn diagnostics_log(app: AppHandle, message: String) {
 #[tauri::command]
 // Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
-    runtime_config()
+    let config = runtime_config();
+    if console_diagnostics_enabled() {
+        eprintln!(
+            "config_get title={} titlebarColor={} shell={}",
+            config.config.window.title,
+            config.config.window.titlebar_color,
+            configured_shell(&config.config).unwrap_or_default()
+        );
+    }
+    config
 }
 
 #[tauri::command]

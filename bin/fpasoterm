@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
 const path = require('node:path');
 const toml = require('smol-toml');
@@ -25,6 +25,9 @@ Options:
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --self-update             Update an npm-installed fpasoterm package, then refresh desktop files on Linux.
+      --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
+      --update-desktop          Reinstall the local command, desktop entry, and launcher icons, then exit.
   -s, --shell <command>         Override the configured shell for this launch.
   -e, --command <command>       Send a command to the shell after launch.
   -t, --title <text>            Override the titlebar title for this launch.
@@ -39,7 +42,8 @@ Options:
       --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
-Normal launches detach from the console so the shell prompt is available again.
+Normal launches build and run the local Tauri binary when needed, then detach
+from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
 `;
 
@@ -67,6 +71,9 @@ function parseArgs(argv) {
   let dev = false;
   let showConfig = false;
   let resetWindowState = false;
+  let selfUpdate = false;
+  let selfUpdateCheckout = false;
+  let updateDesktop = false;
   let startCommand = '';
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -88,6 +95,21 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--self-update') {
+      selfUpdate = true;
+      continue;
+    }
+
+    if (arg === '--self-update-checkout') {
+      selfUpdateCheckout = true;
+      continue;
+    }
+
+    if (arg === '--update-desktop') {
+      updateDesktop = true;
       continue;
     }
 
@@ -192,6 +214,9 @@ function parseArgs(argv) {
     dev,
     showConfig,
     resetWindowState,
+    selfUpdate,
+    selfUpdateCheckout,
+    updateDesktop,
     env: {
       ...env,
       ...(startCommand ? { FPASOTERM_START_COMMAND: startCommand } : {}),
@@ -201,6 +226,96 @@ function parseArgs(argv) {
     disablePlugins,
     runtimeArgs,
   };
+}
+
+// Selects the npm executable in a way that works on Windows and Unix.
+function npmCommand() {
+  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+}
+
+// Runs an update command and fails fast with a clear message.
+function runChecked(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd || root,
+    env: process.env,
+    stdio: 'inherit',
+    shell: process.platform === 'win32',
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error(`${command} ${args.join(' ')} failed with exit code ${result.status}`);
+  }
+}
+
+// Returns true when this command is running from a source checkout.
+function isSourceCheckout() {
+  return fs.existsSync(path.join(root, '.git')) || fs.existsSync(path.join(root, '.jj'));
+}
+
+// Returns true for jj workspaces, which need explicit user-controlled updates.
+function isJjCheckout() {
+  return fs.existsSync(path.join(root, '.jj'));
+}
+
+// Checks whether a git checkout is clean before automated pull/update work.
+function ensureCleanGitCheckout() {
+  const result = spawnSync('git', ['status', '--porcelain'], {
+    cwd: root,
+    encoding: 'utf8',
+    shell: process.platform === 'win32',
+  });
+  if (result.error) {
+    throw result.error;
+  }
+  if (result.status !== 0) {
+    throw new Error('git status failed; refusing to self-update this checkout');
+  }
+  if (result.stdout.trim()) {
+    throw new Error('checkout has local changes; commit, stash, or update manually before --self-update-checkout');
+  }
+}
+
+// Reinstalls desktop integration from the currently running package root.
+function updateDesktopIntegration() {
+  runChecked(process.execPath, [path.join(root, 'scripts', 'install-linux-desktop.js')]);
+}
+
+// Updates an npm-installed package. Source checkouts are intentionally not pulled.
+function selfUpdate() {
+  if (isSourceCheckout()) {
+    console.log('source checkout detected; not running npm global self-update from this tree');
+    console.log('Use --self-update-checkout for a clean git checkout, or update manually and run:');
+    console.log('  fpasoterm --update-desktop');
+    return;
+  }
+
+  runChecked(npmCommand(), ['install', '-g', 'fpasoterm@latest']);
+  if (process.platform === 'linux' && fs.existsSync(path.join(root, 'scripts', 'install-linux-desktop.js'))) {
+    updateDesktopIntegration();
+  }
+  console.log('fpasoterm updated. Restart fpasoterm to use the updated app.');
+}
+
+// Updates a clean non-jj git checkout and refreshes its desktop integration.
+function selfUpdateCheckout() {
+  if (!fs.existsSync(path.join(root, '.git'))) {
+    throw new Error('--self-update-checkout requires a git checkout');
+  }
+  if (isJjCheckout()) {
+    console.log('jj checkout detected; automatic checkout updates are intentionally disabled.');
+    console.log('Update with your jj workflow, then run:');
+    console.log('  npm install');
+    console.log('  fpasoterm --update-desktop');
+    return;
+  }
+
+  ensureCleanGitCheckout();
+  runChecked('git', ['pull', '--ff-only']);
+  runChecked(npmCommand(), ['install']);
+  updateDesktopIntegration();
+  console.log('checkout updated. Restart fpasoterm to use the updated app.');
 }
 
 // Reads the value after a flag and reports a CLI-friendly error when missing.
@@ -335,6 +450,86 @@ function findTauriBinary() {
   return undefined;
 }
 
+// Stores proof that the binary was created by normal cargo build, not tauri dev.
+function buildStampPath() {
+  return path.join(root, 'src-tauri', 'target', 'debug', '.fpasoterm-normal-build.json');
+}
+
+// Reads the normal-build stamp used to avoid an unnecessary cargo build.
+function readBuildStamp() {
+  try {
+    return JSON.parse(fs.readFileSync(buildStampPath(), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+// Writes the binary/source mtimes after a successful normal cargo build.
+function writeBuildStamp(binary) {
+  const stamp = {
+    binary,
+    binaryMtime: fs.statSync(binary).mtimeMs,
+    sourceMtime: latestRuntimeSourceMtime(),
+  };
+  fs.writeFileSync(buildStampPath(), JSON.stringify(stamp, null, 2));
+}
+
+// Returns a binary only when the normal-build stamp still matches current files.
+function findStampedTauriBinary() {
+  const binary = findTauriBinary();
+  const stamp = readBuildStamp();
+  if (!binary || !stamp || stamp.binary !== binary) {
+    return undefined;
+  }
+  if (stamp.sourceMtime !== latestRuntimeSourceMtime()) {
+    return undefined;
+  }
+  if (stamp.binaryMtime !== fs.statSync(binary).mtimeMs) {
+    return undefined;
+  }
+  return binary;
+}
+
+// Builds the debug binary used by normal source-checkout launches.
+function buildTauriBinary(options) {
+  const stampedBinary = findStampedTauriBinary();
+  if (stampedBinary) {
+    appendLauncherLog(`launcher build=skip stamped binary=${stampedBinary}`);
+    return Promise.resolve(stampedBinary);
+  }
+
+  appendLauncherLog('launcher build=cargo build');
+  const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
+    cwd: root,
+    env: process.env,
+    stdio: options.foreground ? 'inherit' : 'ignore',
+    windowsHide: !options.foreground,
+  });
+
+  return new Promise((resolve, reject) => {
+    result.on('error', (error) => {
+      reject(new Error(`failed to start cargo build: ${error.message}`));
+    });
+    result.on('exit', (code, signal) => {
+      if (signal) {
+        reject(new Error(`cargo build exited with signal ${signal}`));
+        return;
+      }
+      if (code !== 0) {
+        reject(new Error(`cargo build failed with exit code ${code}`));
+        return;
+      }
+      const binary = findTauriBinary();
+      if (!binary) {
+        reject(new Error('cargo build finished but no current fpasoterm binary was found'));
+        return;
+      }
+      writeBuildStamp(binary);
+      resolve(binary);
+    });
+  });
+}
+
 // Avoids launching stale local target binaries after source checkout edits.
 function isBuiltBinaryCurrent(candidate) {
   const binaryMtime = fs.statSync(candidate).mtimeMs;
@@ -399,16 +594,16 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 }
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
-function launch(options) {
-  const tauriBinary = options.dev ? undefined : findTauriBinary();
-  const command = tauriBinary || process.execPath;
-  const args = tauriBinary
-    ? options.runtimeArgs
-    : [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs];
+async function launch(options) {
+  const tauriBinary = options.dev ? undefined : await buildTauriBinary(options);
+  const command = options.dev ? process.execPath : tauriBinary;
+  const args = options.dev
+    ? [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs]
+    : options.runtimeArgs;
   const env = runtimeEnv(options);
   appendLauncherLog(`launcher command=${command}`);
   appendLauncherLog(`launcher args=${JSON.stringify(args)}`);
-  appendLauncherLog(`launcher mode=${tauriBinary ? 'binary' : 'tauri-dev'}`);
+  appendLauncherLog(`launcher mode=${options.dev ? 'tauri-dev' : 'binary'}`);
   appendLauncherLog(`launcher cwd=${root}`);
 
   let logFd;
@@ -475,8 +670,18 @@ try {
     resetWindowState(options);
   } else if (options.showConfig) {
     showConfig(options);
+  } else if (options.updateDesktop) {
+    updateDesktopIntegration();
+  } else if (options.selfUpdateCheckout) {
+    selfUpdateCheckout();
+  } else if (options.selfUpdate) {
+    selfUpdate();
   } else {
-    launch(options);
+    Promise.resolve(launch(options)).catch((launchError) => {
+      console.error(`fpasoterm: ${launchError.message}`);
+      appendLauncherLog(`launcher error=${launchError.message}`);
+      process.exitCode = 1;
+    });
   }
 } catch (error) {
   console.error(`fpasoterm: ${error.message}`);
