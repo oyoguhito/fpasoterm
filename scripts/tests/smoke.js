@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.2.1');
+assert.equal(packageJson.version, '1.2.2');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -39,6 +39,7 @@ assert.ok(packageJson.dependencies.typescript, 'typescript should be available f
 assert.equal(packageJson.scripts.start, 'node ./bin/fpasoterm');
 assert.equal(packageJson.scripts.build, 'tauri build');
 assert.match(packageJson.scripts.check, /cargo check --manifest-path src-tauri\/Cargo\.toml/);
+assert.equal(packageJson.scripts['uninstall:desktop'], 'node scripts/uninstall-desktop.js');
 const oldRuntimePackage = `${'elect'}${'ron'}`;
 const oldPtyPackage = `${'node'}-${'pty'}`;
 assert.equal(Object.hasOwn(packageJson.dependencies, oldRuntimePackage), false);
@@ -61,7 +62,11 @@ for (const file of [
   'docs/spec.en.md',
   'docs/spec.ja.md',
   'examples/apply-default-appearance.sh',
+  'examples/apply-default-appearance.ps1',
+  'examples/apply-default-appearance.bat',
   'examples/apply-runtime-appearance.sh',
+  'examples/apply-runtime-appearance.ps1',
+  'examples/apply-runtime-appearance.bat',
   'examples/plugins/hello.ts',
   'examples/plugins/theme.ts',
   'examples/config/default-appearance.toml',
@@ -72,7 +77,9 @@ for (const file of [
   'extra/macos/fpasoterm.icns',
   'extra/windows/fpasoterm.ico',
   'scripts/install-linux-desktop.js',
+  'scripts/uninstall-desktop.js',
   'scripts/uninstall-linux-desktop.js',
+  'scripts/uninstall-windows-path.js',
   'scripts/security/scan-secrets.js',
   'src/config.js',
   'src/renderer/index.html',
@@ -308,9 +315,21 @@ assert.match(uninstallDesktop, /XDG_CACHE_HOME/);
 assert.match(uninstallDesktop, /io\.github\.oyoguhito\.fpasoterm/);
 assert.match(uninstallDesktop, /removeDir/);
 
+const uninstallEntry = read('scripts/uninstall-desktop.js');
+assert.match(uninstallEntry, /process\.platform === 'win32'/);
+assert.match(uninstallEntry, /uninstall-windows-path\.js/);
+assert.match(uninstallEntry, /uninstall-linux-desktop\.js/);
+
+const uninstallWindowsPath = read('scripts/uninstall-windows-path.js');
+assert.match(uninstallWindowsPath, /GetEnvironmentVariable\('Path', 'User'\)/);
+assert.match(uninstallWindowsPath, /SetEnvironmentVariable\('Path'/);
+assert.match(uninstallWindowsPath, /isFpasotermPathEntry/);
+assert.match(uninstallWindowsPath, /fpasoterm/);
+assert.doesNotMatch(uninstallWindowsPath, /setx/i);
+
 const tauriConfig = read('src-tauri/tauri.conf.json');
 assert.match(tauriConfig, /"withGlobalTauri": true/);
-assert.match(tauriConfig, /"enableGTKAppId": true/);
+assert.match(tauriConfig, /"enableGTKAppId": false/);
 assert.match(tauriConfig, /"macOSPrivateApi": true/);
 assert.match(tauriConfig, /"macOS": \{/);
 assert.match(tauriConfig, /"signingIdentity": "-"/);
@@ -334,6 +353,14 @@ assert.match(tauriCapabilities, /"windows": \["main"\]/);
 const rustMain = read('src-tauri/src/main.rs');
 assert.match(rustMain, /windows_subsystem = "windows"/);
 assert.match(rustMain, /HELP_TEXT/);
+assert.match(rustMain, /apply_direct_cli_env_overrides/);
+assert.match(rustMain, /set_env_from_cli/);
+assert.match(rustMain, /sanitize_cli_value/);
+assert.match(rustMain, /set_env_from_cli\("FPASOTERM_SHELL"/);
+assert.match(rustMain, /set_env_from_cli\("FPASOTERM_WINDOW_TITLE"/);
+assert.match(rustMain, /FPASOTERM_WINDOW_TITLE_LOCKED/);
+assert.match(rustMain, /title_locked/);
+assert.match(rustMain, /set_env_from_cli\("FPASOTERM_START_COMMAND"/);
 assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
 assert.match(rustMain, /print_cli_text\(HELP_TEXT\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
@@ -379,8 +406,12 @@ assert.match(rustMain, /cli_has_flag\(&\["--disable-dmabuf"\]\)/);
 assert.match(rustMain, /resolve_shell_command/);
 assert.match(rustMain, /sanitize_shell_value/);
 assert.match(rustMain, /resolve_windows_shell/);
+assert.match(rustMain, /default_windows_shell/);
 assert.match(rustMain, /windows_pwsh_candidates/);
 assert.match(rustMain, /windows_path_executable/);
+assert.match(rustMain, /terminal_path_with_app_dir/);
+assert.match(rustMain, /env::current_exe/);
+assert.match(rustMain, /command\.env\("Path", path_value\)/);
 assert.match(rustMain, /replace\('\\0', ""\)/);
 assert.match(rustMain, /PowerShell\\\\7\\\\pwsh\.exe/);
 assert.match(rustMain, /clone_killer/);
@@ -438,12 +469,22 @@ assert.match(readme, /docs\/pr-review\.ja\.md/);
 assert.match(readme, /examples\/plugins/);
 assert.match(readme, /--shell/);
 assert.match(readme, /PowerShell\\7\\pwsh\.exe/);
+assert.match(readme, /PowerShell 7 \(`pwsh\.exe`\) by default/);
+assert.match(readme, /fpasoterm executable directory at the[\s\S]*front of `Path`/);
+assert.match(readme, /multiple fpasoterm windows can be opened/);
+assert.match(readme, /removes fpasoterm-specific directories from the[\s\S]*current user's `Path`/);
+assert.match(readme, /By default, fpasoterm keeps its configured title/);
 assert.match(readme, /--command/);
 assert.match(readme, /--reset-window-state/);
 assert.match(readme, /--disable-dmabuf/);
 assert.match(readme, /OSC 777|033\]777/);
+assert.match(readme, /POSIX shell/);
+assert.match(readme, /Windows PowerShell and cmd\.exe do not run those `printf` examples as-is/);
+assert.match(readme, /\[Console\]::Write\("\$\(\[char\]27\)\]777;title=work;titlebarColor=#2e7d32/);
 assert.match(readme, /examples\/config\/runtime-appearance\.toml/);
 assert.match(readme, /apply-runtime-appearance\.sh/);
+assert.match(readme, /apply-runtime-appearance\.ps1/);
+assert.match(readme, /apply-runtime-appearance\.bat/);
 assert.match(readme, /\\a\\r\\n/);
 assert.match(readme, /Runtime config application keeps the current shell session running/);
 assert.match(readme, /window-state\.json/);
@@ -455,6 +496,9 @@ assert.match(configDocsEn, /title = "fpasoterm"/);
 assert.match(configDocsEn, /width = 1000/);
 assert.match(configDocsEn, /height = 680/);
 assert.match(configDocsEn, /titlebarColor = "#1565c0"/);
+assert.match(configDocsEn, /titleLocked = true/);
+assert.match(configDocsEn, /titleLocked` defaults to `true`/);
+assert.match(configDocsEn, /shell-emitted title changes are ignored/);
 assert.match(configDocsEn, /rememberBounds = true/);
 assert.match(configDocsEn, /frame = false/);
 assert.match(configDocsEn, /allowTransparency = true/);
@@ -463,17 +507,26 @@ assert.match(configDocsEn, /termName = "xterm-256color"/);
 assert.match(configDocsEn, /fontSize = 14/);
 assert.match(configDocsEn, /shell = ""/);
 assert.match(configDocsEn, /pwsh\.exe/);
+assert.match(configDocsEn, /PowerShell 7 \(`pwsh\.exe`\) is the default/);
 assert.match(configDocsEn, /PowerShell\\7\\pwsh\.exe/);
+assert.match(configDocsEn, /fpasoterm executable directory at the front of `Path`/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);
 assert.match(configDocsEn, /window-state\.json/);
 assert.match(configDocsEn, /same table to be defined more than once/);
 assert.match(configDocsEn, /OSC 777/);
+assert.match(configDocsEn, /The following `printf` examples are for POSIX shells/);
+assert.match(configDocsEn, /They do not run as-is in Windows PowerShell or cmd\.exe/);
+assert.match(configDocsEn, /\[Console\]::Write\("\$\(\[char\]27\)\]777;title=work;titlebarColor=#2e7d32/);
 assert.match(configDocsEn, /titlebarColor=#2e7d32/);
 assert.match(configDocsEn, /opacity=0\.65/);
 assert.match(configDocsEn, /examples\/config\/runtime-appearance\.toml/);
 assert.match(configDocsEn, /apply-runtime-appearance\.sh/);
+assert.match(configDocsEn, /apply-runtime-appearance\.ps1/);
+assert.match(configDocsEn, /apply-runtime-appearance\.bat/);
 assert.match(configDocsEn, /RUNTIME SAMPLE ACTIVE/);
 assert.match(configDocsEn, /apply-default-appearance\.sh/);
+assert.match(configDocsEn, /apply-default-appearance\.ps1/);
+assert.match(configDocsEn, /apply-default-appearance\.bat/);
 assert.match(configDocsEn, /\\a\\r\\n/);
 assert.match(configDocsEn, /Settings that require a new PTY/);
 assert.match(configDocsEn, /TERM=xterm-256color/);
@@ -484,6 +537,9 @@ assert.match(configDocsJa, /\[window\]/);
 assert.match(configDocsJa, /examples\/plugins/);
 assert.match(configDocsJa, /title = "fpasoterm"/);
 assert.match(configDocsJa, /titlebarColor = "#1565c0"/);
+assert.match(configDocsJa, /titleLocked = true/);
+assert.match(configDocsJa, /`titleLocked` は既定で `true`/);
+assert.match(configDocsJa, /shell が送る title change は無視/);
 assert.match(configDocsJa, /rememberBounds = true/);
 assert.match(configDocsJa, /frame = false/);
 assert.match(configDocsJa, /allowTransparency = true/);
@@ -491,16 +547,25 @@ assert.match(configDocsJa, /backgroundOpacity = 0\.8/);
 assert.match(configDocsJa, /termName = "xterm-256color"/);
 assert.match(configDocsJa, /shell = ""/);
 assert.match(configDocsJa, /pwsh\.exe/);
+assert.match(configDocsJa, /PowerShell 7 \(`pwsh\.exe`\) が利用可能な場合に既定 shell/);
 assert.match(configDocsJa, /PowerShell\\7\\pwsh\.exe/);
+assert.match(configDocsJa, /fpasoterm の実行ファイルがあるディレクトリを追加/);
 assert.match(configDocsJa, /window-state\.json/);
 assert.match(configDocsJa, /同じ table を複数回定義できません/);
 assert.match(configDocsJa, /OSC 777/);
+assert.match(configDocsJa, /`printf` 例は POSIX shell/);
+assert.match(configDocsJa, /PowerShell や cmd\.exe ではそのまま使えません/);
+assert.match(configDocsJa, /\[Console\]::Write\("\$\(\[char\]27\)\]777;title=work;titlebarColor=#2e7d32/);
 assert.match(configDocsJa, /titlebarColor=#2e7d32/);
 assert.match(configDocsJa, /opacity=0\.65/);
 assert.match(configDocsJa, /examples\/config\/runtime-appearance\.toml/);
 assert.match(configDocsJa, /apply-runtime-appearance\.sh/);
+assert.match(configDocsJa, /apply-runtime-appearance\.ps1/);
+assert.match(configDocsJa, /apply-runtime-appearance\.bat/);
 assert.match(configDocsJa, /RUNTIME SAMPLE ACTIVE/);
 assert.match(configDocsJa, /apply-default-appearance\.sh/);
+assert.match(configDocsJa, /apply-default-appearance\.ps1/);
+assert.match(configDocsJa, /apply-default-appearance\.bat/);
 assert.match(configDocsJa, /\\a\\r\\n/);
 assert.match(configDocsJa, /現在の shell session は維持されます/);
 assert.match(configDocsJa, /TERM=xterm-256color/);
@@ -544,6 +609,8 @@ assert.match(sampleConfig, /termName = "xterm-256color"/);
 
 const runtimeConfig = read('examples/config/runtime-appearance.toml');
 assert.match(runtimeConfig, /title = "RUNTIME SAMPLE ACTIVE"/);
+assert.match(runtimeConfig, /POSIX shell/);
+assert.match(runtimeConfig, /apply-runtime-appearance\.ps1 or \.bat/);
 assert.match(runtimeConfig, /titlebarColor = "#d81b60"/);
 assert.match(runtimeConfig, /# fontSize = 18/);
 assert.match(runtimeConfig, /# width = 1180/);
@@ -556,8 +623,21 @@ const runtimeApplyScript = read('examples/apply-runtime-appearance.sh');
 assert.match(runtimeApplyScript, /runtime-appearance\.toml/);
 assert.match(runtimeApplyScript, /printf '\\033\]777;config=%s\\a\\r\\n'/);
 
+const runtimeApplyPowerShell = read('examples/apply-runtime-appearance.ps1');
+assert.match(runtimeApplyPowerShell, /runtime-appearance\.toml/);
+assert.match(runtimeApplyPowerShell, /\[Console\]::Write/);
+assert.match(runtimeApplyPowerShell, /`e\]777;config=\$ConfigPath`a`r`n/);
+
+const runtimeApplyBatch = read('examples/apply-runtime-appearance.bat');
+assert.match(runtimeApplyBatch, /runtime-appearance\.toml/);
+assert.match(runtimeApplyBatch, /powershell\.exe -NoProfile -ExecutionPolicy Bypass/);
+assert.match(runtimeApplyBatch, /\[char\]27/);
+assert.match(runtimeApplyBatch, /\[char\]7/);
+
 const defaultConfig = read('examples/config/default-appearance.toml');
 assert.match(defaultConfig, /title = "fpasoterm"/);
+assert.match(defaultConfig, /POSIX shell/);
+assert.match(defaultConfig, /apply-default-appearance\.ps1 or \.bat/);
 assert.match(defaultConfig, /titlebarColor = "#1565c0"/);
 assert.match(defaultConfig, /backgroundOpacity = 0\.8/);
 assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.80\)"/);
@@ -567,6 +647,17 @@ assert.match(defaultConfig, /cursor = "#f5d76e"/);
 const defaultApplyScript = read('examples/apply-default-appearance.sh');
 assert.match(defaultApplyScript, /default-appearance\.toml/);
 assert.match(defaultApplyScript, /printf '\\033\]777;config=%s\\a\\r\\n'/);
+
+const defaultApplyPowerShell = read('examples/apply-default-appearance.ps1');
+assert.match(defaultApplyPowerShell, /default-appearance\.toml/);
+assert.match(defaultApplyPowerShell, /\[Console\]::Write/);
+assert.match(defaultApplyPowerShell, /`e\]777;config=\$ConfigPath`a`r`n/);
+
+const defaultApplyBatch = read('examples/apply-default-appearance.bat');
+assert.match(defaultApplyBatch, /default-appearance\.toml/);
+assert.match(defaultApplyBatch, /powershell\.exe -NoProfile -ExecutionPolicy Bypass/);
+assert.match(defaultApplyBatch, /\[char\]27/);
+assert.match(defaultApplyBatch, /\[char\]7/);
 
 const pluginTypes = read('docs/fpasoterm-plugin.d.ts');
 assert.match(pluginTypes, /fpasotermPluginApi/);
@@ -622,6 +713,9 @@ assert.match(renderer, /applyRuntimeConfigPath/);
 assert.match(renderer, /await afterNextPaint\(\);\s*fitAndResize\(\);/s);
 assert.match(renderer, /applyConfigPath/);
 assert.match(renderer, /setRuntimeWindowTitle/);
+assert.match(renderer, /titleLocked/);
+assert.match(renderer, /ignored shell title change while title is locked/);
+assert.match(renderer, /setRuntimeWindowTitle\(value, \{ force: true \}\)/);
 assert.match(renderer, /setRuntimeTitlebarColor/);
 assert.match(renderer, /applyFpasotermOsc/);
 assert.match(renderer, /processRuntimeOsc/);
@@ -667,6 +761,7 @@ assert.match(config, /defaultConfig/);
 assert.match(config, /defaultConfigExample/);
 assert.match(config, /title: 'fpasoterm'/);
 assert.match(config, /titlebarColor: '#1565c0'/);
+assert.match(config, /titleLocked: true/);
 assert.match(config, /backgroundOpacity: 0\.8/);
 assert.match(config, /termName: 'xterm-256color'/);
 assert.match(config, /shell: ''/);

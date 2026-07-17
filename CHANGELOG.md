@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.2
+
+- Allowed multiple fpasoterm windows on ChromeOS/Linux by disabling GTK application-id activation.
+- Made Windows prefer PowerShell 7 (`pwsh.exe`) as the default shell when available.
+- Added the fpasoterm executable directory to Windows child terminal `Path` so `fpasoterm` commands work inside the opened terminal.
+
 ## 1.2.1
 
 - Fixed Windows direct binary CLI handling for `--help`, `--show-config`, window overrides, and shell selection.

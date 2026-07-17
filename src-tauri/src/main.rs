@@ -43,6 +43,7 @@ struct WindowConfig {
     min_height: u32,
     background_color: String,
     titlebar_color: String,
+    title_locked: bool,
     theme_source: String,
     frame: bool,
     remember_bounds: bool,
@@ -115,6 +116,8 @@ const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help   
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
+    apply_direct_cli_env_overrides();
+
     if cli_has_flag(&["--help", "-h"]) {
         print_cli_text(HELP_TEXT);
         return;
@@ -198,6 +201,48 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run fpasoterm");
+}
+
+// Normalizes direct binary arguments into the same environment overrides used by the Node launcher.
+fn apply_direct_cli_env_overrides() {
+    set_env_from_cli("FPASOTERM_CONFIG_PATH", &["--config", "-c"]);
+    set_env_from_cli("FPASOTERM_SHELL", &["--shell", "-s"]);
+    set_env_from_cli("FPASOTERM_WINDOW_TITLE", &["--title", "-t"]);
+    set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
+    set_env_from_cli("FPASOTERM_START_COMMAND", &["--command", "-e"]);
+
+    if let Some((width, height)) = cli_size_option() {
+        env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
+        env::set_var("FPASOTERM_WINDOW_HEIGHT", height.to_string());
+    }
+    if env::var("FPASOTERM_WINDOW_TITLE").is_ok() {
+        env::set_var("FPASOTERM_WINDOW_TITLE_LOCKED", "1");
+    }
+    if let Some(width) = cli_positive_u32_option_any(&["--width", "-W"]) {
+        env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
+    }
+    if let Some(height) = cli_positive_u32_option_any(&["--height", "-H"]) {
+        env::set_var("FPASOTERM_WINDOW_HEIGHT", height.to_string());
+    }
+    if cli_has_flag(&["--debug-keys", "-k"]) {
+        env::set_var("FPASOTERM_DEBUG_KEYS", "1");
+    }
+    if cli_has_flag(&["--console-diagnostics", "-C"]) {
+        env::set_var("FPASOTERM_CONSOLE_DIAGNOSTICS", "1");
+    }
+    if cli_has_flag(&["--debug-opaque-terminal"]) {
+        env::set_var("FPASOTERM_DEBUG_OPAQUE_TERMINAL", "1");
+    }
+    if cli_has_flag(&["--disable-dmabuf"]) {
+        env::set_var("FPASOTERM_DISABLE_DMABUF", "1");
+    }
+}
+
+// Stores one sanitized CLI value in the process environment when present.
+fn set_env_from_cli(name: &str, flags: &[&str]) {
+    if let Some(value) = cli_option_value_any(flags) {
+        env::set_var(name, sanitize_cli_value(&value));
+    }
 }
 
 // Applies the runtime icon shown by Linux shelves, task switchers, and window managers.
@@ -393,6 +438,8 @@ fn default_runtime_config() -> RuntimeConfig {
             .or_else(|| cli_option_value_any(&["--titlebar-color", "-b"]))
             .or_else(|| read_configured_string(&config_path, "window", "titlebarColor"))
             .unwrap_or_else(|| "#1565c0".to_string()),
+        title_locked: env::var("FPASOTERM_WINDOW_TITLE_LOCKED").as_deref() == Ok("1")
+            || read_configured_bool(&config_path, "window", "titleLocked").unwrap_or(true),
         theme_source: "system".to_string(),
         frame: false,
         remember_bounds: true,
@@ -473,6 +520,12 @@ fn read_configured_string(config_path: &str, section: &str, key: &str) -> Option
         .map(str::to_string)
 }
 
+// Reads a boolean from a specific TOML section and key.
+fn read_configured_bool(config_path: &str, section: &str, key: &str) -> Option<bool> {
+    let value: toml::Value = toml::from_str(&fs::read_to_string(config_path).ok()?).ok()?;
+    value.get(section)?.get(key)?.as_bool()
+}
+
 // Reads terminal.shell from config.toml.
 fn read_configured_shell(config_path: &str) -> Option<String> {
     read_configured_string(config_path, "terminal", "shell")
@@ -482,6 +535,7 @@ fn read_configured_shell(config_path: &str) -> Option<String> {
 fn apply_direct_cli_overrides(runtime: &mut RuntimeConfig) {
     if let Some(title) = cli_option_value_any(&["--title", "-t"]) {
         runtime.config.window.title = title;
+        runtime.config.window.title_locked = true;
     }
     if let Some(color) = cli_option_value_any(&["--titlebar-color", "-b"]) {
         runtime.config.window.titlebar_color = color;
@@ -523,17 +577,24 @@ fn cli_option_value(flag: &str) -> Option<String> {
         if arg == flag {
             return args
                 .next()
-                .map(|value| value.trim().to_string())
+                .map(|value| sanitize_cli_value(&value))
                 .filter(|value| !value.is_empty());
         }
         if let Some(value) = arg.strip_prefix(&equals_prefix) {
-            let value = value.trim();
+            let value = sanitize_cli_value(value);
             if !value.is_empty() {
-                return Some(value.to_string());
+                return Some(value);
             }
         }
     }
     None
+}
+
+// Removes accidental NUL terminators and surrounding whitespace from direct CLI values.
+fn sanitize_cli_value(value: &str) -> String {
+    value
+        .trim_matches(|character: char| character.is_whitespace() || character == '\0')
+        .replace('\0', "")
 }
 
 // Parses a positive integer option, ignoring invalid values so the UI can still start.
@@ -730,12 +791,28 @@ fn shell_command(config: &Config) -> String {
         return resolve_shell_command(&shell);
     }
     if cfg!(windows) {
-        env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
+        default_windows_shell()
     } else if cfg!(target_os = "macos") {
         macos_login_shell().unwrap_or_else(|| "/bin/zsh".to_string())
     } else {
         env::var("SHELL").unwrap_or_else(|_| "/bin/bash".to_string())
     }
+}
+
+#[cfg(windows)]
+// Chooses PowerShell 7 by default when available, then falls back to the OS command shell.
+fn default_windows_shell() -> String {
+    for candidate in windows_pwsh_candidates() {
+        if fs::metadata(&candidate).is_ok() {
+            return candidate;
+        }
+    }
+    env::var("ComSpec").unwrap_or_else(|_| "powershell.exe".to_string())
+}
+
+#[cfg(not(windows))]
+fn default_windows_shell() -> String {
+    String::new()
 }
 
 // Resolves known shell aliases that are not always available through PATH.
@@ -809,6 +886,23 @@ fn windows_path_executable(name: &str) -> Option<String> {
     None
 }
 
+#[cfg(windows)]
+// Prepends the installed executable directory so child shells can run `fpasoterm`.
+fn terminal_path_with_app_dir() -> Option<String> {
+    let app_dir = env::current_exe().ok()?.parent()?.to_path_buf();
+    let existing_path = env::var_os("PATH").unwrap_or_default();
+    let mut paths = vec![app_dir];
+    paths.extend(env::split_paths(&existing_path));
+    env::join_paths(paths)
+        .ok()
+        .map(|value| value.to_string_lossy().to_string())
+}
+
+#[cfg(not(windows))]
+fn terminal_path_with_app_dir() -> Option<String> {
+    None
+}
+
 #[tauri::command]
 // Creates the PTY, starts the configured shell, and bridges output to the renderer.
 fn terminal_start(
@@ -847,6 +941,9 @@ fn terminal_start(
     command.cwd(home_dir());
     command.env("TERM", "xterm-256color");
     command.env("TERM_PROGRAM", "fpasoterm");
+    if let Some(path_value) = terminal_path_with_app_dir() {
+        command.env("Path", path_value);
+    }
 
     let mut child = pair
         .slave

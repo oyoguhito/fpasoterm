@@ -77,6 +77,10 @@ runtime cache, and Tauri/WebKit app data:
 npm run uninstall:desktop
 ```
 
+On Windows, this also removes fpasoterm-specific directories from the current
+user's `Path` if they were added during local testing. Shared npm directories
+are left untouched.
+
 To expose the local command during development:
 
 ```sh
@@ -112,7 +116,7 @@ Tagged GitHub Releases build the broader release set in GitHub Actions:
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.2.1_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.2_arm64-linux-arm64.deb
 ```
 
 ## 日本語
@@ -182,6 +186,9 @@ local command、launcher entry、icon、ユーザー設定、runtime cache、Tau
 npm run uninstall:desktop
 ```
 
+Windows では、local testing で追加した fpasoterm 関連 directory を current user
+の `Path` から削除します。共有 npm directory は残します。
+
 ChromeOS/Baguette で透過検証中に黒、白、ちらつきが出る場合:
 
 ```sh
@@ -210,7 +217,7 @@ tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.2.1_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.2_arm64-linux-arm64.deb
 ```
 
 ## Linux Desktop Entry

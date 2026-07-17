@@ -16,6 +16,7 @@ const defaultConfig = Object.freeze({
     minHeight: 260,
     backgroundColor: 'rgba(0, 0, 0, 0)',
     titlebarColor: '#1565c0',
+    titleLocked: true,
     themeSource: 'system',
     frame: false,
     rememberBounds: true,
@@ -79,6 +80,8 @@ minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
 # titlebarColor controls the custom titlebar background when frame is false.
 titlebarColor = "#1565c0"
+# titleLocked prevents shell-emitted title sequences from replacing title.
+titleLocked = true
 # themeSource can be "system", "light", or "dark".
 themeSource = "system"
 # frame controls whether the native window frame/titlebar is shown.

@@ -35,6 +35,10 @@ fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm -t logs -b '#6a1b9a'
 ```
 
+`--title` を使った場合、shell が送る title change は無視されるため、
+ウィンドウ識別用の表示名が維持されます。起動中 terminal から意図して
+変更したい場合は `OSC 777;title=...` を使ってください。
+
 起動後に shell でコマンドを実行する場合:
 
 ```sh
@@ -84,6 +88,7 @@ minWidth = 420
 minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
 titlebarColor = "#1565c0"
+titleLocked = true
 themeSource = "system"
 rememberBounds = true
 frame = false
@@ -131,8 +136,8 @@ enabled = []
 
 ## セクション
 
-- `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。
+- `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
+- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 
@@ -140,7 +145,11 @@ enabled = []
 
 window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
+Windows では、起動した terminal process の `Path` 先頭に fpasoterm の実行ファイルがあるディレクトリを追加します。これにより、global user/system PATH を変更しなくても、fpasoterm 内で `fpasoterm --help` などを実行できます。
+
 起動中の titlebar は terminal 内の command からも変更できます。標準の OSC title sequence は window title を変更し、fpasoterm 独自の OSC 777 は titlebar 表示を変更します。
+
+次の `printf` 例は POSIX shell (`bash`、`dash`、`fish` など) 向けです。Windows の PowerShell や cmd.exe ではそのまま使えません。
 
 ```sh
 printf '\033]0;work\a\r\n'
@@ -149,10 +158,23 @@ printf '\033]777;opacity=0.65\a\r\n'
 printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
 ```
 
+PowerShell で直接送る場合:
+
+```powershell
+[Console]::Write("$([char]27)]777;title=work;titlebarColor=#2e7d32$([char]7)`r`n")
+```
+
 runtime config sample は次で適用できます。
 
 ```sh
 ./examples/apply-runtime-appearance.sh
+```
+
+Windows PowerShell または cmd.exe では次を使えます。
+
+```powershell
+.\examples\apply-runtime-appearance.ps1
+.\examples\apply-runtime-appearance.bat
 ```
 
 この sample は title を `RUNTIME SAMPLE ACTIVE` にし、titlebar をピンク、terminal 背景と文字色を分かりやすく変更します。
@@ -163,11 +185,25 @@ runtime config sample は次で適用できます。
 ./examples/apply-default-appearance.sh
 ```
 
+Windows PowerShell または cmd.exe では次を使えます。
+
+```powershell
+.\examples\apply-default-appearance.ps1
+.\examples\apply-default-appearance.bat
+```
+
 path を手動指定する場合:
 
 ```sh
 config_path="$(pwd)/examples/config/runtime-appearance.toml"
 printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+Windows PowerShell で path を手動指定する場合:
+
+```powershell
+$configPath = Resolve-Path .\examples\config\runtime-appearance.toml
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
 runtime config 適用では、現在の shell session は維持されます。`window.title`、`window.titlebarColor`、`window.width`、`window.height`、`terminal.fontSize`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。`terminal.shell` のように新しい PTY が必要な設定は次回起動時に反映されます。

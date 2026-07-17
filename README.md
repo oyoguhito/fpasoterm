@@ -93,6 +93,10 @@ To cleanly remove the local command, launcher entry, installed launcher icons, u
 npm run uninstall:desktop
 ```
 
+On Windows, the same command removes fpasoterm-specific directories from the
+current user's `Path` if they were added during local testing. It does not remove
+shared npm directories from `Path`.
+
 ## Command-line binary
 
 Install from the npm registry:
@@ -146,10 +150,17 @@ fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm --reset-window-state
 ```
 
-On Windows, `--shell pwsh.exe` uses PowerShell 7 when it is available on `PATH`.
-If it is installed in a standard PowerShell 7 location but not on `PATH`,
-fpasoterm also checks common install paths such as
-`C:\Program Files\PowerShell\7\pwsh.exe`. A full path can always be used.
+On Windows, fpasoterm uses PowerShell 7 (`pwsh.exe`) by default when it is
+available. If it is not on `PATH`, fpasoterm also checks common install paths
+such as `C:\Program Files\PowerShell\7\pwsh.exe`, then falls back to the OS
+command shell. A full path can always be used with `--shell`.
+
+Windows child shells also receive the fpasoterm executable directory at the
+front of `Path`, so commands such as `fpasoterm --help` work inside a
+fpasoterm terminal after installation.
+
+By default, fpasoterm keeps its configured title even if the shell emits its own
+title sequence. Use `OSC 777;title=...` for an intentional runtime rename.
 
 Short options are available for common one-shot overrides:
 
@@ -158,7 +169,7 @@ fpasoterm -t work -b '#2e7d32' -z 1200x760 -s pwsh.exe
 fpasoterm -e "tmux attach -t work"
 ```
 
-The running window can also be renamed from inside the terminal:
+The running window can also be renamed from inside the terminal with a POSIX shell:
 
 ```sh
 printf '\033]0;work\a\r\n'
@@ -167,10 +178,24 @@ printf '\033]777;opacity=0.65\a\r\n'
 printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
 ```
 
+Windows PowerShell and cmd.exe do not run those `printf` examples as-is. Use the
+PowerShell form or the helper scripts below:
+
+```powershell
+[Console]::Write("$([char]27)]777;title=work;titlebarColor=#2e7d32$([char]7)`r`n")
+```
+
 The runtime config sample can be applied with:
 
 ```sh
 ./examples/apply-runtime-appearance.sh
+```
+
+On Windows PowerShell or cmd.exe:
+
+```powershell
+.\examples\apply-runtime-appearance.ps1
+.\examples\apply-runtime-appearance.bat
 ```
 
 This sample changes the title to `RUNTIME SAMPLE ACTIVE`, switches the titlebar
@@ -182,11 +207,25 @@ To return the running window to the default appearance:
 ./examples/apply-default-appearance.sh
 ```
 
+On Windows PowerShell or cmd.exe:
+
+```powershell
+.\examples\apply-default-appearance.ps1
+.\examples\apply-default-appearance.bat
+```
+
 Or, if you need to specify the path manually:
 
 ```sh
 config_path="$(pwd)/examples/config/runtime-appearance.toml"
 printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+On Windows PowerShell:
+
+```powershell
+$configPath = Resolve-Path .\examples\config\runtime-appearance.toml
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
 Runtime config application keeps the current shell session running. It applies
@@ -323,6 +362,10 @@ and also falls back to common `node` paths. This lets the ChromeOS launcher
 start fpasoterm from the icon even when it does not inherit the user's shell
 `PATH`.
 
+Linux builds do not enable GTK application-id activation. This keeps ChromeOS
+from treating a second launcher start as an activation of the existing window,
+so multiple fpasoterm windows can be opened.
+
 When packaging a macOS `.app` bundle, use the generated icon at:
 
 ```text
@@ -445,7 +488,7 @@ fpasoterm -t work -b '#2e7d32' -z 1200x760 -s /bin/fish
 fpasoterm -e "tmux attach -t work"
 ```
 
-起動中の window は terminal 内の command からも変更できます。
+起動中の window は、POSIX shell を使っている場合は terminal 内の command からも変更できます。
 
 ```sh
 printf '\033]0;work\a\r\n'
@@ -454,10 +497,24 @@ printf '\033]777;opacity=0.65\a\r\n'
 printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
 ```
 
+Windows PowerShell や cmd.exe では、この `printf` 例はそのまま使えません。
+PowerShell 形式、または下記 helper script を使ってください。
+
+```powershell
+[Console]::Write("$([char]27)]777;title=work;titlebarColor=#2e7d32$([char]7)`r`n")
+```
+
 runtime config sample は次で適用できます。
 
 ```sh
 ./examples/apply-runtime-appearance.sh
+```
+
+Windows PowerShell または cmd.exe では次を使えます。
+
+```powershell
+.\examples\apply-runtime-appearance.ps1
+.\examples\apply-runtime-appearance.bat
 ```
 
 この sample は title を `RUNTIME SAMPLE ACTIVE` にし、titlebar をピンク、
@@ -469,11 +526,25 @@ terminal 背景と文字色を分かりやすく変更します。
 ./examples/apply-default-appearance.sh
 ```
 
+Windows PowerShell または cmd.exe では次を使えます。
+
+```powershell
+.\examples\apply-default-appearance.ps1
+.\examples\apply-default-appearance.bat
+```
+
 path を手動指定する場合:
 
 ```sh
 config_path="$(pwd)/examples/config/runtime-appearance.toml"
 printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+Windows PowerShell で path を手動指定する場合:
+
+```powershell
+$configPath = Resolve-Path .\examples\config\runtime-appearance.toml
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
 runtime config 適用では、現在の shell session は維持されます。

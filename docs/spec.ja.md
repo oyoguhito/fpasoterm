@@ -26,7 +26,7 @@ npm install -g fpasoterm
 
 展開済み checkout では、`npm run install:desktop` により `XDG_BIN_HOME` または `~/.local/bin` にローカル `fpasoterm` コマンドをインストールします。
 
-`npm run update:desktop` は同じ command、launcher entry、hicolor icon files を上書きします。`npm run uninstall:desktop` は source checkout や npm dependencies を削除せず、インストール済みファイルだけを削除します。
+`npm run update:desktop` は同じ command、launcher entry、hicolor icon files を上書きします。`npm run uninstall:desktop` は source checkout や npm dependencies を削除せず、インストール済みファイルだけを削除します。Windows では current user の `Path` から fpasoterm 関連 directory だけを削除し、共有 npm directory は削除しません。
 
 プロジェクトアイコンは `extra/logo/fpasoterm.png` です。
 
