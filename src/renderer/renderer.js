@@ -16,6 +16,7 @@ const fallbackConfig = {
     backgroundColor: 'rgba(0, 0, 0, 0)',
     title: 'fpasoterm',
     titlebarColor: '#1565c0',
+    titleLocked: true,
   },
   terminal: {
     allowTransparency: true,
@@ -534,9 +535,13 @@ async function applyRuntimeConfigPath(configPath) {
 }
 
 // Updates both the browser document title and the visible custom titlebar text.
-function setRuntimeWindowTitle(title) {
+function setRuntimeWindowTitle(title, options = {}) {
   const normalizedTitle = String(title || '').trim();
   if (!normalizedTitle) {
+    return;
+  }
+  if (appConfig.window?.titleLocked && !options.force) {
+    showDebugDiagnostic(`ignored shell title change while title is locked: ${normalizedTitle}`);
     return;
   }
 
@@ -569,7 +574,7 @@ function applyFpasotermOsc(command) {
     const key = field.slice(0, separator).trim();
     const value = field.slice(separator + 1).trim();
     if (key === 'title') {
-      setRuntimeWindowTitle(value);
+      setRuntimeWindowTitle(value, { force: true });
     } else if (key === 'titlebarColor') {
       setRuntimeTitlebarColor(value);
     } else if (key === 'opacity' || key === 'backgroundOpacity' || key === 'terminalOpacity') {
@@ -702,7 +707,7 @@ function createTerminal() {
     screenReaderMode: false,
   });
   if (typeof term.onTitleChange === 'function') {
-    term.onTitleChange(setRuntimeWindowTitle);
+    term.onTitleChange((title) => setRuntimeWindowTitle(title));
   }
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);

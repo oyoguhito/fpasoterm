@@ -1,6 +1,7 @@
 # Runtime appearance test config.
-# Apply from a running fpasoterm terminal:
+# Apply from a running fpasoterm terminal with a POSIX shell:
 # printf '\033]777;config=/path/to/fpasoterm/examples/config/runtime-appearance.toml\a\r\n'
+# On Windows, use examples/apply-runtime-appearance.ps1 or .bat.
 
 [window]
 title = "RUNTIME SAMPLE ACTIVE"

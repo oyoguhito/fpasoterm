@@ -1,6 +1,6 @@
 {
   "name": "fpasoterm",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Cross-platform terminal with Japanese IME support.",
   "license": "MIT",
   "homepage": "https://github.com/oyoguhito/fpasoterm#readme",
@@ -46,7 +46,7 @@
     "dev": "tauri dev",
     "build": "tauri build",
     "check": "npm run check:syntax && npm test && cargo check --manifest-path src-tauri/Cargo.toml",
-    "check:syntax": "node --check bin/fpasoterm && node --check src/config.js && node --check src/renderer/renderer.js",
+    "check:syntax": "node --check bin/fpasoterm && node --check scripts/uninstall-desktop.js && node --check scripts/uninstall-windows-path.js && node --check src/config.js && node --check src/renderer/renderer.js",
     "test": "node scripts/tests/smoke.js",
     "scan:secrets": "node scripts/security/scan-secrets.js",
     "security": "npm run scan:secrets && npm run audit:prod",
@@ -54,7 +54,7 @@
     "generate:icons": "node scripts/generate-icon.js",
     "install:desktop": "node scripts/install-linux-desktop.js",
     "update:desktop": "node scripts/install-linux-desktop.js",
-    "uninstall:desktop": "node scripts/uninstall-linux-desktop.js",
+    "uninstall:desktop": "node scripts/uninstall-desktop.js",
     "build:artifacts": "node scripts/build-artifacts.js"
   },
   "dependencies": {

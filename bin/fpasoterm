@@ -581,6 +581,7 @@ function applyTerminalRuntimeOverrides(terminalConfig, env) {
 function applyWindowRuntimeOverrides(windowConfig, env) {
   if (env.FPASOTERM_WINDOW_TITLE) {
     windowConfig.title = env.FPASOTERM_WINDOW_TITLE;
+    windowConfig.titleLocked = true;
   }
   if (env.FPASOTERM_TITLEBAR_COLOR) {
     windowConfig.titlebarColor = env.FPASOTERM_TITLEBAR_COLOR;

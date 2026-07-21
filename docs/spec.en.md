@@ -26,7 +26,7 @@ npm install -g fpasoterm
 
 For an unpacked checkout, `npm run install:desktop` installs a local `fpasoterm` command into `XDG_BIN_HOME` or `~/.local/bin`.
 
-`npm run update:desktop` overwrites the same command, launcher entry, and hicolor icon files. `npm run uninstall:desktop` removes those installed files without removing the source checkout or npm dependencies.
+`npm run update:desktop` overwrites the same command, launcher entry, and hicolor icon files. `npm run uninstall:desktop` removes those installed files without removing the source checkout or npm dependencies. On Windows, `npm run uninstall:desktop` removes only fpasoterm-specific directories from the current user's `Path`; shared npm directories are not removed.
 
 The project icon is `extra/logo/fpasoterm.png`.
 

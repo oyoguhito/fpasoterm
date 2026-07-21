@@ -35,6 +35,10 @@ fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm -t logs -b '#6a1b9a'
 ```
 
+When `--title` is used, shell-emitted title changes are ignored so the window
+label stays stable. Use `OSC 777;title=...` if you intentionally want to rename
+the running window from inside the terminal.
+
 Run a command in the shell after launch:
 
 ```sh
@@ -84,6 +88,7 @@ minWidth = 420
 minHeight = 260
 backgroundColor = "rgba(0, 0, 0, 0)"
 titlebarColor = "#1565c0"
+titleLocked = true
 themeSource = "system"
 rememberBounds = true
 frame = false
@@ -131,8 +136,8 @@ enabled = []
 
 ## Sections
 
-- `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
+- `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
+- `terminal`: xterm.js options passed when the terminal is created. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 
@@ -140,7 +145,11 @@ When `window.rememberBounds` is enabled, the last window size is saved to `~/.co
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
-The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance:
+On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. This allows `fpasoterm --help` and other fpasoterm commands to run from inside the opened terminal without changing the global user or system PATH.
+
+The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance.
+
+The following `printf` examples are for POSIX shells such as `bash`, `dash`, and `fish`. They do not run as-is in Windows PowerShell or cmd.exe.
 
 ```sh
 printf '\033]0;work\a\r\n'
@@ -149,10 +158,23 @@ printf '\033]777;opacity=0.65\a\r\n'
 printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
 ```
 
+In PowerShell, emit the same fpasoterm OSC 777 sequence with:
+
+```powershell
+[Console]::Write("$([char]27)]777;title=work;titlebarColor=#2e7d32$([char]7)`r`n")
+```
+
 The runtime config sample can be applied with:
 
 ```sh
 ./examples/apply-runtime-appearance.sh
+```
+
+On Windows PowerShell or cmd.exe:
+
+```powershell
+.\examples\apply-runtime-appearance.ps1
+.\examples\apply-runtime-appearance.bat
 ```
 
 This sample changes the title to `RUNTIME SAMPLE ACTIVE`, switches the titlebar to pink, and changes the terminal background and text colors.
@@ -163,11 +185,25 @@ To return the running window to the default appearance:
 ./examples/apply-default-appearance.sh
 ```
 
+On Windows PowerShell or cmd.exe:
+
+```powershell
+.\examples\apply-default-appearance.ps1
+.\examples\apply-default-appearance.bat
+```
+
 Or, if you need to specify the path manually:
 
 ```sh
 config_path="$(pwd)/examples/config/runtime-appearance.toml"
 printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+In Windows PowerShell, specify the path manually with:
+
+```powershell
+$configPath = Resolve-Path .\examples\config\runtime-appearance.toml
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
 Runtime config application keeps the current shell session running. It applies live window and terminal appearance settings such as `window.title`, `window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`, `terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`. Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
