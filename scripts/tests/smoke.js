@@ -28,7 +28,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.2.0');
+assert.equal(packageJson.version, '1.2.1');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -56,6 +56,8 @@ for (const file of [
   'docs/fpasoterm-plugin.d.ts',
   'docs/known-issues.en.md',
   'docs/known-issues.ja.md',
+  'docs/pr-review.en.md',
+  'docs/pr-review.ja.md',
   'docs/spec.en.md',
   'docs/spec.ja.md',
   'examples/apply-default-appearance.sh',
@@ -102,6 +104,9 @@ assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
 assert.match(bin, /--show-config/);
+assert.match(bin, /--self-update/);
+assert.match(bin, /--self-update-checkout/);
+assert.match(bin, /--update-desktop/);
 assert.match(bin, /--shell/);
 assert.match(bin, /--command/);
 assert.match(bin, /--title/);
@@ -123,6 +128,17 @@ assert.match(bin, /WEBKIT_DISABLE_DMABUF_RENDERER/);
 assert.match(bin, /FPASOTERM_RUNTIME_CONFIG_JSON/);
 assert.match(bin, /FPASOTERM_LAUNCHER_LOG/);
 assert.match(bin, /appendLauncherLog/);
+assert.match(bin, /npmCommand/);
+assert.match(bin, /runChecked/);
+assert.match(bin, /isSourceCheckout/);
+assert.match(bin, /isJjCheckout/);
+assert.match(bin, /ensureCleanGitCheckout/);
+assert.match(bin, /updateDesktopIntegration/);
+assert.match(bin, /selfUpdate/);
+assert.match(bin, /selfUpdateCheckout/);
+assert.match(bin, /npmCommand\(\), \['install', '-g', 'fpasoterm@latest'\]/);
+assert.match(bin, /git', \['pull', '--ff-only'\]/);
+assert.match(bin, /npmCommand\(\), \['install'\]/);
 assert.match(bin, /debugKeys/);
 assert.match(bin, /consoleDiagnostics/);
 assert.match(bin, /opaqueTerminal/);
@@ -132,6 +148,15 @@ assert.match(bin, /child\.unref\(\)/);
 assert.match(bin, /windowsHide: !options\.foreground/);
 assert.match(bin, /isBuiltBinaryCurrent/);
 assert.match(bin, /latestRuntimeSourceMtime/);
+assert.match(bin, /buildTauriBinary/);
+assert.match(bin, /buildStampPath/);
+assert.match(bin, /readBuildStamp/);
+assert.match(bin, /writeBuildStamp/);
+assert.match(bin, /findStampedTauriBinary/);
+assert.match(bin, /\.fpasoterm-normal-build\.json/);
+assert.match(bin, /cargo', \['build', '--manifest-path'/);
+assert.match(bin, /options\.dev \? 'tauri-dev' : 'binary'/);
+assert.match(bin, /options\.dev \? undefined : await buildTauriBinary\(options\)/);
 assert.match(bin, /src-tauri\/src\/main\.rs/);
 assert.doesNotMatch(bin, new RegExp(`--${'ozo'}${'ne'}-platform`));
 assert.doesNotMatch(bin, new RegExp(`FPASOTERM_${'OZONE'}_PLATFORM`));
@@ -298,6 +323,8 @@ assert.match(cargoToml, /tauri =/);
 assert.match(cargoToml, /macos-private-api/);
 assert.match(cargoToml, /portable-pty/);
 assert.match(cargoToml, /toml =/);
+assert.match(cargoToml, /windows-sys/);
+assert.match(cargoToml, /Win32_System_Console/);
 
 const tauriCapabilities = read('src-tauri/capabilities/default.json');
 assert.match(tauriCapabilities, /core:event:allow-listen/);
@@ -306,6 +333,16 @@ assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
 assert.match(rustMain, /windows_subsystem = "windows"/);
+assert.match(rustMain, /HELP_TEXT/);
+assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
+assert.match(rustMain, /print_cli_text\(HELP_TEXT\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
+assert.match(rustMain, /print_show_config/);
+assert.match(rustMain, /cli_has_flag\(&\["--reset-window-state", "-r"\]\)/);
+assert.match(rustMain, /reset_window_state_cli/);
+assert.match(rustMain, /print_cli_text_windows/);
+assert.match(rustMain, /AttachConsole/);
+assert.match(rustMain, /CONOUT\$/);
 assert.match(rustMain, /portable_pty/);
 assert.match(rustMain, /ChildKiller/);
 assert.match(rustMain, /terminal_start/);
@@ -316,6 +353,9 @@ assert.match(rustMain, /command\.env\("TERM", "xterm-256color"\)/);
 assert.match(rustMain, /TERM_PROGRAM/);
 assert.match(rustMain, /config_apply_path/);
 assert.match(rustMain, /runtime_config_from_path/);
+assert.match(rustMain, /direct_runtime_config/);
+assert.match(rustMain, /apply_direct_cli_overrides/);
+assert.match(rustMain, /merge_runtime_config_from_path/);
 assert.match(rustMain, /merge_json_value/);
 assert.match(rustMain, /applied runtime config/);
 assert.match(rustMain, /terminal_write bytes/);
@@ -328,6 +368,21 @@ assert.match(rustMain, /cli_option_value_any\(&\["--shell", "-s"\]\)/);
 assert.match(rustMain, /cli_option_value_any\(&\["--config", "-c"\]\)/);
 assert.match(rustMain, /cli_option_value_any\(&\["--title", "-t"\]\)/);
 assert.match(rustMain, /cli_option_value_any\(&\["--titlebar-color", "-b"\]\)/);
+assert.match(rustMain, /cli_option_value_any\(&\["--command", "-e"\]\)/);
+assert.match(rustMain, /cli_positive_u32_option_any\(&\["--width", "-W"\]\)/);
+assert.match(rustMain, /cli_positive_u32_option_any\(&\["--height", "-H"\]\)/);
+assert.match(rustMain, /cli_size_option/);
+assert.match(rustMain, /cli_has_flag\(&\["--debug-keys", "-k"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--console-diagnostics", "-C"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--debug-opaque-terminal"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--disable-dmabuf"\]\)/);
+assert.match(rustMain, /resolve_shell_command/);
+assert.match(rustMain, /sanitize_shell_value/);
+assert.match(rustMain, /resolve_windows_shell/);
+assert.match(rustMain, /windows_pwsh_candidates/);
+assert.match(rustMain, /windows_path_executable/);
+assert.match(rustMain, /replace\('\\0', ""\)/);
+assert.match(rustMain, /PowerShell\\\\7\\\\pwsh\.exe/);
 assert.match(rustMain, /clone_killer/);
 assert.match(rustMain, /\.wait\(\)/);
 assert.match(rustMain, /macos_login_shell/);
@@ -378,8 +433,11 @@ assert.match(readme, /Tauri, xterm\.js, and a Rust PTY bridge/);
 assert.match(readme, /~\/\.config\/fpasoterm\/User\/config\.toml/);
 assert.match(readme, /plugins\/.*\.ts/);
 assert.match(readme, /docs\/config\.en\.md/);
+assert.match(readme, /docs\/pr-review\.en\.md/);
+assert.match(readme, /docs\/pr-review\.ja\.md/);
 assert.match(readme, /examples\/plugins/);
 assert.match(readme, /--shell/);
+assert.match(readme, /PowerShell\\7\\pwsh\.exe/);
 assert.match(readme, /--command/);
 assert.match(readme, /--reset-window-state/);
 assert.match(readme, /--disable-dmabuf/);
@@ -405,6 +463,7 @@ assert.match(configDocsEn, /termName = "xterm-256color"/);
 assert.match(configDocsEn, /fontSize = 14/);
 assert.match(configDocsEn, /shell = ""/);
 assert.match(configDocsEn, /pwsh\.exe/);
+assert.match(configDocsEn, /PowerShell\\7\\pwsh\.exe/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);
 assert.match(configDocsEn, /window-state\.json/);
 assert.match(configDocsEn, /same table to be defined more than once/);
@@ -432,6 +491,7 @@ assert.match(configDocsJa, /backgroundOpacity = 0\.8/);
 assert.match(configDocsJa, /termName = "xterm-256color"/);
 assert.match(configDocsJa, /shell = ""/);
 assert.match(configDocsJa, /pwsh\.exe/);
+assert.match(configDocsJa, /PowerShell\\7\\pwsh\.exe/);
 assert.match(configDocsJa, /window-state\.json/);
 assert.match(configDocsJa, /同じ table を複数回定義できません/);
 assert.match(configDocsJa, /OSC 777/);
@@ -456,6 +516,20 @@ assert.match(knownIssuesJa, /ChromeOS\/Baguette のウィンドウ位置/);
 assert.match(knownIssuesJa, /window size のみ復元/);
 assert.match(knownIssuesJa, /今後の課題/);
 assert.match(knownIssuesJa, /WEBKIT_DISABLE_DMABUF_RENDERER=1/);
+
+const prReviewEn = read('docs/pr-review.en.md');
+assert.match(prReviewEn, /Ordinary pull requests do not include release artifacts/);
+assert.match(prReviewEn, /gh pr checkout <number>/);
+assert.match(prReviewEn, /fpasoterm\.exe --help/);
+assert.match(prReviewEn, /Do not use tag release assets as substitutes for PR artifacts/);
+assert.match(prReviewEn, /pull_request/);
+
+const prReviewJa = read('docs/pr-review.ja.md');
+assert.match(prReviewJa, /通常の pull request には/);
+assert.match(prReviewJa, /gh pr checkout <number>/);
+assert.match(prReviewJa, /fpasoterm\.exe --help/);
+assert.match(prReviewJa, /tag release asset は PR artifact の代わりには使いません/);
+assert.match(prReviewJa, /pull_request/);
 
 const samplePlugin = read('examples/plugins/hello.ts');
 assert.match(samplePlugin, /fpasotermPluginApi/);

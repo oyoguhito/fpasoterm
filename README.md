@@ -74,6 +74,19 @@ To update the local command, launcher entry, and icons after pulling a newer che
 npm run update:desktop
 ```
 
+To update an npm-installed fpasoterm package from the terminal:
+
+```sh
+fpasoterm --self-update
+```
+
+For a source checkout, update the checkout with your normal git or jj workflow,
+then refresh desktop integration:
+
+```sh
+fpasoterm --update-desktop
+```
+
 To cleanly remove the local command, launcher entry, installed launcher icons, user config, runtime cache, and Tauri/WebKit app data:
 
 ```sh
@@ -133,6 +146,11 @@ fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm --reset-window-state
 ```
 
+On Windows, `--shell pwsh.exe` uses PowerShell 7 when it is available on `PATH`.
+If it is installed in a standard PowerShell 7 location but not on `PATH`,
+fpasoterm also checks common install paths such as
+`C:\Program Files\PowerShell\7\pwsh.exe`. A full path can always be used.
+
 Short options are available for common one-shot overrides:
 
 ```sh
@@ -184,12 +202,20 @@ fpasoterm --show-config
 fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 ```
 
+When a packaged `fpasoterm.exe` is launched directly on Windows, `--show-config`
+prints the resolved runtime config as JSON. The Node launcher prints TOML and
+plugin load details when it is available.
+
 Enable or disable plugins in `config.toml`:
 
 ```sh
 fpasoterm --enable-plugin hello.ts,theme.ts
 fpasoterm --disable-plugin hello.ts,theme.ts
 ```
+
+Plugin enable/disable commands are handled by the Node launcher. For direct
+packaged binary launches, edit `config.toml` manually or use the npm-installed
+`fpasoterm` command.
 
 For debugging, keep the app attached to the current console:
 
@@ -354,9 +380,11 @@ GitHub Actions runs the same check set on pushes and pull requests.
 
 - [Specification](docs/spec.en.md)
 - [Configuration](docs/config.en.md)
+- [Pull request review](docs/pr-review.en.md)
 - [Release checklist](docs/release-checklist.en.md)
 - [仕様](docs/spec.ja.md)
 - [設定](docs/config.ja.md)
+- [Pull request review 日本語](docs/pr-review.ja.md)
 - [リリースチェックリスト](docs/release-checklist.ja.md)
 
 ## 日本語
@@ -460,12 +488,20 @@ fpasoterm --show-config
 fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 ```
 
+Windows の packaged `fpasoterm.exe` を直接起動した場合、`--show-config` は
+解決済み runtime config を JSON で出力します。Node launcher を使える場合は
+TOML と plugin load detail を表示します。
+
 `config.toml` の plugin を有効化・無効化:
 
 ```sh
 fpasoterm --enable-plugin hello.ts,theme.ts
 fpasoterm --disable-plugin hello.ts,theme.ts
 ```
+
+plugin enable/disable command は Node launcher が処理します。packaged binary
+を直接起動している場合は、`config.toml` を手動編集するか、npm install された
+`fpasoterm` command を使ってください。
 
 デバッグ時にコンソールへ接続したまま起動する場合:
 

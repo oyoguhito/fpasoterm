@@ -49,6 +49,25 @@ Update an existing local command, launcher entry, and icon installation:
 npm run update:desktop
 ```
 
+Update an npm-installed package from the terminal:
+
+```sh
+fpasoterm --self-update
+```
+
+For a source checkout, update the checkout with your normal git or jj workflow,
+then refresh the installed command, launcher entry, and icons:
+
+```sh
+fpasoterm --update-desktop
+```
+
+For a clean non-jj git checkout, this can be automated:
+
+```sh
+fpasoterm --self-update-checkout
+```
+
 Run `npm run update:desktop` after changing the checkout path, launcher icon, or installed command wrapper. It is not required for `./bin/fpasoterm --dev ...`.
 
 Remove the local command, launcher entry, installed launcher icons, user config,
@@ -93,7 +112,7 @@ Tagged GitHub Releases build the broader release set in GitHub Actions:
 Install the Debian package locally:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.2.0_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.1_arm64-linux-arm64.deb
 ```
 
 ## 日本語
@@ -138,6 +157,25 @@ checkout path、launcher icon、installed command wrapper を更新した場合:
 npm run update:desktop
 ```
 
+npm でインストールした package を terminal から更新する場合:
+
+```sh
+fpasoterm --self-update
+```
+
+source checkout の場合は、通常の git または jj workflow で checkout を更新した後、
+installed command、launcher entry、icons を更新します。
+
+```sh
+fpasoterm --update-desktop
+```
+
+clean な non-jj git checkout では、次で自動化できます。
+
+```sh
+fpasoterm --self-update-checkout
+```
+
 local command、launcher entry、icon、ユーザー設定、runtime cache、Tauri/WebKit app data を完全に削除する場合:
 
 ```sh
@@ -172,7 +210,7 @@ tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成
 Debian package をローカルにインストールする場合:
 
 ```sh
-sudo apt install ./artifacts/fpasoterm_1.2.0_arm64-linux-arm64.deb
+sudo apt install ./artifacts/fpasoterm_1.2.1_arm64-linux-arm64.deb
 ```
 
 ## Linux Desktop Entry

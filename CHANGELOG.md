@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.1
+
+- Fixed Windows direct binary CLI handling for `--help`, `--show-config`, window overrides, and shell selection.
+- Added PowerShell 7 path fallback and shell value sanitization for `--shell pwsh.exe`.
+- Added pull request review documentation for the no-artifact review path.
+
 ## 1.2.0
 
 - Added runtime config application from inside a running terminal via OSC 777.

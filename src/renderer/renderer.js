@@ -404,6 +404,9 @@ async function loadRuntimeConfig() {
       Number(appConfig.ime.repeatedTextWindowMs) || fallbackConfig.ime.repeatedTextWindowMs;
     imeDuplicateGuardEnabled = appConfig.ime.duplicateGuard !== false;
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
+    showDiagnostic(
+      `renderer resolved config title=${appConfig.window?.title || ''} titlebarColor=${appConfig.window?.titlebarColor || ''} shell=${appConfig.terminal?.shell || ''}`,
+    );
   } catch (error) {
     console.error(`renderer failed to load config: ${error.stack || error.message || error}`);
     appConfig = fallbackConfig;
@@ -425,6 +428,7 @@ function applyWindowAppearance() {
     windowTitleElement.textContent = title;
   }
   document.documentElement.style.setProperty('--titlebar-background', titlebarColor);
+  showDebugDiagnostic(`renderer applied window title=${title} titlebarColor=${titlebarColor}`);
 }
 
 // Normalizes opacity values to the CSS alpha range.
