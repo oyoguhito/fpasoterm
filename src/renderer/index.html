@@ -11,6 +11,23 @@
     <header id="drag-region" data-tauri-drag-region>
       <span id="window-title">fpasoterm</span>
       <div id="window-controls" aria-label="Window controls">
+        <div id="sync-menu" hidden>
+          <button id="sync-menu-toggle" type="button" aria-label="Open sync menu" aria-expanded="false">Sync</button>
+          <div id="sync-menu-items" role="menu" hidden>
+            <button id="sync-copy" type="button" role="menuitem">Copy Selection</button>
+            <button id="sync-paste" type="button" role="menuitem">Pull to Clipboard</button>
+            <button id="sync-diagnostics" type="button" role="menuitem">Write Diagnostics</button>
+          </div>
+        </div>
+        <div id="web-console-menu" hidden>
+          <button id="web-console-toggle" type="button" aria-label="Open web console menu" aria-expanded="false">Web</button>
+          <div id="web-console-items" role="menu" hidden>
+            <button id="web-console-start" type="button" role="menuitem">Start</button>
+            <button id="web-console-copy" type="button" role="menuitem">Copy URL</button>
+            <button id="web-console-stop" type="button" role="menuitem">Stop</button>
+          </div>
+        </div>
+        <button id="terminal-log-toggle" type="button" aria-label="Toggle terminal log">Log Start</button>
         <button id="minimize-window" type="button" aria-label="Minimize">-</button>
         <button id="maximize-window" type="button" aria-label="Maximize">[]</button>
         <button id="close-window" type="button" aria-label="Close">x</button>

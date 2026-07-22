@@ -1,0 +1,10 @@
+# Enables the temporary read-only web console controls.
+# Start the server from the titlebar Web menu, then stop it when done.
+
+[webConsole]
+enabled = true
+bind = "127.0.0.1"
+port = 0
+ttlSeconds = 900
+maxBytes = 1048576
+allowTerminalInput = false

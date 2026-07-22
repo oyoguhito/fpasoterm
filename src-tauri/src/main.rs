@@ -4,11 +4,17 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
-use std::fs;
+use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    Arc, Mutex,
+};
+use std::thread::JoinHandle;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -30,6 +36,10 @@ struct Config {
     terminal: serde_json::Value,
     ime: serde_json::Value,
     plugins: serde_json::Value,
+    sync: serde_json::Value,
+    logging: serde_json::Value,
+    #[serde(rename = "webConsole")]
+    web_console: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -98,6 +108,87 @@ struct WindowBounds {
     height: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Text payload requested by the renderer for sync-folder publishing.
+struct SyncWriteRequest {
+    text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current sync-folder state returned to the renderer.
+struct SyncStatus {
+    enabled: bool,
+    provider: String,
+    path: String,
+    channel: String,
+    clipboard_path: String,
+    diagnostics_path: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A sync-folder item shared between fpasoterm instances.
+struct SyncItem {
+    schema_version: u8,
+    kind: String,
+    channel: String,
+    source_id: String,
+    updated_at: u128,
+    text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Optional terminal log start request from the renderer.
+struct TerminalLogStartRequest {
+    path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current terminal output log state returned to the renderer.
+struct TerminalLogStatus {
+    enabled: bool,
+    active: bool,
+    path: String,
+    bytes_written: u64,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current temporary web console state returned to the renderer.
+struct WebConsoleStatus {
+    enabled: bool,
+    active: bool,
+    url: String,
+    bind: String,
+    port: u16,
+    expires_at: u128,
+    message: String,
+}
+
+// Active terminal output log file and byte counter.
+struct TerminalLog {
+    path: String,
+    file: File,
+    bytes_written: u64,
+    max_bytes: u64,
+}
+
+// Running temporary web console server and its shutdown flag.
+struct WebConsoleServer {
+    url: String,
+    bind: String,
+    port: u16,
+    expires_at: u128,
+    stop: Arc<AtomicBool>,
+    handle: Option<JoinHandle<()>>,
+}
+
 // Owns the native PTY session and child shell handles.
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
@@ -105,14 +196,30 @@ struct TerminalSession {
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
 }
 
-#[derive(Default)]
 // Shared runtime state for the active PTY session and recent diagnostics.
 struct AppState {
     terminal: Mutex<Option<TerminalSession>>,
-    diagnostics: Mutex<VecDeque<String>>,
+    diagnostics: Arc<Mutex<VecDeque<String>>>,
+    recent_output: Arc<Mutex<VecDeque<u8>>>,
+    terminal_log: Arc<Mutex<Option<TerminalLog>>>,
+    web_console: Mutex<Option<WebConsoleServer>>,
+    source_id: String,
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            terminal: Mutex::new(None),
+            diagnostics: Arc::new(Mutex::new(VecDeque::new())),
+            recent_output: Arc::new(Mutex::new(VecDeque::new())),
+            terminal_log: Arc::new(Mutex::new(None)),
+            web_console: Mutex::new(None),
+            source_id: format!("{}-{}", std::process::id(), now_millis()),
+        }
+    }
+}
+
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n      --web-console             Enable temporary read-only web console for this launch.\n      --web-console-ttl <sec>   Override the temporary web console lifetime.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
@@ -186,11 +293,21 @@ fn main() {
             terminal_start,
             terminal_write,
             terminal_resize,
+            terminal_log_start,
+            terminal_log_stop,
+            terminal_log_status,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
             config_get,
             config_apply_path,
+            sync_status,
+            sync_write_clipboard,
+            sync_read_clipboard,
+            sync_write_diagnostics,
+            web_console_start,
+            web_console_stop,
+            web_console_status,
             window_close,
             window_minimize,
             window_toggle_maximize,
@@ -210,6 +327,7 @@ fn apply_direct_cli_env_overrides() {
     set_env_from_cli("FPASOTERM_WINDOW_TITLE", &["--title", "-t"]);
     set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
     set_env_from_cli("FPASOTERM_START_COMMAND", &["--command", "-e"]);
+    set_env_from_cli("FPASOTERM_WEB_CONSOLE_TTL", &["--web-console-ttl"]);
 
     if let Some((width, height)) = cli_size_option() {
         env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
@@ -235,6 +353,9 @@ fn apply_direct_cli_env_overrides() {
     }
     if cli_has_flag(&["--disable-dmabuf"]) {
         env::set_var("FPASOTERM_DISABLE_DMABUF", "1");
+    }
+    if cli_has_flag(&["--web-console"]) {
+        env::set_var("FPASOTERM_WEB_CONSOLE", "1");
     }
 }
 
@@ -483,6 +604,31 @@ fn default_runtime_config() -> RuntimeConfig {
                 "repeatedTextWindowMs": 140
             }),
             plugins: serde_json::json!({ "enabled": [] }),
+            sync: serde_json::json!({
+                "enabled": false,
+                "provider": "folder",
+                "path": "",
+                "channel": "default",
+                "clipboard": true,
+                "diagnostics": true,
+                "pasteRequiresConfirm": true,
+                "maxBytes": 1048576,
+                "ttlSeconds": 86400
+            }),
+            logging: serde_json::json!({
+                "enabled": true,
+                "directory": "",
+                "autoStart": false,
+                "maxBytes": 10485760
+            }),
+            web_console: serde_json::json!({
+                "enabled": false,
+                "bind": "127.0.0.1",
+                "port": 0,
+                "ttlSeconds": 900,
+                "maxBytes": 1048576,
+                "allowTerminalInput": false
+            }),
         },
         config_dir: config_dir.clone(),
         config_path,
@@ -553,6 +699,26 @@ fn apply_direct_cli_overrides(runtime: &mut RuntimeConfig) {
     if let Some(shell) = cli_option_value_any(&["--shell", "-s"]) {
         if let Some(terminal) = runtime.config.terminal.as_object_mut() {
             terminal.insert("shell".to_string(), serde_json::Value::String(shell));
+        }
+    }
+    if env::var("FPASOTERM_WEB_CONSOLE").as_deref() == Ok("1") || cli_has_flag(&["--web-console"]) {
+        if let Some(web_console) = runtime.config.web_console.as_object_mut() {
+            web_console.insert("enabled".to_string(), serde_json::Value::Bool(true));
+        }
+    }
+    if let Ok(ttl) = env::var("FPASOTERM_WEB_CONSOLE_TTL")
+        .ok()
+        .or_else(|| cli_option_value_any(&["--web-console-ttl"]))
+        .unwrap_or_default()
+        .parse::<u64>()
+    {
+        if ttl > 0 {
+            if let Some(web_console) = runtime.config.web_console.as_object_mut() {
+                web_console.insert(
+                    "ttlSeconds".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(ttl)),
+                );
+            }
         }
     }
 }
@@ -959,7 +1125,19 @@ fn terminal_start(
             .take_writer()
             .map_err(|error| error.to_string())?,
     ));
+    if logging_bool("autoStart", false) {
+        match start_terminal_log_state(state.inner(), None) {
+            Ok(status) => {
+                append_diagnostic(&app, &format!("terminal log auto-started {}", status.path))
+            }
+            Err(error) => {
+                append_diagnostic(&app, &format!("terminal log auto-start failed: {error}"))
+            }
+        }
+    }
     let writer_for_state = Arc::clone(&writer);
+    let terminal_log = Arc::clone(&state.terminal_log);
+    let recent_output = Arc::clone(&state.recent_output);
     let app_for_reader = app.clone();
     let app_for_wait = app.clone();
 
@@ -972,6 +1150,8 @@ fn terminal_start(
                     if console_diagnostics_enabled() {
                         eprintln!("terminal_read bytes={read}");
                     }
+                    append_recent_output(&recent_output, &buffer[..read]);
+                    append_terminal_log(&terminal_log, &buffer[..read]);
                     let data = String::from_utf8_lossy(&buffer[..read]).to_string();
                     let _ = app_for_reader.emit("terminal:data", data);
                 }
@@ -1055,9 +1235,418 @@ fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), Str
     Ok(())
 }
 
+// Returns the current logging section as a JSON object for tolerant access.
+fn logging_config() -> serde_json::Map<String, serde_json::Value> {
+    runtime_config()
+        .config
+        .logging
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+// Reads a boolean key from [logging], falling back to a default.
+fn logging_bool(key: &str, default: bool) -> bool {
+    logging_config()
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+// Reads a positive byte limit from [logging].
+fn logging_max_bytes() -> u64 {
+    logging_config()
+        .get("maxBytes")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(10_485_760)
+}
+
+// Reads the resolved [webConsole] configuration object.
+fn web_console_config() -> serde_json::Value {
+    runtime_config().config.web_console
+}
+
+// Reads a boolean from [webConsole].
+fn web_console_bool(key: &str, default: bool) -> bool {
+    web_console_config()
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+// Reads a string from [webConsole].
+fn web_console_string(key: &str, default: &str) -> String {
+    web_console_config()
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+// Reads a u64 from [webConsole].
+fn web_console_u64(key: &str, default: u64) -> u64 {
+    web_console_config()
+        .get(key)
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(default)
+}
+
+// Reads a u16 port from [webConsole], allowing zero for OS-selected ports.
+fn web_console_port() -> u16 {
+    web_console_config()
+        .get("port")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value <= u16::MAX as u64)
+        .unwrap_or(0) as u16
+}
+
+// Keeps recent PTY output for the temporary web console.
+fn append_recent_output(output: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
+    let max_bytes = web_console_u64("maxBytes", 1_048_576) as usize;
+    if max_bytes == 0 {
+        return;
+    }
+    let Ok(mut guard) = output.lock() else {
+        return;
+    };
+    guard.extend(bytes.iter().copied());
+    while guard.len() > max_bytes {
+        guard.pop_front();
+    }
+}
+
+// Runs the temporary read-only HTTP server until stopped or expired.
+fn run_web_console_server(
+    listener: TcpListener,
+    stop: Arc<AtomicBool>,
+    token: String,
+    expires_at: u128,
+    recent_output: Arc<Mutex<VecDeque<u8>>>,
+    diagnostics: Arc<Mutex<VecDeque<String>>>,
+) {
+    while !stop.load(Ordering::SeqCst) && now_millis() < expires_at {
+        match listener.accept() {
+            Ok((mut stream, _addr)) => {
+                handle_web_console_stream(
+                    &mut stream,
+                    &token,
+                    expires_at,
+                    &recent_output,
+                    &diagnostics,
+                );
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(100));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+// Handles one browser request to the temporary web console.
+fn handle_web_console_stream(
+    stream: &mut TcpStream,
+    token: &str,
+    expires_at: u128,
+    recent_output: &Arc<Mutex<VecDeque<u8>>>,
+    diagnostics: &Arc<Mutex<VecDeque<String>>>,
+) {
+    let mut buffer = [0_u8; 4096];
+    let read = stream.read(&mut buffer).unwrap_or(0);
+    let request = String::from_utf8_lossy(&buffer[..read]);
+    let request_line = request.lines().next().unwrap_or_default();
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("/")
+        .to_string();
+
+    if !path_has_token(&path, token) {
+        let _ = write_http_response(stream, 403, "text/plain; charset=utf-8", "forbidden\n");
+        return;
+    }
+    if now_millis() >= expires_at {
+        let _ = write_http_response(stream, 410, "text/plain; charset=utf-8", "expired\n");
+        return;
+    }
+
+    let output = recent_output_text(recent_output);
+    let diagnostics_text = diagnostics
+        .lock()
+        .map(|guard| guard.iter().cloned().collect::<Vec<_>>().join("\n"))
+        .unwrap_or_else(|_| String::new());
+
+    if path.starts_with("/output.txt") {
+        let _ = write_http_response(stream, 200, "text/plain; charset=utf-8", &output);
+        return;
+    }
+    if path.starts_with("/diagnostics.txt") {
+        let _ = write_http_response(stream, 200, "text/plain; charset=utf-8", &diagnostics_text);
+        return;
+    }
+
+    let body = web_console_html(&output, &diagnostics_text, expires_at, token);
+    let _ = write_http_response(stream, 200, "text/html; charset=utf-8", &body);
+}
+
+// Checks the random token query parameter without accepting browser input.
+fn path_has_token(path: &str, token: &str) -> bool {
+    path.split('?')
+        .nth(1)
+        .unwrap_or_default()
+        .split('&')
+        .any(|part| part == format!("token={token}"))
+}
+
+// Writes a minimal HTTP/1.1 response.
+fn write_http_response(
+    stream: &mut TcpStream,
+    status: u16,
+    content_type: &str,
+    body: &str,
+) -> std::io::Result<()> {
+    let reason = match status {
+        200 => "OK",
+        403 => "Forbidden",
+        410 => "Gone",
+        _ => "Error",
+    };
+    let response = format!(
+        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
+        body.as_bytes().len()
+    );
+    stream.write_all(response.as_bytes())
+}
+
+// Converts the recent output ring buffer to text for browser display.
+fn recent_output_text(recent_output: &Arc<Mutex<VecDeque<u8>>>) -> String {
+    recent_output
+        .lock()
+        .map(|guard| {
+            String::from_utf8_lossy(&guard.iter().copied().collect::<Vec<_>>()).to_string()
+        })
+        .unwrap_or_else(|_| String::new())
+}
+
+// Builds the read-only temporary web console page.
+fn web_console_html(output: &str, diagnostics: &str, expires_at: u128, token: &str) -> String {
+    format!(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><title>fpasoterm web console</title><style>body{{margin:0;background:#101317;color:#e8edf2;font:14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}header{{position:sticky;top:0;padding:10px 12px;background:#1565c0}}main{{display:grid;gap:12px;padding:12px}}pre{{margin:0;white-space:pre-wrap;word-break:break-word;background:#11151a;border:1px solid #35506b;border-radius:6px;padding:10px;min-height:160px}}a{{color:#9de9ea}}</style></head><body><header>fpasoterm temporary web console · read-only · expires at {}</header><main><section><h2>Recent Output</h2><p><a href=\"/output.txt{}\">plain text</a></p><pre>{}</pre></section><section><h2>Diagnostics</h2><p><a href=\"/diagnostics.txt{}\">plain text</a></p><pre>{}</pre></section></main></body></html>",
+        expires_at,
+        web_console_token_suffix(token),
+        html_escape(output),
+        web_console_token_suffix(token),
+        html_escape(diagnostics)
+    )
+}
+
+// Builds the token query string for JavaScript-free page links.
+fn web_console_token_suffix(token: &str) -> String {
+    format!("?token={token}")
+}
+
+// Escapes text for safe HTML rendering.
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+}
+
+// Generates an in-memory token for the temporary web console.
+fn generate_web_console_token() -> String {
+    let mut bytes = [0_u8; 24];
+    if File::open("/dev/urandom")
+        .and_then(|mut file| file.read_exact(&mut bytes))
+        .is_err()
+    {
+        let seed = format!(
+            "{}-{:?}-{}",
+            std::process::id(),
+            SystemTime::now(),
+            now_millis()
+        );
+        for (index, byte) in seed.as_bytes().iter().enumerate() {
+            bytes[index % bytes.len()] ^= *byte;
+        }
+    }
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+// Resolves the configured terminal log directory, defaulting to User/logs.
+fn terminal_log_directory() -> PathBuf {
+    let configured = logging_config()
+        .get("directory")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(expand_sync_path);
+
+    configured.unwrap_or_else(|| PathBuf::from(runtime_config().config_dir).join("logs"))
+}
+
+// Builds a timestamped default terminal output log path.
+fn default_terminal_log_path() -> PathBuf {
+    terminal_log_directory().join(format!("terminal-{}.log", now_millis()))
+}
+
+// Resolves an optional requested log path against the configured log directory.
+fn resolve_terminal_log_path(path: Option<String>) -> PathBuf {
+    match path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => {
+            let path = expand_sync_path(&value);
+            if path.is_absolute() {
+                path
+            } else {
+                terminal_log_directory().join(path)
+            }
+        }
+        None => default_terminal_log_path(),
+    }
+}
+
+// Appends raw PTY output bytes to the active terminal log if logging is active.
+fn append_terminal_log(log_state: &Arc<Mutex<Option<TerminalLog>>>, bytes: &[u8]) {
+    let Ok(mut guard) = log_state.lock() else {
+        return;
+    };
+    let Some(log) = guard.as_mut() else {
+        return;
+    };
+
+    let max_bytes = log.max_bytes;
+    if log.bytes_written >= max_bytes {
+        return;
+    }
+
+    let remaining = (max_bytes - log.bytes_written) as usize;
+    let write_len = bytes.len().min(remaining);
+    if write_len == 0 {
+        return;
+    }
+
+    if log.file.write_all(&bytes[..write_len]).is_ok() {
+        log.bytes_written += write_len as u64;
+        let _ = log.file.flush();
+    }
+}
+
+#[tauri::command]
+// Starts writing raw terminal output to a log file.
+fn terminal_log_start(
+    state: State<AppState>,
+    request: Option<TerminalLogStartRequest>,
+) -> Result<TerminalLogStatus, String> {
+    start_terminal_log_state(state.inner(), request.and_then(|value| value.path))
+}
+
+// Opens a terminal output log file and stores it in shared application state.
+fn start_terminal_log_state(
+    state: &AppState,
+    path_request: Option<String>,
+) -> Result<TerminalLogStatus, String> {
+    if !logging_bool("enabled", true) {
+        return Err("terminal logging is disabled; set logging.enabled = true".to_string());
+    }
+
+    let path = resolve_terminal_log_path(path_request);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    let path_text = path.display().to_string();
+
+    let mut guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    *guard = Some(TerminalLog {
+        path: path_text.clone(),
+        file,
+        bytes_written: 0,
+        max_bytes: logging_max_bytes(),
+    });
+    Ok(TerminalLogStatus {
+        enabled: true,
+        active: true,
+        path: path_text,
+        bytes_written: 0,
+        message: "terminal output logging started".to_string(),
+    })
+}
+
+#[tauri::command]
+// Stops the active terminal output log and returns the final path/counter.
+fn terminal_log_stop(state: State<AppState>) -> Result<TerminalLogStatus, String> {
+    let mut guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(mut log) = guard.take() {
+        let _ = log.file.flush();
+        return Ok(TerminalLogStatus {
+            enabled: logging_bool("enabled", true),
+            active: false,
+            path: log.path,
+            bytes_written: log.bytes_written,
+            message: "terminal output logging stopped".to_string(),
+        });
+    }
+
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        message: "terminal output logging was not active".to_string(),
+    })
+}
+
+#[tauri::command]
+// Returns the active terminal output log state.
+fn terminal_log_status(state: State<AppState>) -> Result<TerminalLogStatus, String> {
+    let guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(log) = guard.as_ref() {
+        return Ok(TerminalLogStatus {
+            enabled: logging_bool("enabled", true),
+            active: true,
+            path: log.path.clone(),
+            bytes_written: log.bytes_written,
+            message: "terminal output logging is active".to_string(),
+        });
+    }
+
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        message: "terminal output logging is inactive".to_string(),
+    })
+}
+
 #[tauri::command]
 // Returns recent diagnostics as plain text for copying from the UI.
 fn diagnostics_copy(state: State<AppState>) -> Result<String, String> {
+    diagnostics_text(&state)
+}
+
+// Returns recent diagnostics from shared runtime state.
+fn diagnostics_text(state: &AppState) -> Result<String, String> {
     let diagnostics = state
         .diagnostics
         .lock()
@@ -1075,6 +1664,173 @@ fn diagnostics_path() -> String {
 // Lets the renderer append messages to the backend diagnostics ring buffer.
 fn diagnostics_log(app: AppHandle, message: String) {
     append_diagnostic(&app, &message);
+}
+
+#[tauri::command]
+// Starts a short-lived read-only HTTP console for recent output and diagnostics.
+fn web_console_start(state: State<AppState>) -> Result<WebConsoleStatus, String> {
+    if !web_console_bool("enabled", false) {
+        return Ok(WebConsoleStatus {
+            enabled: false,
+            active: false,
+            url: String::new(),
+            bind: web_console_string("bind", "127.0.0.1"),
+            port: web_console_port(),
+            expires_at: 0,
+            message: "temporary web console is disabled; set webConsole.enabled = true or launch with --web-console".to_string(),
+        });
+    }
+
+    if let Some(status) = web_console_active_status(&state)? {
+        return Ok(status);
+    }
+
+    let bind = web_console_string("bind", "127.0.0.1");
+    let requested_port = web_console_port();
+    let ttl_seconds = web_console_u64("ttlSeconds", 900);
+    let expires_at = now_millis() + u128::from(ttl_seconds) * 1000;
+    let token = generate_web_console_token();
+    let listener = TcpListener::bind(format!("{bind}:{requested_port}"))
+        .map_err(|error| format!("failed to bind temporary web console: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let port = listener
+        .local_addr()
+        .map_err(|error| error.to_string())?
+        .port();
+    let url = format!("http://{bind}:{port}/?token={token}");
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = Arc::clone(&stop);
+    let diagnostics = Arc::clone(&state.diagnostics);
+    let recent_output = Arc::clone(&state.recent_output);
+    let token_for_thread = token.clone();
+
+    let handle = std::thread::spawn(move || {
+        run_web_console_server(
+            listener,
+            stop_for_thread,
+            token_for_thread,
+            expires_at,
+            recent_output,
+            diagnostics,
+        );
+    });
+
+    let server = WebConsoleServer {
+        url: url.clone(),
+        bind: bind.clone(),
+        port,
+        expires_at,
+        stop,
+        handle: Some(handle),
+    };
+
+    let mut guard = state
+        .web_console
+        .lock()
+        .map_err(|error| error.to_string())?;
+    *guard = Some(server);
+
+    Ok(WebConsoleStatus {
+        enabled: true,
+        active: true,
+        url,
+        bind,
+        port,
+        expires_at,
+        message: "temporary web console started".to_string(),
+    })
+}
+
+#[tauri::command]
+// Stops the temporary web console and discards its in-memory token.
+fn web_console_stop(state: State<AppState>) -> Result<WebConsoleStatus, String> {
+    stop_web_console_state(&state, "temporary web console stopped")
+}
+
+#[tauri::command]
+// Returns the temporary web console status, stopping expired servers.
+fn web_console_status(state: State<AppState>) -> Result<WebConsoleStatus, String> {
+    if !web_console_bool("enabled", false) {
+        return Ok(WebConsoleStatus {
+            enabled: false,
+            active: false,
+            url: String::new(),
+            bind: web_console_string("bind", "127.0.0.1"),
+            port: web_console_port(),
+            expires_at: 0,
+            message: "temporary web console is disabled".to_string(),
+        });
+    }
+
+    if let Some(status) = web_console_active_status(&state)? {
+        if status.expires_at > 0 && status.expires_at <= now_millis() {
+            return stop_web_console_state(&state, "temporary web console expired");
+        }
+        return Ok(status);
+    }
+
+    Ok(WebConsoleStatus {
+        enabled: true,
+        active: false,
+        url: String::new(),
+        bind: web_console_string("bind", "127.0.0.1"),
+        port: web_console_port(),
+        expires_at: 0,
+        message: "temporary web console is inactive".to_string(),
+    })
+}
+
+// Returns active web console state without mutating it.
+fn web_console_active_status(state: &AppState) -> Result<Option<WebConsoleStatus>, String> {
+    let guard = state
+        .web_console
+        .lock()
+        .map_err(|error| error.to_string())?;
+    Ok(guard.as_ref().map(|server| WebConsoleStatus {
+        enabled: true,
+        active: true,
+        url: server.url.clone(),
+        bind: server.bind.clone(),
+        port: server.port,
+        expires_at: server.expires_at,
+        message: "temporary web console is active".to_string(),
+    }))
+}
+
+// Stops an active server and joins its thread.
+fn stop_web_console_state(state: &AppState, message: &str) -> Result<WebConsoleStatus, String> {
+    let mut server = state
+        .web_console
+        .lock()
+        .map_err(|error| error.to_string())?
+        .take();
+    if let Some(mut server) = server.take() {
+        server.stop.store(true, Ordering::SeqCst);
+        if let Some(handle) = server.handle.take() {
+            let _ = handle.join();
+        }
+        return Ok(WebConsoleStatus {
+            enabled: web_console_bool("enabled", false),
+            active: false,
+            url: String::new(),
+            bind: server.bind,
+            port: server.port,
+            expires_at: 0,
+            message: message.to_string(),
+        });
+    }
+
+    Ok(WebConsoleStatus {
+        enabled: web_console_bool("enabled", false),
+        active: false,
+        url: String::new(),
+        bind: web_console_string("bind", "127.0.0.1"),
+        port: web_console_port(),
+        expires_at: 0,
+        message: "temporary web console was not active".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -1101,6 +1857,305 @@ fn config_apply_path(app: AppHandle, path: String) -> Result<RuntimeConfig, Stri
         &format!("applied runtime config {}", config.config_path),
     );
     Ok(config)
+}
+
+// Resolved sync-folder paths for the active channel.
+struct SyncFolderPaths {
+    provider: String,
+    root: std::path::PathBuf,
+    channel: String,
+    clipboard: std::path::PathBuf,
+    diagnostics: std::path::PathBuf,
+}
+
+// Returns the current sync section as a JSON object for tolerant access.
+fn sync_config() -> serde_json::Map<String, serde_json::Value> {
+    runtime_config()
+        .config
+        .sync
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+// Reads a string key from [sync], falling back to a default.
+fn sync_string(key: &str, default: &str) -> String {
+    sync_config()
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+// Reads a boolean key from [sync], falling back to a default.
+fn sync_bool(key: &str, default: bool) -> bool {
+    sync_config()
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+// Reads a positive byte limit from [sync].
+fn sync_max_bytes() -> usize {
+    sync_config()
+        .get("maxBytes")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(1_048_576) as usize
+}
+
+// Reads the sync item lifetime in milliseconds; zero disables expiration.
+fn sync_ttl_millis() -> u128 {
+    sync_config()
+        .get("ttlSeconds")
+        .and_then(|value| value.as_u64())
+        .map(|seconds| seconds as u128 * 1000)
+        .unwrap_or(86_400_000)
+}
+
+// Normalizes channel names so they can safely be used as directory names.
+fn sync_channel() -> String {
+    let raw = sync_string("channel", "default");
+    let sanitized = raw
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    sanitized
+        .trim_matches('.')
+        .trim_matches('_')
+        .chars()
+        .take(80)
+        .collect::<String>()
+}
+
+// Expands %VAR% and $VAR references commonly used in config paths.
+fn expand_path_variables(path: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = path.chars().collect();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '%' {
+            if let Some(end) = chars[index + 1..]
+                .iter()
+                .position(|character| *character == '%')
+            {
+                let end_index = index + 1 + end;
+                let name = chars[index + 1..end_index].iter().collect::<String>();
+                if !name.is_empty() {
+                    if let Ok(value) = env::var(&name) {
+                        result.push_str(&value);
+                    } else {
+                        result.push('%');
+                        result.push_str(&name);
+                        result.push('%');
+                    }
+                    index = end_index + 1;
+                    continue;
+                }
+            }
+        }
+
+        if chars[index] == '$' {
+            let mut end_index = index + 1;
+            while end_index < chars.len()
+                && (chars[end_index].is_ascii_alphanumeric() || chars[end_index] == '_')
+            {
+                end_index += 1;
+            }
+            if end_index > index + 1 {
+                let name = chars[index + 1..end_index].iter().collect::<String>();
+                if let Ok(value) = env::var(&name) {
+                    result.push_str(&value);
+                } else {
+                    result.push('$');
+                    result.push_str(&name);
+                }
+                index = end_index;
+                continue;
+            }
+        }
+
+        result.push(chars[index]);
+        index += 1;
+    }
+
+    result
+}
+
+// Expands a leading ~/ and environment variables so config files can be portable.
+fn expand_sync_path(path: &str) -> std::path::PathBuf {
+    let expanded = expand_path_variables(path.trim());
+    if expanded == "~" {
+        return std::path::PathBuf::from(home_dir());
+    }
+    if let Some(rest) = expanded
+        .strip_prefix("~/")
+        .or_else(|| expanded.strip_prefix("~\\"))
+    {
+        return std::path::PathBuf::from(home_dir()).join(rest);
+    }
+    std::path::PathBuf::from(expanded)
+}
+
+// Resolves and creates the sync channel directory for a specific operation.
+fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
+    if !sync_bool("enabled", false) {
+        return Err("sync folder is disabled; set sync.enabled = true".to_string());
+    }
+
+    let provider = sync_string("provider", "folder");
+    if provider != "folder" {
+        return Err(format!("unsupported sync provider: {provider}"));
+    }
+
+    if kind == "clipboard" && !sync_bool("clipboard", true) {
+        return Err("sync clipboard is disabled; set sync.clipboard = true".to_string());
+    }
+    if kind == "diagnostics" && !sync_bool("diagnostics", true) {
+        return Err("sync diagnostics is disabled; set sync.diagnostics = true".to_string());
+    }
+
+    let root_text = sync_string("path", "");
+    if root_text.is_empty() {
+        return Err("sync path is empty; set sync.path to a synced local folder".to_string());
+    }
+
+    let channel = {
+        let value = sync_channel();
+        if value.is_empty() {
+            "default".to_string()
+        } else {
+            value
+        }
+    };
+    let root = expand_sync_path(&root_text);
+    let channel_dir = root.join(&channel);
+    fs::create_dir_all(&channel_dir).map_err(|error| error.to_string())?;
+
+    Ok(SyncFolderPaths {
+        provider,
+        root,
+        channel,
+        clipboard: channel_dir.join("clipboard.json"),
+        diagnostics: channel_dir.join("diagnostics.json"),
+    })
+}
+
+// Selects the only supported sync item file names.
+fn sync_item_path(kind: &str) -> Result<std::path::PathBuf, String> {
+    let paths = sync_folder_paths(kind)?;
+    match kind {
+        "clipboard" => Ok(paths.clipboard),
+        "diagnostics" => Ok(paths.diagnostics),
+        _ => Err(format!("unsupported sync item kind: {kind}")),
+    }
+}
+
+// Returns the current UNIX timestamp in milliseconds.
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+// Writes a sync item through a temporary file and atomic rename.
+fn write_sync_item(kind: &str, text: String, source_id: &str) -> Result<SyncItem, String> {
+    let max_bytes = sync_max_bytes();
+    if text.len() > max_bytes {
+        return Err(format!(
+            "sync {kind} payload is too large: {} bytes > {max_bytes} bytes",
+            text.len()
+        ));
+    }
+
+    let paths = sync_folder_paths(kind)?;
+    let path = sync_item_path(kind)?;
+    let item = SyncItem {
+        schema_version: 1,
+        kind: kind.to_string(),
+        channel: paths.channel,
+        source_id: source_id.to_string(),
+        updated_at: now_millis(),
+        text,
+    };
+    let json = serde_json::to_string_pretty(&item).map_err(|error| error.to_string())?;
+    let temp_path = path.with_extension(format!("json.tmp.{}", source_id.replace('/', "_")));
+    fs::write(&temp_path, format!("{json}\n")).map_err(|error| error.to_string())?;
+    fs::rename(&temp_path, &path).map_err(|error| error.to_string())?;
+    Ok(item)
+}
+
+// Reads a sync item if the configured file exists.
+fn read_sync_item(kind: &str) -> Result<Option<SyncItem>, String> {
+    let path = sync_item_path(kind)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let item: SyncItem = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let ttl_millis = sync_ttl_millis();
+    if ttl_millis > 0 && now_millis().saturating_sub(item.updated_at) > ttl_millis {
+        return Ok(None);
+    }
+    Ok(Some(item))
+}
+
+#[tauri::command]
+// Returns where sync-folder files would be read and written.
+fn sync_status() -> SyncStatus {
+    match sync_folder_paths("status") {
+        Ok(paths) => SyncStatus {
+            enabled: true,
+            provider: paths.provider,
+            path: paths.root.display().to_string(),
+            channel: paths.channel,
+            clipboard_path: paths.clipboard.display().to_string(),
+            diagnostics_path: paths.diagnostics.display().to_string(),
+            message: "sync folder is enabled".to_string(),
+        },
+        Err(message) => SyncStatus {
+            enabled: false,
+            provider: sync_string("provider", "folder"),
+            path: sync_string("path", ""),
+            channel: sync_channel(),
+            clipboard_path: String::new(),
+            diagnostics_path: String::new(),
+            message,
+        },
+    }
+}
+
+#[tauri::command]
+// Publishes explicit clipboard text to the configured sync folder.
+fn sync_write_clipboard(
+    state: State<AppState>,
+    request: SyncWriteRequest,
+) -> Result<SyncItem, String> {
+    write_sync_item("clipboard", request.text, &state.source_id)
+}
+
+#[tauri::command]
+// Reads the latest clipboard text from the configured sync folder.
+fn sync_read_clipboard() -> Result<Option<SyncItem>, String> {
+    read_sync_item("clipboard")
+}
+
+#[tauri::command]
+// Publishes recent diagnostics to the configured sync folder.
+fn sync_write_diagnostics(state: State<AppState>) -> Result<SyncItem, String> {
+    let text = diagnostics_text(&state)?;
+    write_sync_item("diagnostics", text, &state.source_id)
 }
 
 #[tauri::command]

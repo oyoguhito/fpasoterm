@@ -2,7 +2,9 @@
 
 const { spawn, spawnSync } = require('node:child_process');
 const fs = require('node:fs');
+const os = require('node:os');
 const path = require('node:path');
+const readline = require('node:readline/promises');
 const toml = require('smol-toml');
 
 const root = path.resolve(__dirname, '..');
@@ -25,6 +27,7 @@ Options:
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --setup-sync              Ask questions and configure a local sync folder, then exit.
       --self-update             Update an npm-installed fpasoterm package, then refresh desktop files on Linux.
       --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
       --update-desktop          Reinstall the local command, desktop entry, and launcher icons, then exit.
@@ -38,6 +41,8 @@ Options:
   -W, --width <px>              Override the configured window width for this launch.
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
+      --web-console             Enable temporary read-only web console for this launch.
+      --web-console-ttl <sec>   Override the temporary web console lifetime.
   -k, --debug-keys              Enable key/composition diagnostics.
       --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
@@ -70,6 +75,7 @@ function parseArgs(argv) {
   let foreground = false;
   let dev = false;
   let showConfig = false;
+  let setupSync = false;
   let resetWindowState = false;
   let selfUpdate = false;
   let selfUpdateCheckout = false;
@@ -95,6 +101,11 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--setup-sync') {
+      setupSync = true;
       continue;
     }
 
@@ -175,6 +186,17 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--web-console') {
+      env.FPASOTERM_WEB_CONSOLE = '1';
+      continue;
+    }
+
+    if (arg === '--web-console-ttl') {
+      env.FPASOTERM_WEB_CONSOLE_TTL = requirePositiveInteger(requireValue(argv, index, arg), arg);
+      index += 1;
+      continue;
+    }
+
     if (arg === '--config' || arg === '-c') {
       env.FPASOTERM_CONFIG_PATH = requireValue(argv, index, arg);
       index += 1;
@@ -213,6 +235,7 @@ function parseArgs(argv) {
     foreground,
     dev,
     showConfig,
+    setupSync,
     resetWindowState,
     selfUpdate,
     selfUpdateCheckout,
@@ -393,6 +416,7 @@ function showConfig(options) {
   const runtimeConfig = loadConfig();
   applyWindowRuntimeOverrides(runtimeConfig.config.window, options.env);
   applyTerminalRuntimeOverrides(runtimeConfig.config.terminal, options.env);
+  applyWebConsoleRuntimeOverrides(runtimeConfig.config.webConsole, options.env);
   const enabled = Array.isArray(runtimeConfig.config.plugins?.enabled) ? runtimeConfig.config.plugins.enabled : [];
 
   console.log(`Config path: ${runtimeConfig.configPath}`);
@@ -431,6 +455,248 @@ function printPluginList(targetPath, enabled, pluginUrls = []) {
     const exists = fs.existsSync(pluginPath);
     const status = loaded ? 'loadable' : exists ? 'not loadable' : 'missing';
     console.log(`  - ${plugin} [${status}]${loaded ? ` -> ${loaded.url}` : ''}`);
+  }
+}
+
+// Expands common environment variable forms used in configuration paths.
+function expandPathVariables(inputPath) {
+  return String(inputPath || '')
+    .replace(/%([^%]+)%/g, (match, name) => process.env[name] || match)
+    .replace(/\$([A-Za-z_][A-Za-z0-9_]*)/g, (match, name) => process.env[name] || match);
+}
+
+// Expands a leading ~/ and environment variables so prompts can accept portable paths.
+function expandHome(inputPath) {
+  const normalized = expandPathVariables(inputPath).trim();
+  if (normalized === '~') {
+    return os.homedir();
+  }
+  if (normalized.startsWith('~/') || normalized.startsWith('~\\')) {
+    return path.join(os.homedir(), normalized.slice(2));
+  }
+  return normalized;
+}
+
+// Returns platform-specific Google Drive folder candidates for setup prompts.
+function googleDriveCandidates() {
+  const home = os.homedir();
+  const candidates = [
+    path.join(home, 'Google Drive'),
+    path.join(home, 'GoogleDrive'),
+    path.join(home, 'MyDrive'),
+  ];
+
+  if (process.platform === 'linux') {
+    candidates.unshift('/mnt/chromeos/GoogleDrive/MyDrive');
+    candidates.unshift('/mnt/shared/GoogleDrive/MyDrive');
+    candidates.unshift('/mnt/chromeos/shared/GoogleDrive/MyDrive');
+  } else if (process.platform === 'darwin') {
+    const cloudStorage = path.join(home, 'Library', 'CloudStorage');
+    if (fs.existsSync(cloudStorage)) {
+      for (const entry of fs.readdirSync(cloudStorage)) {
+        if (entry.startsWith('GoogleDrive-')) {
+          candidates.unshift(path.join(cloudStorage, entry, 'My Drive'));
+          candidates.unshift(path.join(cloudStorage, entry));
+        }
+      }
+    }
+    candidates.push('/Volumes/GoogleDrive/My Drive');
+  } else if (process.platform === 'win32') {
+    for (const letter of 'DEFGHIJKLMNOPQRSTUVWXYZ') {
+      candidates.unshift(`${letter}:\\Google Drive`);
+      candidates.unshift(`${letter}:\\マイドライブ`);
+      candidates.unshift(`${letter}:\\My Drive`);
+    }
+    candidates.unshift('G:\\My Drive');
+    candidates.push(path.join(home, 'My Drive'));
+    candidates.push(path.join(home, 'Google Drive'));
+  }
+
+  return [...new Set(candidates)];
+}
+
+// Returns true when the current user should be able to create files in a directory.
+function canWriteDirectory(directory) {
+  try {
+    fs.accessSync(directory, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Adds writable immediate subdirectories because ChromeOS often shares selected
+// Drive folders, not the whole MyDrive root, into Linux.
+function writableDriveCandidates() {
+  const expanded = [];
+  for (const candidate of googleDriveCandidates()) {
+    if (!fs.existsSync(candidate)) {
+      continue;
+    }
+    expanded.push(candidate);
+    try {
+      for (const entry of fs.readdirSync(candidate, { withFileTypes: true })) {
+        if (entry.isDirectory()) {
+          expanded.push(path.join(candidate, entry.name));
+        }
+      }
+    } catch {
+      // Some provider roots are visible but not listable until fully mounted.
+    }
+  }
+  return [...new Set(expanded)].filter(canWriteDirectory);
+}
+
+// Picks the most likely writable sync root and appends the fpasoterm subdirectory.
+function defaultSyncPath() {
+  const existing = writableDriveCandidates()[0] || googleDriveCandidates().find((candidate) => fs.existsSync(candidate));
+  return path.join(existing || path.join(os.homedir(), 'Google Drive'), 'fpasoterm-sync');
+}
+
+// Returns concrete sync folder suggestions by appending fpasoterm-sync to roots.
+function syncPathCandidates() {
+  const roots = writableDriveCandidates();
+  const visibleRoots = googleDriveCandidates().filter((candidate) => fs.existsSync(candidate));
+  return [...new Set([...(roots.length > 0 ? roots : visibleRoots), ...visibleRoots])]
+    .map((candidate) => path.join(candidate, 'fpasoterm-sync'));
+}
+
+// Asks one setup question, returning the default when the user presses Enter.
+async function askQuestion(rl, question, defaultValue) {
+  const suffix = defaultValue === undefined || defaultValue === '' ? '' : ` [${defaultValue}]`;
+  const answer = (await rl.question(`${question}${suffix}: `)).trim();
+  return answer || defaultValue;
+}
+
+// Lets users choose a detected sync folder candidate by number or type a path.
+async function askSyncPath(rl, defaultValue) {
+  const candidates = syncPathCandidates();
+  if (candidates.length > 0) {
+    console.log('Detected sync folder candidates:');
+    candidates.forEach((candidate, index) => {
+      console.log(`  ${index + 1}. ${candidate}`);
+    });
+    console.log('');
+    const answer = await askQuestion(rl, 'Select sync folder candidate number or type a path', '1');
+    if (/^\d+$/.test(answer)) {
+      const index = Number(answer) - 1;
+      if (!candidates[index]) {
+        throw new Error(`unknown sync folder candidate number: ${answer}`);
+      }
+      return candidates[index];
+    }
+    return answer;
+  }
+
+  const answer = await askQuestion(rl, 'Local sync folder path or candidate number', defaultValue);
+  return answer;
+}
+
+// Parses yes/no setup answers with a default.
+function isYes(value, defaultValue = true) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) {
+    return defaultValue;
+  }
+  return ['y', 'yes', 'true', '1', 'はい'].includes(normalized);
+}
+
+// Prints Google Drive mounting guidance before asking for the local sync path.
+function printSyncSetupHelp() {
+  console.log('fpasoterm sync uses a local folder that Google Drive or another tool already syncs.');
+  console.log('It does not use Google Drive API, OAuth, API keys, or a Google Cloud project.');
+  console.log('');
+  console.log('Google Drive folder setup:');
+  console.log('- ChromeOS/Baguette: open the Files app, create folders such as Google Drive/My Drive/shared or Google Drive/My Drive/temp, right-click each folder, and choose "Share with Linux".');
+  console.log('- Then select a detected candidate such as /mnt/chromeos/shared/GoogleDrive/MyDrive/shared/fpasoterm-sync or /mnt/chromeos/shared/GoogleDrive/MyDrive/temp/fpasoterm-sync.');
+  console.log('- Some ChromeOS Linux environments expose the same shared folders as /mnt/shared/GoogleDrive/MyDrive/<folder>/fpasoterm-sync or /mnt/chromeos/GoogleDrive/MyDrive/<folder>/fpasoterm-sync.');
+  console.log('- If Linux cannot create a folder under MyDrive directly, use a subfolder that is individually shared with Linux.');
+  console.log('- macOS: install Google Drive for desktop, sign in, then use the local Google Drive folder under ~/Library/CloudStorage/GoogleDrive-*/.');
+  console.log('- Windows: install Google Drive for desktop, sign in, then use the drive/folder shown by Google Drive, often G:\\My Drive. In a source checkout, run setup as: node .\\bin\\fpasoterm --setup-sync');
+  console.log('- Linux desktop: use your chosen sync client, rclone mount, Syncthing, Dropbox, or another local synced folder.');
+  console.log('');
+  console.log('Sync channel:');
+  console.log('- A channel is a folder name used to separate sync data inside the same sync path.');
+  console.log('- Use the same channel on every machine that should share clipboard text and diagnostics.');
+  console.log('- Press Enter to keep "default" when you do not need separate work/test/personal channels.');
+  console.log('');
+}
+
+// Interactively creates or updates [sync] and [logging] in config.toml.
+async function setupSync(options) {
+  if (!process.stdin.isTTY || !process.stdout.isTTY) {
+    throw new Error('--setup-sync must be run from an interactive terminal');
+  }
+
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const userConfig = readUserConfig(targetPath);
+  const currentSync = userConfig.sync && typeof userConfig.sync === 'object' ? userConfig.sync : {};
+  const currentLogging = userConfig.logging && typeof userConfig.logging === 'object' ? userConfig.logging : {};
+  const defaultPath = currentSync.path || defaultSyncPath();
+  const defaultChannel = currentSync.channel || 'default';
+  const localDefaultLogDirectory = path.join(path.dirname(targetPath), 'logs');
+  const syncedDefaultLogDirectory = currentLogging.directory || path.join(defaultPath, 'logs');
+
+  printSyncSetupHelp();
+  console.log(`Config file: ${targetPath}`);
+  console.log('');
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const syncPath = await askSyncPath(rl, defaultPath);
+    console.log('Use the same sync channel on devices that should share data. Press Enter for default.');
+    const channel = await askQuestion(rl, 'Sync channel name', defaultChannel);
+    const createFolder = isYes(await askQuestion(rl, 'Create the folder if it does not exist? (Y/n)', 'Y'), true);
+    console.log(`Terminal output logs stay local by default under ${localDefaultLogDirectory}.`);
+    console.log('Answer y only when you want raw terminal output logs stored in the selected sync folder.');
+    const enableLogs = isYes(await askQuestion(rl, 'Store terminal output logs in the sync folder? (y/N)', 'N'), false);
+    const logDirectory = enableLogs
+      ? await askQuestion(rl, 'Synced terminal log directory', syncedDefaultLogDirectory)
+      : currentLogging.directory || '';
+
+    const resolvedSyncPath = expandHome(syncPath);
+    if (!fs.existsSync(resolvedSyncPath)) {
+      if (!createFolder) {
+        throw new Error(`sync folder does not exist: ${resolvedSyncPath}`);
+      }
+      fs.mkdirSync(resolvedSyncPath, { recursive: true });
+    }
+    fs.mkdirSync(path.join(resolvedSyncPath, channel || 'default'), { recursive: true });
+    if (enableLogs) {
+      fs.mkdirSync(expandHome(logDirectory), { recursive: true });
+    }
+
+    writeUserConfig({
+      ...userConfig,
+      sync: {
+        ...currentSync,
+        enabled: true,
+        provider: 'folder',
+        path: syncPath,
+        channel: channel || 'default',
+        clipboard: currentSync.clipboard ?? true,
+        diagnostics: currentSync.diagnostics ?? true,
+        pasteRequiresConfirm: currentSync.pasteRequiresConfirm ?? true,
+        maxBytes: currentSync.maxBytes ?? 1048576,
+        ttlSeconds: currentSync.ttlSeconds ?? 86400,
+      },
+      logging: {
+        ...currentLogging,
+        enabled: currentLogging.enabled ?? true,
+        directory: logDirectory,
+        autoStart: currentLogging.autoStart ?? false,
+        maxBytes: currentLogging.maxBytes ?? 10485760,
+      },
+    }, targetPath);
+
+    console.log('');
+    console.log(`updated ${targetPath}`);
+    console.log(`sync path: ${syncPath}`);
+    console.log(`sync channel: ${channel || 'default'}`);
+    console.log(`terminal logs: ${enableLogs ? logDirectory : 'local default unless configured later'}`);
+  } finally {
+    rl.close();
   }
 }
 
@@ -570,6 +836,19 @@ function runtimeEnv(options) {
   };
 }
 
+// Applies one-shot temporary web console overrides after config resolution.
+function applyWebConsoleRuntimeOverrides(webConsoleConfig, env) {
+  if (!webConsoleConfig || typeof webConsoleConfig !== 'object') {
+    return;
+  }
+  if (env.FPASOTERM_WEB_CONSOLE === '1') {
+    webConsoleConfig.enabled = true;
+  }
+  if (env.FPASOTERM_WEB_CONSOLE_TTL) {
+    webConsoleConfig.ttlSeconds = Number(env.FPASOTERM_WEB_CONSOLE_TTL);
+  }
+}
+
 // Applies one-shot CLI terminal overrides after config resolution.
 function applyTerminalRuntimeOverrides(terminalConfig, env) {
   if (env.FPASOTERM_SHELL) {
@@ -669,6 +948,11 @@ try {
     // The config command has completed without starting the desktop process.
   } else if (options.resetWindowState) {
     resetWindowState(options);
+  } else if (options.setupSync) {
+    Promise.resolve(setupSync(options)).catch((setupError) => {
+      console.error(`fpasoterm: ${setupError.message}`);
+      process.exitCode = 1;
+    });
   } else if (options.showConfig) {
     showConfig(options);
   } else if (options.updateDesktop) {

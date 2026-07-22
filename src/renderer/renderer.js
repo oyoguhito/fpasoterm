@@ -6,6 +6,19 @@ const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
+const syncMenu = document.getElementById('sync-menu');
+const syncMenuToggleButton = document.getElementById('sync-menu-toggle');
+const syncMenuItems = document.getElementById('sync-menu-items');
+const syncCopyButton = document.getElementById('sync-copy');
+const syncPasteButton = document.getElementById('sync-paste');
+const syncDiagnosticsButton = document.getElementById('sync-diagnostics');
+const webConsoleMenu = document.getElementById('web-console-menu');
+const webConsoleToggleButton = document.getElementById('web-console-toggle');
+const webConsoleItems = document.getElementById('web-console-items');
+const webConsoleStartButton = document.getElementById('web-console-start');
+const webConsoleCopyButton = document.getElementById('web-console-copy');
+const webConsoleStopButton = document.getElementById('web-console-stop');
+const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
@@ -58,6 +71,31 @@ const fallbackConfig = {
   plugins: {
     enabled: [],
   },
+  sync: {
+    enabled: false,
+    provider: 'folder',
+    path: '',
+    channel: 'default',
+    clipboard: true,
+    diagnostics: true,
+    pasteRequiresConfirm: true,
+    maxBytes: 1048576,
+    ttlSeconds: 86400,
+  },
+  logging: {
+    enabled: true,
+    directory: '',
+    autoStart: false,
+    maxBytes: 10485760,
+  },
+  webConsole: {
+    enabled: false,
+    bind: '127.0.0.1',
+    port: 0,
+    ttlSeconds: 900,
+    maxBytes: 1048576,
+    allowTerminalInput: false,
+  },
 };
 let appConfig = fallbackConfig;
 let pluginUrls = [];
@@ -89,6 +127,9 @@ function installTauriApiAdapter() {
     startTerminal: (size) => invoke('terminal_start', { size }),
     writeTerminal: (data) => invoke('terminal_write', { data }),
     resizeTerminal: (size) => invoke('terminal_resize', { size }),
+    startTerminalLog: (path) => invoke('terminal_log_start', { request: { path: path || null } }),
+    stopTerminalLog: () => invoke('terminal_log_stop'),
+    terminalLogStatus: () => invoke('terminal_log_status'),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
@@ -107,6 +148,13 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
+    syncStatus: () => invoke('sync_status'),
+    syncWriteClipboard: (text) => invoke('sync_write_clipboard', { request: { text } }),
+    syncReadClipboard: () => invoke('sync_read_clipboard'),
+    syncWriteDiagnostics: () => invoke('sync_write_diagnostics'),
+    webConsoleStart: () => invoke('web_console_start'),
+    webConsoleStop: () => invoke('web_console_stop'),
+    webConsoleStatus: () => invoke('web_console_status'),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
@@ -565,6 +613,7 @@ function setRuntimeTitlebarColor(color) {
 // Applies fpasoterm-specific OSC 777 commands emitted by shell scripts.
 function applyFpasotermOsc(command) {
   const fields = String(command || '').split(';');
+  const values = {};
   for (const field of fields) {
     const separator = field.indexOf('=');
     if (separator === -1) {
@@ -573,6 +622,7 @@ function applyFpasotermOsc(command) {
 
     const key = field.slice(0, separator).trim();
     const value = field.slice(separator + 1).trim();
+    values[key] = value;
     if (key === 'title') {
       setRuntimeWindowTitle(value, { force: true });
     } else if (key === 'titlebarColor') {
@@ -588,6 +638,16 @@ function applyFpasotermOsc(command) {
     } else if (key === 'config' || key === 'configPath') {
       applyRuntimeConfigPath(value);
     }
+  }
+
+  if (values.log === 'start') {
+    startTerminalOutputLog(values.logPath || values.path || '').catch((error) => {
+      showDiagnostic(`terminal log start failed: ${error}`);
+    });
+  } else if (values.log === 'stop') {
+    stopTerminalOutputLog().catch((error) => {
+      showDiagnostic(`terminal log stop failed: ${error}`);
+    });
   }
 }
 
@@ -758,6 +818,217 @@ async function loadPlugins() {
   }
 }
 
+// Returns true when sync-folder features are enabled in the resolved config.
+function syncEnabled() {
+  const sync = appConfig.sync || {};
+  return sync.enabled === true && sync.provider === 'folder' && Boolean(String(sync.path || '').trim());
+}
+
+// Shows a short state label on a sync button, then restores the original text.
+function flashSyncButton(button, label) {
+  if (!button) {
+    return;
+  }
+  const original = button.dataset.label || button.textContent;
+  button.dataset.label = original;
+  button.textContent = label;
+  setTimeout(() => {
+    button.textContent = button.dataset.label || original;
+  }, 1400);
+}
+
+// Reads selected terminal text first, then falls back to the local clipboard.
+async function textForSyncClipboard() {
+  const selectedText = term?.getSelection?.() || '';
+  if (selectedText) {
+    return selectedText;
+  }
+  try {
+    return await navigator.clipboard.readText();
+  } catch (error) {
+    showDiagnostic(`sync clipboard read failed: ${error}`);
+    return '';
+  }
+}
+
+// Publishes explicit text to the sync folder for another fpasoterm to pull.
+async function syncCopyText() {
+  const text = await textForSyncClipboard();
+  if (!text) {
+    flashSyncButton(syncCopyButton, 'Empty');
+    showDiagnostic('sync copy skipped: no selected text or clipboard text');
+    return;
+  }
+  const item = await window.fpasoterm.syncWriteClipboard(text);
+  flashSyncButton(syncCopyButton, 'Synced');
+  showDiagnostic(`sync clipboard wrote bytes=${item.text.length} channel=${item.channel}`);
+}
+
+// Pulls the latest sync clipboard item into the local OS clipboard.
+async function syncPullClipboard() {
+  const item = await window.fpasoterm.syncReadClipboard();
+  if (!item?.text) {
+    flashSyncButton(syncPasteButton, 'None');
+    showDiagnostic('sync clipboard pull found no item');
+    return;
+  }
+  await navigator.clipboard.writeText(item.text);
+  flashSyncButton(syncPasteButton, 'Pulled');
+  showDiagnostic(`sync clipboard pulled to OS clipboard bytes=${item.text.length} channel=${item.channel}`);
+}
+
+// Publishes the backend diagnostics ring buffer to the sync folder.
+async function syncDiagnostics() {
+  const item = await window.fpasoterm.syncWriteDiagnostics();
+  flashSyncButton(syncDiagnosticsButton, item.text ? 'Synced' : 'Empty');
+  showDiagnostic(`sync diagnostics wrote bytes=${item.text.length} channel=${item.channel}`);
+}
+
+// Enables sync controls only when [sync] is configured.
+async function installSyncControls() {
+  if (syncMenu) {
+    syncMenu.hidden = true;
+  }
+  closeSyncMenu();
+  if (!syncEnabled()) {
+    return;
+  }
+
+  const status = await window.fpasoterm.syncStatus();
+  if (!status.enabled) {
+    showDiagnostic(`sync disabled: ${status.message}`);
+    return;
+  }
+
+  if (syncMenu) {
+    syncMenu.hidden = false;
+  }
+  showDiagnostic(`sync folder enabled channel=${status.channel} path=${status.path}`);
+}
+
+// Opens or closes the compact sync action menu in the custom titlebar.
+function setSyncMenuOpen(open) {
+  if (!syncMenuItems || !syncMenuToggleButton) {
+    return;
+  }
+  syncMenuItems.hidden = !open;
+  syncMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// Closes the sync menu after actions or outside clicks.
+function closeSyncMenu() {
+  setSyncMenuOpen(false);
+}
+
+// Returns true when the temporary web console controls should be available.
+function webConsoleEnabled() {
+  const webConsole = appConfig.webConsole || {};
+  return webConsole.enabled === true;
+}
+
+// Enables the temporary web console controls only when configured or requested.
+async function installWebConsoleControls() {
+  if (webConsoleMenu) {
+    webConsoleMenu.hidden = true;
+  }
+  closeWebConsoleMenu();
+  if (!webConsoleEnabled()) {
+    return;
+  }
+  const status = await window.fpasoterm.webConsoleStatus();
+  if (webConsoleMenu) {
+    webConsoleMenu.hidden = false;
+  }
+  updateWebConsoleButtons(status);
+  showDiagnostic(`web console ${status.active ? 'active' : 'available'} ${status.message}`);
+}
+
+// Opens or closes the compact web console action menu.
+function setWebConsoleMenuOpen(open) {
+  if (!webConsoleItems || !webConsoleToggleButton) {
+    return;
+  }
+  webConsoleItems.hidden = !open;
+  webConsoleToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// Closes the web console menu after actions or outside clicks.
+function closeWebConsoleMenu() {
+  setWebConsoleMenuOpen(false);
+}
+
+// Reflects the active read-only server state in the titlebar menu.
+function updateWebConsoleButtons(status) {
+  if (webConsoleStartButton) {
+    webConsoleStartButton.disabled = status?.active === true;
+  }
+  if (webConsoleCopyButton) {
+    webConsoleCopyButton.disabled = status?.active !== true || !status?.url;
+  }
+  if (webConsoleStopButton) {
+    webConsoleStopButton.disabled = status?.active !== true;
+  }
+}
+
+// Starts the read-only temporary web console.
+async function startWebConsole() {
+  const status = await window.fpasoterm.webConsoleStart();
+  updateWebConsoleButtons(status);
+  if (status.url) {
+    await navigator.clipboard.writeText(status.url);
+    showDiagnostic(`web console started url copied ${status.url}`);
+  } else {
+    showDiagnostic(`web console not started: ${status.message}`);
+  }
+  return status;
+}
+
+// Copies the active temporary web console URL to the OS clipboard.
+async function copyWebConsoleUrl() {
+  const status = await window.fpasoterm.webConsoleStatus();
+  updateWebConsoleButtons(status);
+  if (!status.active || !status.url) {
+    showDiagnostic(`web console URL unavailable: ${status.message}`);
+    return;
+  }
+  await navigator.clipboard.writeText(status.url);
+  showDiagnostic(`web console URL copied ${status.url}`);
+}
+
+// Stops the temporary web console and invalidates the in-memory token.
+async function stopWebConsole() {
+  const status = await window.fpasoterm.webConsoleStop();
+  updateWebConsoleButtons(status);
+  showDiagnostic(status.message);
+}
+
+// Updates the terminal output log button label from backend state.
+async function refreshTerminalLogControl() {
+  if (!terminalLogToggleButton) {
+    return;
+  }
+  const status = await window.fpasoterm.terminalLogStatus();
+  terminalLogToggleButton.hidden = status.enabled === false;
+  terminalLogToggleButton.textContent = status.active ? 'Log Stop' : 'Log Start';
+  terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
+}
+
+// Starts terminal output logging to the configured or requested file.
+async function startTerminalOutputLog(path = '') {
+  const status = await window.fpasoterm.startTerminalLog(path);
+  await refreshTerminalLogControl();
+  showDiagnostic(`terminal log started path=${status.path}`);
+  return status;
+}
+
+// Stops terminal output logging and reports the final byte count.
+async function stopTerminalOutputLog() {
+  const status = await window.fpasoterm.stopTerminalLog();
+  await refreshTerminalLogControl();
+  showDiagnostic(`terminal log stopped path=${status.path} bytes=${status.bytesWritten}`);
+  return status;
+}
+
 // Copies diagnostics even when terminal copy shortcuts are captured by xterm.js.
 copyDiagnosticsButton.addEventListener('click', async () => {
   const copiedLength = await window.fpasoterm.copyDiagnostics();
@@ -766,6 +1037,75 @@ copyDiagnosticsButton.addEventListener('click', async () => {
     copyDiagnosticsButton.textContent = 'Copy';
   }, 1200);
 });
+
+syncCopyButton.addEventListener('click', () => {
+  syncCopyText().catch((error) => {
+    flashSyncButton(syncCopyButton, 'Error');
+    showDiagnostic(`sync copy failed: ${error}`);
+  }).finally(closeSyncMenu);
+});
+
+syncPasteButton.addEventListener('click', () => {
+  syncPullClipboard().catch((error) => {
+    flashSyncButton(syncPasteButton, 'Error');
+    showDiagnostic(`sync pull failed: ${error}`);
+  }).finally(closeSyncMenu);
+});
+
+syncDiagnosticsButton.addEventListener('click', () => {
+  syncDiagnostics().catch((error) => {
+    flashSyncButton(syncDiagnosticsButton, 'Error');
+    showDiagnostic(`sync diagnostics failed: ${error}`);
+  }).finally(closeSyncMenu);
+});
+
+syncMenuToggleButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setSyncMenuOpen(syncMenuItems?.hidden !== false);
+});
+
+webConsoleStartButton.addEventListener('click', () => {
+  startWebConsole().catch((error) => {
+    showDiagnostic(`web console start failed: ${error}`);
+  }).finally(closeWebConsoleMenu);
+});
+
+webConsoleCopyButton.addEventListener('click', () => {
+  copyWebConsoleUrl().catch((error) => {
+    showDiagnostic(`web console copy failed: ${error}`);
+  }).finally(closeWebConsoleMenu);
+});
+
+webConsoleStopButton.addEventListener('click', () => {
+  stopWebConsole().catch((error) => {
+    showDiagnostic(`web console stop failed: ${error}`);
+  }).finally(closeWebConsoleMenu);
+});
+
+webConsoleToggleButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setWebConsoleMenuOpen(webConsoleItems?.hidden !== false);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (syncMenu && !syncMenu.hidden && !syncMenu.contains(event.target)) {
+    closeSyncMenu();
+  }
+  if (webConsoleMenu && !webConsoleMenu.hidden && !webConsoleMenu.contains(event.target)) {
+    closeWebConsoleMenu();
+  }
+});
+
+terminalLogToggleButton.addEventListener('click', () => {
+  const active = terminalLogToggleButton.dataset.active === 'true';
+  const action = active ? stopTerminalOutputLog() : startTerminalOutputLog();
+  action.catch((error) => {
+    terminalLogToggleButton.textContent = 'Log Error';
+    setTimeout(() => refreshTerminalLogControl().catch(() => {}), 1400);
+    showDiagnostic(`terminal log toggle failed: ${error}`);
+  });
+});
+
 
 // Closes the frameless window from the custom titlebar.
 closeWindowButton.addEventListener('click', () => {
@@ -918,6 +1258,9 @@ async function initialize() {
     return;
   }
   await loadRuntimeConfig();
+  await installSyncControls();
+  await installWebConsoleControls();
+  await refreshTerminalLogControl();
   if (debugKeys) {
     window.fpasoterm.getDiagnosticsPath().then((logPath) => {
       diagnosticsPathElement.textContent = logPath;
@@ -1005,6 +1348,7 @@ async function initialize() {
   fitAddon.fit();
   try {
     await window.fpasoterm.startTerminal({ cols: term.cols, rows: term.rows });
+    await refreshTerminalLogControl();
     await afterNextPaint();
     fitAndResize();
   } catch (error) {

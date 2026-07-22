@@ -62,6 +62,31 @@ const defaultConfig = Object.freeze({
   plugins: {
     enabled: [],
   },
+  sync: {
+    enabled: false,
+    provider: 'folder',
+    path: '',
+    channel: 'default',
+    clipboard: true,
+    diagnostics: true,
+    pasteRequiresConfirm: true,
+    maxBytes: 1048576,
+    ttlSeconds: 86400,
+  },
+  logging: {
+    enabled: true,
+    directory: '',
+    autoStart: false,
+    maxBytes: 10485760,
+  },
+  webConsole: {
+    enabled: false,
+    bind: '127.0.0.1',
+    port: 0,
+    ttlSeconds: 900,
+    maxBytes: 1048576,
+    allowTerminalInput: false,
+  },
 });
 
 // Writes the default TOML with comments so users can copy it to config.toml
@@ -139,6 +164,39 @@ repeatedTextWindowMs = 140
 # Example: enabled = ["plugins/hello.ts", "plugins/theme.ts"]
 [plugins]
 enabled = []
+
+# Sync folder options use an already-synced local folder, such as Google Drive.
+# fpasoterm does not call Google Drive APIs or perform OAuth.
+[sync]
+enabled = false
+provider = "folder"
+# Example: path = "~/Google Drive/fpasoterm-sync"
+path = ""
+channel = "default"
+clipboard = true
+diagnostics = true
+pasteRequiresConfirm = true
+maxBytes = 1048576
+ttlSeconds = 86400
+
+# Terminal output logging records raw PTY output when started from the titlebar
+# or an OSC 777 command. The default directory is User/logs.
+[logging]
+enabled = true
+# Example: directory = "~/Google Drive/fpasoterm-sync/logs"
+directory = ""
+autoStart = false
+maxBytes = 10485760
+
+# Temporary web console exposes recent output through a read-only local HTTP
+# endpoint only while explicitly started. Keep disabled unless needed.
+[webConsole]
+enabled = false
+bind = "127.0.0.1"
+port = 0
+ttlSeconds = 900
+maxBytes = 1048576
+allowTerminalInput = false
 `;
 }
 
