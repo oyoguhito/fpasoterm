@@ -13,7 +13,6 @@ use std::sync::{
     atomic::{AtomicBool, Ordering},
     Arc, Mutex,
 };
-use std::thread::JoinHandle;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 
@@ -186,7 +185,6 @@ struct WebConsoleServer {
     port: u16,
     expires_at: u128,
     stop: Arc<AtomicBool>,
-    handle: Option<JoinHandle<()>>,
 }
 
 // Owns the native PTY session and child shell handles.
@@ -219,7 +217,7 @@ impl Default for AppState {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n      --web-console             Enable temporary read-only web console for this launch.\n      --web-console-ttl <sec>   Override the temporary web console lifetime.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n      --web-console             Enable temporary read-only web console for this launch.\n      --web-console-ttl <sec>   Override the temporary web console lifetime.\n      --web-console-bind <ip>   Override the temporary web console bind address.\n      --web-console-port <port> Override the temporary web console port; 0 chooses a free port.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
@@ -328,6 +326,8 @@ fn apply_direct_cli_env_overrides() {
     set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
     set_env_from_cli("FPASOTERM_START_COMMAND", &["--command", "-e"]);
     set_env_from_cli("FPASOTERM_WEB_CONSOLE_TTL", &["--web-console-ttl"]);
+    set_env_from_cli("FPASOTERM_WEB_CONSOLE_BIND", &["--web-console-bind"]);
+    set_env_from_cli("FPASOTERM_WEB_CONSOLE_PORT", &["--web-console-port"]);
 
     if let Some((width, height)) = cli_size_option() {
         env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
@@ -717,6 +717,31 @@ fn apply_direct_cli_overrides(runtime: &mut RuntimeConfig) {
                 web_console.insert(
                     "ttlSeconds".to_string(),
                     serde_json::Value::Number(serde_json::Number::from(ttl)),
+                );
+            }
+        }
+    }
+    if let Ok(bind) = env::var("FPASOTERM_WEB_CONSOLE_BIND")
+        .ok()
+        .or_else(|| cli_option_value_any(&["--web-console-bind"]))
+        .filter(|value| !value.trim().is_empty())
+        .ok_or(())
+    {
+        if let Some(web_console) = runtime.config.web_console.as_object_mut() {
+            web_console.insert("bind".to_string(), serde_json::Value::String(bind));
+        }
+    }
+    if let Ok(port) = env::var("FPASOTERM_WEB_CONSOLE_PORT")
+        .ok()
+        .or_else(|| cli_option_value_any(&["--web-console-port"]))
+        .unwrap_or_default()
+        .parse::<u64>()
+    {
+        if port <= u16::MAX as u64 {
+            if let Some(web_console) = runtime.config.web_console.as_object_mut() {
+                web_console.insert(
+                    "port".to_string(),
+                    serde_json::Value::Number(serde_json::Number::from(port)),
                 );
             }
         }
@@ -1787,7 +1812,7 @@ fn web_console_start(state: State<AppState>) -> Result<WebConsoleStatus, String>
     let recent_output = Arc::clone(&state.recent_output);
     let token_for_thread = token.clone();
 
-    let handle = std::thread::spawn(move || {
+    std::thread::spawn(move || {
         run_web_console_server(
             listener,
             stop_for_thread,
@@ -1804,7 +1829,6 @@ fn web_console_start(state: State<AppState>) -> Result<WebConsoleStatus, String>
         port,
         expires_at,
         stop,
-        handle: Some(handle),
     };
 
     let mut guard = state
@@ -1880,18 +1904,15 @@ fn web_console_active_status(state: &AppState) -> Result<Option<WebConsoleStatus
     }))
 }
 
-// Stops an active server and joins its thread.
+// Signals an active server to stop without blocking the UI thread.
 fn stop_web_console_state(state: &AppState, message: &str) -> Result<WebConsoleStatus, String> {
     let mut server = state
         .web_console
         .lock()
         .map_err(|error| error.to_string())?
         .take();
-    if let Some(mut server) = server.take() {
+    if let Some(server) = server.take() {
         server.stop.store(true, Ordering::SeqCst);
-        if let Some(handle) = server.handle.take() {
-            let _ = handle.join();
-        }
         return Ok(WebConsoleStatus {
             enabled: web_console_bool("enabled", false),
             active: false,

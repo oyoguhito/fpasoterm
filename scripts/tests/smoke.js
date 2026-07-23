@@ -459,6 +459,8 @@ assert.match(rustMain, /sync_write_diagnostics/);
 assert.match(rustMain, /web_console_start/);
 assert.match(rustMain, /web_console_stop/);
 assert.match(rustMain, /web_console_status/);
+assert.match(rustMain, /--web-console-bind/);
+assert.match(rustMain, /--web-console-port/);
 assert.match(rustMain, /TcpListener::bind/);
 assert.match(rustMain, /127\.0\.0\.1/);
 assert.match(rustMain, /generate_web_console_token/);
@@ -466,6 +468,8 @@ assert.match(rustMain, /append_recent_output/);
 assert.match(rustMain, /clean_terminal_text_for_web/);
 assert.match(rustMain, /strip_ansi_sequences/);
 assert.match(rustMain, /normalize_terminal_newlines/);
+assert.match(rustMain, /Signals an active server to stop without blocking the UI thread/);
+assert.doesNotMatch(rustMain, /handle\.join\(\)/);
 assert.match(rustMain, /allowTerminalInput/);
 assert.match(rustMain, /terminal_log_start/);
 assert.match(rustMain, /terminal_log_stop/);
@@ -672,6 +676,8 @@ assert.match(temporaryWebConsoleEn, /no shell input/);
 assert.match(temporaryWebConsoleEn, /SSH port forwarding/);
 assert.match(temporaryWebConsoleEn, /\[webConsole\]/);
 assert.match(temporaryWebConsoleEn, /--web-console/);
+assert.match(temporaryWebConsoleEn, /--web-console-bind 0\.0\.0\.0/);
+assert.match(temporaryWebConsoleEn, /real host IP address/);
 assert.match(temporaryWebConsoleEn, /examples\/config\/web-console\.toml/);
 
 const temporaryWebConsoleJa = read('docs/temporary-web-console.ja.md');
@@ -684,6 +690,8 @@ assert.match(temporaryWebConsoleJa, /browser から shell input は送らない/
 assert.match(temporaryWebConsoleJa, /SSH port forwarding/);
 assert.match(temporaryWebConsoleJa, /\[webConsole\]/);
 assert.match(temporaryWebConsoleJa, /--web-console/);
+assert.match(temporaryWebConsoleJa, /--web-console-bind 0\.0\.0\.0/);
+assert.match(temporaryWebConsoleJa, /実 IP address/);
 assert.match(temporaryWebConsoleJa, /examples\/config\/web-console\.toml/);
 
 const specEn = read('docs/spec.en.md');
@@ -1021,6 +1029,11 @@ assert.match(config, /transpileModule/);
 
 const launcher = read('bin/fpasoterm');
 assert.match(launcher, /--setup-sync/);
+assert.match(launcher, /--web-console-bind/);
+assert.match(launcher, /--web-console-port/);
+assert.match(launcher, /requirePort/);
+assert.match(launcher, /FPASOTERM_WEB_CONSOLE_BIND/);
+assert.match(launcher, /FPASOTERM_WEB_CONSOLE_PORT/);
 assert.match(launcher, /setupSync/);
 assert.match(launcher, /expandPathVariables/);
 assert.match(launcher, /%\(\[\^%\]\+\)%/);

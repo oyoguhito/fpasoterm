@@ -65,9 +65,12 @@ examples/config/web-console.toml
 ```sh
 fpasoterm --web-console
 fpasoterm --web-console --web-console-ttl 900
+fpasoterm --web-console --web-console-bind 0.0.0.0 --web-console-port 18080
 ```
 
 `--web-console` enables the titlebar `Web` menu for that launch. It does not start the HTTP server by itself.
+
+`--web-console-bind 0.0.0.0` listens on every interface. If the generated URL is `http://0.0.0.0:18080/...`, use the machine's real IP address from another device, not `0.0.0.0`. For non-public access, prefer a private path such as SSH port forwarding, Tailscale, WireGuard, or VPN.
 
 The titlebar exposes:
 
@@ -82,7 +85,7 @@ Web Console -> Stop
 1. Start fpasoterm with `[webConsole].enabled = true` or `--web-console`.
 2. Select `Web` -> `Start` on the machine that owns the fpasoterm window.
 3. Copy the generated URL. `Start` copies it automatically, and `Copy URL` can copy it again.
-4. If another machine needs access, create a private tunnel or VPN route.
+4. If another machine needs access, create a private tunnel or VPN route. When using `0.0.0.0`, open the real host IP address in the browser.
 5. Open the URL in a browser.
 6. Copy the needed output.
 7. Select `Web` -> `Stop`.

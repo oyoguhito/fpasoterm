@@ -65,9 +65,12 @@ examples/config/web-console.toml
 ```sh
 fpasoterm --web-console
 fpasoterm --web-console --web-console-ttl 900
+fpasoterm --web-console --web-console-bind 0.0.0.0 --web-console-port 18080
 ```
 
 `--web-console` は、その起動だけ titlebar の `Web` menu を有効にします。HTTP server 自体は自動起動しません。
+
+`--web-console-bind 0.0.0.0` は全 interface で listen します。生成 URL が `http://0.0.0.0:18080/...` の場合でも、別端末からアクセスする時は `0.0.0.0` ではなく、fpasoterm を起動している端末の実 IP address を使ってください。public network へ公開しない前提では、SSH port forwarding、Tailscale、WireGuard、VPN など private path 経由を推奨します。
 
 titlebar には次の menu が表示されます。
 
@@ -82,7 +85,7 @@ Web Console -> Stop
 1. `[webConsole].enabled = true` または `--web-console` で fpasoterm を起動します。
 2. 出力を持っている fpasoterm 側で `Web` -> `Start` を選択します。
 3. 生成された URL をコピーします。`Start` 時に自動で clipboard へコピーされ、`Copy URL` でも再コピーできます。
-4. 別端末からアクセスする場合は、private tunnel や VPN route を用意します。
+4. 別端末からアクセスする場合は、private tunnel や VPN route を用意します。`0.0.0.0` bind を使う場合も、browser には実 IP address を指定します。
 5. browser で URL を開きます。
 6. 必要な出力をコピーします。
 7. `Web` -> `Stop` で temporary web console を停止します。

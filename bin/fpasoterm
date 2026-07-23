@@ -43,6 +43,8 @@ Options:
   -z, --size <width>x<height>   Override both window dimensions for this launch.
       --web-console             Enable temporary read-only web console for this launch.
       --web-console-ttl <sec>   Override the temporary web console lifetime.
+      --web-console-bind <ip>   Override the temporary web console bind address.
+      --web-console-port <port> Override the temporary web console port; 0 chooses a free port.
   -k, --debug-keys              Enable key/composition diagnostics.
       --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
@@ -193,6 +195,18 @@ function parseArgs(argv) {
 
     if (arg === '--web-console-ttl') {
       env.FPASOTERM_WEB_CONSOLE_TTL = requirePositiveInteger(requireValue(argv, index, arg), arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--web-console-bind') {
+      env.FPASOTERM_WEB_CONSOLE_BIND = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--web-console-port') {
+      env.FPASOTERM_WEB_CONSOLE_PORT = requirePort(requireValue(argv, index, arg), arg);
       index += 1;
       continue;
     }
@@ -355,6 +369,15 @@ function requirePositiveInteger(value, flag) {
   const parsed = Number(value);
   if (!Number.isInteger(parsed) || parsed <= 0) {
     throw new Error(`${flag} must be a positive integer`);
+  }
+  return String(parsed);
+}
+
+// Normalizes port arguments, allowing 0 for OS-selected web console ports.
+function requirePort(value, flag) {
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 65535) {
+    throw new Error(`${flag} must be an integer from 0 to 65535`);
   }
   return String(parsed);
 }
@@ -846,6 +869,12 @@ function applyWebConsoleRuntimeOverrides(webConsoleConfig, env) {
   }
   if (env.FPASOTERM_WEB_CONSOLE_TTL) {
     webConsoleConfig.ttlSeconds = Number(env.FPASOTERM_WEB_CONSOLE_TTL);
+  }
+  if (env.FPASOTERM_WEB_CONSOLE_BIND) {
+    webConsoleConfig.bind = env.FPASOTERM_WEB_CONSOLE_BIND;
+  }
+  if (env.FPASOTERM_WEB_CONSOLE_PORT) {
+    webConsoleConfig.port = Number(env.FPASOTERM_WEB_CONSOLE_PORT);
   }
 }
 
