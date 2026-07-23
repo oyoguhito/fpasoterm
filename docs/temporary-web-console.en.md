@@ -11,6 +11,7 @@ Use this when you need to inspect output from a remote fpasoterm session for mai
 Initial scope:
 
 - read-only access to recent selected output, diagnostics, and optional terminal log excerpts
+- browser output is sanitized for common terminal control sequences such as ANSI CSI/OSC
 - explicit start and stop
 - short lifetime
 - random access token

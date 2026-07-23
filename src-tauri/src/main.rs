@@ -1424,12 +1424,93 @@ fn write_http_response(
 
 // Converts the recent output ring buffer to text for browser display.
 fn recent_output_text(recent_output: &Arc<Mutex<VecDeque<u8>>>) -> String {
-    recent_output
+    let raw = recent_output
         .lock()
         .map(|guard| {
             String::from_utf8_lossy(&guard.iter().copied().collect::<Vec<_>>()).to_string()
         })
-        .unwrap_or_else(|_| String::new())
+        .unwrap_or_else(|_| String::new());
+    clean_terminal_text_for_web(&raw)
+}
+
+// Removes terminal control sequences from the web console copy surface.
+fn clean_terminal_text_for_web(input: &str) -> String {
+    let without_ansi = strip_ansi_sequences(input);
+    normalize_terminal_newlines(&without_ansi)
+}
+
+// Strips common ANSI CSI/OSC/ESC sequences while preserving printable Unicode.
+fn strip_ansi_sequences(input: &str) -> String {
+    let chars: Vec<char> = input.chars().collect();
+    let mut output = String::new();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '\x1b' {
+            index += 1;
+            if index >= chars.len() {
+                break;
+            }
+            match chars[index] {
+                '[' => {
+                    index += 1;
+                    while index < chars.len() {
+                        let ch = chars[index];
+                        index += 1;
+                        if ('@'..='~').contains(&ch) {
+                            break;
+                        }
+                    }
+                }
+                ']' => {
+                    index += 1;
+                    while index < chars.len() {
+                        if chars[index] == '\x07' {
+                            index += 1;
+                            break;
+                        }
+                        if chars[index] == '\x1b'
+                            && index + 1 < chars.len()
+                            && chars[index + 1] == '\\'
+                        {
+                            index += 2;
+                            break;
+                        }
+                        index += 1;
+                    }
+                }
+                _ => {
+                    index += 1;
+                }
+            }
+            continue;
+        }
+
+        let ch = chars[index];
+        if ch == '\n' || ch == '\r' || ch == '\t' || !ch.is_control() {
+            output.push(ch);
+        }
+        index += 1;
+    }
+
+    output
+}
+
+// Converts terminal carriage returns into browser-friendly line breaks.
+fn normalize_terminal_newlines(input: &str) -> String {
+    let mut output = String::new();
+    let mut chars = input.chars().peekable();
+    while let Some(ch) = chars.next() {
+        if ch == '\r' {
+            if chars.peek() == Some(&'\n') {
+                continue;
+            }
+            output.push('\n');
+        } else {
+            output.push(ch);
+        }
+    }
+    output
 }
 
 // Builds the read-only temporary web console page.
