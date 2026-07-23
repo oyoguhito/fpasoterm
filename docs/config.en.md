@@ -149,14 +149,6 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
-
-[webConsole]
-enabled = false
-bind = "127.0.0.1"
-port = 0
-ttlSeconds = 900
-maxBytes = 1048576
-allowTerminalInput = false
 ```
 
 ## Sections
@@ -167,7 +159,6 @@ allowTerminalInput = false
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for explicit clipboard text and diagnostics. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. See [Sync Folder](sync.en.md).
 - `logging`: terminal output logging. `Log Start` / `Log Stop` writes raw PTY output to a local file. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
-- `webConsole`: temporary read-only web console settings. `enabled = true` or `--web-console` shows the titlebar `Web` menu. The server starts only after an explicit `Start` action and binds to a local `127.0.0.1` port by default. See [Temporary Web Console](temporary-web-console.en.md).
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 

@@ -79,14 +79,6 @@ const defaultConfig = Object.freeze({
     autoStart: false,
     maxBytes: 10485760,
   },
-  webConsole: {
-    enabled: false,
-    bind: '127.0.0.1',
-    port: 0,
-    ttlSeconds: 900,
-    maxBytes: 1048576,
-    allowTerminalInput: false,
-  },
 });
 
 // Writes the default TOML with comments so users can copy it to config.toml
@@ -187,16 +179,6 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
-
-# Temporary web console exposes recent output through a read-only local HTTP
-# endpoint only while explicitly started. Keep disabled unless needed.
-[webConsole]
-enabled = false
-bind = "127.0.0.1"
-port = 0
-ttlSeconds = 900
-maxBytes = 1048576
-allowTerminalInput = false
 `;
 }
 
@@ -250,6 +232,12 @@ function mergeConfig(base, override) {
     }
   }
   return merged;
+}
+
+// Drops config sections that were removed from the supported schema.
+function removeUnsupportedConfigSections(config) {
+  delete config[['web', 'Console'].join('')];
+  return config;
 }
 
 // Keeps config.toml.example in sync without overwriting the user's config.toml.
@@ -436,7 +424,7 @@ function loadConfig() {
   writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
-  const config = mergeConfig(defaultConfig, userConfig);
+  const config = removeUnsupportedConfigSections(mergeConfig(defaultConfig, userConfig));
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {

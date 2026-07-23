@@ -12,12 +12,6 @@ const syncMenuItems = document.getElementById('sync-menu-items');
 const syncCopyButton = document.getElementById('sync-copy');
 const syncPasteButton = document.getElementById('sync-paste');
 const syncDiagnosticsButton = document.getElementById('sync-diagnostics');
-const webConsoleMenu = document.getElementById('web-console-menu');
-const webConsoleToggleButton = document.getElementById('web-console-toggle');
-const webConsoleItems = document.getElementById('web-console-items');
-const webConsoleStartButton = document.getElementById('web-console-start');
-const webConsoleCopyButton = document.getElementById('web-console-copy');
-const webConsoleStopButton = document.getElementById('web-console-stop');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
@@ -88,14 +82,6 @@ const fallbackConfig = {
     autoStart: false,
     maxBytes: 10485760,
   },
-  webConsole: {
-    enabled: false,
-    bind: '127.0.0.1',
-    port: 0,
-    ttlSeconds: 900,
-    maxBytes: 1048576,
-    allowTerminalInput: false,
-  },
 };
 let appConfig = fallbackConfig;
 let pluginUrls = [];
@@ -152,9 +138,6 @@ function installTauriApiAdapter() {
     syncWriteClipboard: (text) => invoke('sync_write_clipboard', { request: { text } }),
     syncReadClipboard: () => invoke('sync_read_clipboard'),
     syncWriteDiagnostics: () => invoke('sync_write_diagnostics'),
-    webConsoleStart: () => invoke('web_console_start'),
-    webConsoleStop: () => invoke('web_console_stop'),
-    webConsoleStatus: () => invoke('web_console_status'),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
@@ -920,88 +903,6 @@ function closeSyncMenu() {
   setSyncMenuOpen(false);
 }
 
-// Returns true when the temporary web console controls should be available.
-function webConsoleEnabled() {
-  const webConsole = appConfig.webConsole || {};
-  return webConsole.enabled === true;
-}
-
-// Enables the temporary web console controls only when configured or requested.
-async function installWebConsoleControls() {
-  if (webConsoleMenu) {
-    webConsoleMenu.hidden = true;
-  }
-  closeWebConsoleMenu();
-  if (!webConsoleEnabled()) {
-    return;
-  }
-  const status = await window.fpasoterm.webConsoleStatus();
-  if (webConsoleMenu) {
-    webConsoleMenu.hidden = false;
-  }
-  updateWebConsoleButtons(status);
-  showDiagnostic(`web console ${status.active ? 'active' : 'available'} ${status.message}`);
-}
-
-// Opens or closes the compact web console action menu.
-function setWebConsoleMenuOpen(open) {
-  if (!webConsoleItems || !webConsoleToggleButton) {
-    return;
-  }
-  webConsoleItems.hidden = !open;
-  webConsoleToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-// Closes the web console menu after actions or outside clicks.
-function closeWebConsoleMenu() {
-  setWebConsoleMenuOpen(false);
-}
-
-// Reflects the active read-only server state in the titlebar menu.
-function updateWebConsoleButtons(status) {
-  if (webConsoleStartButton) {
-    webConsoleStartButton.disabled = status?.active === true;
-  }
-  if (webConsoleCopyButton) {
-    webConsoleCopyButton.disabled = status?.active !== true || !status?.url;
-  }
-  if (webConsoleStopButton) {
-    webConsoleStopButton.disabled = status?.active !== true;
-  }
-}
-
-// Starts the read-only temporary web console.
-async function startWebConsole() {
-  const status = await window.fpasoterm.webConsoleStart();
-  updateWebConsoleButtons(status);
-  if (status.url) {
-    await navigator.clipboard.writeText(status.url);
-    showDiagnostic(`web console started url copied ${status.url}`);
-  } else {
-    showDiagnostic(`web console not started: ${status.message}`);
-  }
-  return status;
-}
-
-// Copies the active temporary web console URL to the OS clipboard.
-async function copyWebConsoleUrl() {
-  const status = await window.fpasoterm.webConsoleStatus();
-  updateWebConsoleButtons(status);
-  if (!status.active || !status.url) {
-    showDiagnostic(`web console URL unavailable: ${status.message}`);
-    return;
-  }
-  await navigator.clipboard.writeText(status.url);
-  showDiagnostic(`web console URL copied ${status.url}`);
-}
-
-// Stops the temporary web console and invalidates the in-memory token.
-async function stopWebConsole() {
-  const status = await window.fpasoterm.webConsoleStop();
-  updateWebConsoleButtons(status);
-  showDiagnostic(status.message);
-}
-
 // Updates the terminal output log button label from backend state.
 async function refreshTerminalLogControl() {
   if (!terminalLogToggleButton) {
@@ -1064,35 +965,9 @@ syncMenuToggleButton.addEventListener('click', (event) => {
   setSyncMenuOpen(syncMenuItems?.hidden !== false);
 });
 
-webConsoleStartButton.addEventListener('click', () => {
-  startWebConsole().catch((error) => {
-    showDiagnostic(`web console start failed: ${error}`);
-  }).finally(closeWebConsoleMenu);
-});
-
-webConsoleCopyButton.addEventListener('click', () => {
-  copyWebConsoleUrl().catch((error) => {
-    showDiagnostic(`web console copy failed: ${error}`);
-  }).finally(closeWebConsoleMenu);
-});
-
-webConsoleStopButton.addEventListener('click', () => {
-  stopWebConsole().catch((error) => {
-    showDiagnostic(`web console stop failed: ${error}`);
-  }).finally(closeWebConsoleMenu);
-});
-
-webConsoleToggleButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  setWebConsoleMenuOpen(webConsoleItems?.hidden !== false);
-});
-
 document.addEventListener('pointerdown', (event) => {
   if (syncMenu && !syncMenu.hidden && !syncMenu.contains(event.target)) {
     closeSyncMenu();
-  }
-  if (webConsoleMenu && !webConsoleMenu.hidden && !webConsoleMenu.contains(event.target)) {
-    closeWebConsoleMenu();
   }
 });
 
@@ -1259,7 +1134,6 @@ async function initialize() {
   }
   await loadRuntimeConfig();
   await installSyncControls();
-  await installWebConsoleControls();
   await refreshTerminalLogControl();
   if (debugKeys) {
     window.fpasoterm.getDiagnosticsPath().then((logPath) => {

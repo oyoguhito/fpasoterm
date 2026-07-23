@@ -346,9 +346,6 @@ Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
 Terminal output logs can also be written with `Log Start` / `Log Stop`; point
 `logging.directory` at the same synced folder when you want those logs shared.
-For one-time remote maintenance where data should not remain in a cloud folder,
-the preferred direction is a temporary read-only web console. See
-[Temporary Web Console](docs/temporary-web-console.en.md).
 
 Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
@@ -435,13 +432,11 @@ GitHub Actions runs the same check set on pushes and pull requests.
 - [Specification](docs/spec.en.md)
 - [Configuration](docs/config.en.md)
 - [Sync Folder](docs/sync.en.md)
-- [Temporary Web Console](docs/temporary-web-console.en.md)
 - [Pull request review](docs/pr-review.en.md)
 - [Release checklist](docs/release-checklist.en.md)
 - [仕様](docs/spec.ja.md)
 - [設定](docs/config.ja.md)
 - [Sync Folder 日本語](docs/sync.ja.md)
-- [Temporary Web Console 日本語](docs/temporary-web-console.ja.md)
 - [Pull request review 日本語](docs/pr-review.ja.md)
 - [リリースチェックリスト](docs/release-checklist.ja.md)
 
@@ -657,7 +652,6 @@ api.terminal.options.cursorBlink = true;
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
 terminal output log は `Log Start` / `Log Stop` で取得できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
-cloud folder に残したくない一時的なリモート出力取得では、read-only の temporary web console を優先する方針です。詳細は [Temporary Web Console 日本語](docs/temporary-web-console.ja.md) を参照してください。
 
 npm registry から global install する場合:
 

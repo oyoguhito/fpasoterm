@@ -14,6 +14,12 @@ const {
 } = require('../../src/config');
 
 const root = path.resolve(__dirname, '..', '..');
+const removedSnakeHttpUiPattern = new RegExp(['web', 'console'].join('_'));
+const removedKebabHttpUiPattern = new RegExp(['web', 'console'].join('-'));
+const removedCamelHttpUiPattern = new RegExp(['web', 'Console'].join(''));
+const removedTemporaryHttpUiPattern = new RegExp(['temporary', 'web', 'console'].join(' '));
+const removedTemporaryHttpUiDocPattern = new RegExp(['temporary', 'web', 'console'].join('-'));
+const removedHttpUiEnvPattern = new RegExp(['FPASOTERM', 'WEB', 'CONSOLE'].join('_'));
 
 // Reads a repository file as UTF-8 for assertions.
 function read(relativePath) {
@@ -28,7 +34,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.2.2');
+assert.equal(packageJson.version, '1.3.0');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -63,8 +69,6 @@ for (const file of [
   'docs/spec.ja.md',
   'docs/sync.en.md',
   'docs/sync.ja.md',
-  'docs/temporary-web-console.en.md',
-  'docs/temporary-web-console.ja.md',
   'examples/apply-default-appearance.sh',
   'examples/apply-default-appearance.ps1',
   'examples/apply-default-appearance.bat',
@@ -77,7 +81,6 @@ for (const file of [
   'examples/config/minimal.toml',
   'examples/config/runtime-appearance.toml',
   'examples/config/sync-folder.toml',
-  'examples/config/web-console.toml',
   'examples/config/with-plugins.toml',
   'extra/logo/fpasoterm.png',
   'extra/macos/fpasoterm.icns',
@@ -456,21 +459,10 @@ assert.match(rustMain, /sync_status/);
 assert.match(rustMain, /sync_write_clipboard/);
 assert.match(rustMain, /sync_read_clipboard/);
 assert.match(rustMain, /sync_write_diagnostics/);
-assert.match(rustMain, /web_console_start/);
-assert.match(rustMain, /web_console_stop/);
-assert.match(rustMain, /web_console_status/);
-assert.match(rustMain, /--web-console-bind/);
-assert.match(rustMain, /--web-console-port/);
-assert.match(rustMain, /TcpListener::bind/);
-assert.match(rustMain, /127\.0\.0\.1/);
-assert.match(rustMain, /generate_web_console_token/);
-assert.match(rustMain, /append_recent_output/);
-assert.match(rustMain, /clean_terminal_text_for_web/);
-assert.match(rustMain, /strip_ansi_sequences/);
-assert.match(rustMain, /normalize_terminal_newlines/);
-assert.match(rustMain, /Signals an active server to stop without blocking the UI thread/);
+assert.doesNotMatch(rustMain, removedSnakeHttpUiPattern);
+assert.doesNotMatch(rustMain, removedKebabHttpUiPattern);
+assert.doesNotMatch(rustMain, /TcpListener::bind/);
 assert.doesNotMatch(rustMain, /handle\.join\(\)/);
-assert.match(rustMain, /allowTerminalInput/);
 assert.match(rustMain, /terminal_log_start/);
 assert.match(rustMain, /terminal_log_stop/);
 assert.match(rustMain, /terminal_log_status/);
@@ -496,11 +488,7 @@ assert.match(indexHtml, /id="sync-diagnostics"/);
 assert.match(indexHtml, /Copy Selection/);
 assert.match(indexHtml, /Pull to Clipboard/);
 assert.match(indexHtml, /Write Diagnostics/);
-assert.match(indexHtml, /id="web-console-menu"/);
-assert.match(indexHtml, /id="web-console-toggle"/);
-assert.match(indexHtml, /id="web-console-start"/);
-assert.match(indexHtml, /id="web-console-copy"/);
-assert.match(indexHtml, /id="web-console-stop"/);
+assert.doesNotMatch(indexHtml, removedKebabHttpUiPattern);
 assert.match(indexHtml, /id="terminal-log-toggle"/);
 assert.match(indexHtml, /id="minimize-window"/);
 assert.match(indexHtml, /id="maximize-window"/);
@@ -517,8 +505,7 @@ assert.match(readme, /plugins\/.*\.ts/);
 assert.match(readme, /docs\/config\.en\.md/);
 assert.match(readme, /docs\/sync\.en\.md/);
 assert.match(readme, /docs\/sync\.ja\.md/);
-assert.match(readme, /docs\/temporary-web-console\.en\.md/);
-assert.match(readme, /docs\/temporary-web-console\.ja\.md/);
+assert.doesNotMatch(readme, removedTemporaryHttpUiDocPattern);
 assert.match(readme, /--setup-sync/);
 assert.match(readme, /node \.\\bin\\fpasoterm --setup-sync/);
 assert.match(readme, /docs\/pr-review\.en\.md/);
@@ -547,8 +534,8 @@ assert.match(readme, /Runtime config application keeps the current shell session
 assert.match(readme, /window-state\.json/);
 assert.match(readme, /known-issues\.en\.md/);
 assert.match(readme, /Google Drive API or OAuth/);
-assert.match(readme, /temporary read-only web console/);
-assert.match(readme, /一時的なリモート出力取得/);
+assert.doesNotMatch(readme, /temporary read-only/);
+assert.doesNotMatch(readme, /一時的なリモート出力取得/);
 
 const configDocsEn = read('docs/config.en.md');
 assert.match(configDocsEn, /\[window\]/);
@@ -598,9 +585,7 @@ assert.match(configDocsEn, /Log Start/);
 assert.match(configDocsEn, /%USERPROFILE%/);
 assert.match(configDocsEn, /\$HOME/);
 assert.match(configDocsEn, /most portable form/);
-assert.match(configDocsEn, /\[webConsole\]/);
-assert.match(configDocsEn, /allowTerminalInput = false/);
-assert.match(configDocsEn, /temporary read-only web console/);
+assert.doesNotMatch(configDocsEn, /\[web[C]onsole\]/);
 assert.match(configDocsEn, /log=start/);
 
 const configDocsJa = read('docs/config.ja.md');
@@ -649,9 +634,7 @@ assert.match(configDocsJa, /Log Start/);
 assert.match(configDocsJa, /%USERPROFILE%/);
 assert.match(configDocsJa, /\$HOME/);
 assert.match(configDocsJa, /最も扱いやすい指定/);
-assert.match(configDocsJa, /\[webConsole\]/);
-assert.match(configDocsJa, /allowTerminalInput = false/);
-assert.match(configDocsJa, /一時的な read-only web console/);
+assert.doesNotMatch(configDocsJa, /\[web[C]onsole\]/);
 assert.match(configDocsJa, /log=start/);
 
 const knownIssuesEn = read('docs/known-issues.en.md');
@@ -666,45 +649,11 @@ assert.match(knownIssuesJa, /window size のみ復元/);
 assert.match(knownIssuesJa, /今後の課題/);
 assert.match(knownIssuesJa, /WEBKIT_DISABLE_DMABUF_RENDERER=1/);
 
-const temporaryWebConsoleEn = read('docs/temporary-web-console.en.md');
-assert.match(temporaryWebConsoleEn, /one-time remote output retrieval/);
-assert.match(temporaryWebConsoleEn, /read-only access/);
-assert.match(temporaryWebConsoleEn, /terminal control sequences/);
-assert.match(temporaryWebConsoleEn, /127\.0\.0\.1/);
-assert.match(temporaryWebConsoleEn, /random token/);
-assert.match(temporaryWebConsoleEn, /no shell input/);
-assert.match(temporaryWebConsoleEn, /SSH port forwarding/);
-assert.match(temporaryWebConsoleEn, /\[webConsole\]/);
-assert.match(temporaryWebConsoleEn, /--web-console/);
-assert.match(temporaryWebConsoleEn, /--web-console-bind 0\.0\.0\.0/);
-assert.match(temporaryWebConsoleEn, /real host IP address/);
-assert.match(temporaryWebConsoleEn, /examples\/config\/web-console\.toml/);
-
-const temporaryWebConsoleJa = read('docs/temporary-web-console.ja.md');
-assert.match(temporaryWebConsoleJa, /一時的にリモート側の出力を取得/);
-assert.match(temporaryWebConsoleJa, /read-only/);
-assert.match(temporaryWebConsoleJa, /terminal control sequence/);
-assert.match(temporaryWebConsoleJa, /127\.0\.0\.1/);
-assert.match(temporaryWebConsoleJa, /random token/);
-assert.match(temporaryWebConsoleJa, /browser から shell input は送らない/);
-assert.match(temporaryWebConsoleJa, /SSH port forwarding/);
-assert.match(temporaryWebConsoleJa, /\[webConsole\]/);
-assert.match(temporaryWebConsoleJa, /--web-console/);
-assert.match(temporaryWebConsoleJa, /--web-console-bind 0\.0\.0\.0/);
-assert.match(temporaryWebConsoleJa, /実 IP address/);
-assert.match(temporaryWebConsoleJa, /examples\/config\/web-console\.toml/);
-
 const specEn = read('docs/spec.en.md');
-assert.match(specEn, /Temporary Remote Output Retrieval/);
-assert.match(specEn, /temporary web console/);
-assert.match(specEn, /separate from sync folders/);
-assert.match(specEn, /does not automatically expose/);
+assert.doesNotMatch(specEn, removedTemporaryHttpUiPattern);
 
 const specJa = read('docs/spec.ja.md');
-assert.match(specJa, /一時的なリモート出力取得/);
-assert.match(specJa, /temporary web console/);
-assert.match(specJa, /sync folder とは別/);
-assert.match(specJa, /public network へ自動公開しません/);
+assert.doesNotMatch(specJa, removedTemporaryHttpUiPattern);
 
 const prReviewEn = read('docs/pr-review.en.md');
 assert.match(prReviewEn, /Ordinary pull requests do not include release artifacts/);
@@ -738,12 +687,6 @@ assert.match(syncConfig, /Google Drive/);
 assert.match(syncConfig, /maxBytes = 1048576/);
 assert.match(syncConfig, /\[logging\]/);
 assert.match(syncConfig, /fpasoterm-sync\/logs/);
-
-const webConsoleConfig = read('examples/config/web-console.toml');
-assert.match(webConsoleConfig, /\[webConsole\]/);
-assert.match(webConsoleConfig, /enabled = true/);
-assert.match(webConsoleConfig, /bind = "127\.0\.0\.1"/);
-assert.match(webConsoleConfig, /allowTerminalInput = false/);
 
 const syncDocsEn = read('docs/sync.en.md');
 assert.match(syncDocsEn, /Google Drive API/);
@@ -940,13 +883,8 @@ assert.match(renderer, /syncWriteClipboard/);
 assert.match(renderer, /syncReadClipboard/);
 assert.match(renderer, /syncWriteDiagnostics/);
 assert.match(renderer, /installSyncControls/);
-assert.match(renderer, /webConsoleStart/);
-assert.match(renderer, /webConsoleStop/);
-assert.match(renderer, /webConsoleStatus/);
-assert.match(renderer, /installWebConsoleControls/);
-assert.match(renderer, /setWebConsoleMenuOpen/);
-assert.match(renderer, /copyWebConsoleUrl/);
-assert.match(renderer, /web console URL copied/);
+assert.doesNotMatch(renderer, removedCamelHttpUiPattern);
+assert.doesNotMatch(renderer, /web console/);
 assert.match(renderer, /startTerminalLog/);
 assert.match(renderer, /stopTerminalLog/);
 assert.match(renderer, /terminalLogStatus/);
@@ -964,8 +902,7 @@ assert.match(renderer, /--titlebar-background/);
 
 const styles = read('src/renderer/styles.css');
 assert.match(styles, /#drag-region/);
-assert.match(styles, /#web-console-menu/);
-assert.match(styles, /#web-console-items/);
+assert.doesNotMatch(styles, removedKebabHttpUiPattern);
 assert.match(styles, /--titlebar-background: #1565c0/);
 assert.match(styles, /background: var\(--titlebar-background\)/);
 assert.match(styles, /-webkit-app-region: drag/);
@@ -977,8 +914,8 @@ assert.match(styles, /pointer-events: none/);
 assert.match(styles, /#window-controls/);
 assert.match(styles, /#sync-menu/);
 assert.match(styles, /#sync-menu-items/);
-assert.match(styles, /#sync-menu,\s*#web-console-menu\s*\{[^}]*display: flex/s);
-assert.match(styles, /#sync-menu,\s*#web-console-menu\s*\{[^}]*height: 24px/s);
+assert.match(styles, /#sync-menu\s*\{[^}]*display: flex/s);
+assert.match(styles, /#sync-menu\s*\{[^}]*height: 24px/s);
 assert.match(styles, /position: absolute/);
 assert.match(styles, /#close-window/);
 assert.match(styles, /resize-edge/);
@@ -1029,11 +966,8 @@ assert.match(config, /transpileModule/);
 
 const launcher = read('bin/fpasoterm');
 assert.match(launcher, /--setup-sync/);
-assert.match(launcher, /--web-console-bind/);
-assert.match(launcher, /--web-console-port/);
-assert.match(launcher, /requirePort/);
-assert.match(launcher, /FPASOTERM_WEB_CONSOLE_BIND/);
-assert.match(launcher, /FPASOTERM_WEB_CONSOLE_PORT/);
+assert.doesNotMatch(launcher, removedKebabHttpUiPattern);
+assert.doesNotMatch(launcher, removedHttpUiEnvPattern);
 assert.match(launcher, /setupSync/);
 assert.match(launcher, /expandPathVariables/);
 assert.match(launcher, /%\(\[\^%\]\+\)%/);

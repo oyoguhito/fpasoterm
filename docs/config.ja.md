@@ -149,14 +149,6 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
-
-[webConsole]
-enabled = false
-bind = "127.0.0.1"
-port = 0
-ttlSeconds = 900
-maxBytes = 1048576
-allowTerminalInput = false
 ```
 
 ## セクション
@@ -167,7 +159,6 @@ allowTerminalInput = false
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: 明示的にコピーした clipboard text と diagnostics を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。詳細は [Sync Folder](sync.ja.md) を参照してください。
 - `logging`: terminal output logging 設定。`Log Start` / `Log Stop` で raw PTY output を local file に記録します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
-- `webConsole`: 一時的な read-only web console 設定。`enabled = true` または `--web-console` の時だけ titlebar に `Web` menu を表示します。server は明示的に `Start` した時だけ起動し、既定では `127.0.0.1` の local port に bind します。詳細は [Temporary Web Console](temporary-web-console.ja.md) を参照してください。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 

@@ -80,8 +80,7 @@ body {
   -webkit-app-region: no-drag;
 }
 
-#sync-menu,
-#web-console-menu {
+#sync-menu {
   position: relative;
   display: flex;
   align-items: center;
@@ -91,22 +90,18 @@ body {
 }
 
 #sync-menu[hidden],
-#sync-menu-items[hidden],
-#web-console-menu[hidden],
-#web-console-items[hidden] {
+#sync-menu-items[hidden] {
   display: none;
 }
 
 #sync-menu-toggle,
-#web-console-toggle,
 #terminal-log-toggle {
   width: auto;
   min-width: 70px;
   padding: 0 8px;
 }
 
-#sync-menu-items,
-#web-console-items {
+#sync-menu-items {
   position: absolute;
   top: 28px;
   right: 0;
@@ -123,8 +118,7 @@ body {
   -webkit-app-region: no-drag;
 }
 
-#sync-menu-items button,
-#web-console-items button {
+#sync-menu-items button {
   width: 100%;
   min-width: 0;
   padding: 0 8px;

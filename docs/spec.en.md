@@ -59,12 +59,6 @@ The full default configuration is documented in `docs/config.en.md`. See `exampl
 
 Known platform limitations are tracked in `docs/known-issues.en.md`.
 
-## Temporary Remote Output Retrieval
-
-For one-time retrieval of remote output without leaving data in persistent shared storage, fpasoterm prefers a temporary web console. This is separate from sync folders and is an explicitly started and stopped read-only retrieval endpoint.
-
-The initial direction is binding to `127.0.0.1`, using a random token, short TTL, and no browser-to-shell input. Access from another machine should use a user-managed private path such as SSH port forwarding, Tailscale, WireGuard, or VPN. Details are tracked in `docs/temporary-web-console.en.md`.
-
 ## Diagnostics
 
 Set `FPASOTERM_DEBUG_KEYS=1` to log key and composition events.
@@ -83,4 +77,3 @@ The debug panel also exposes a Copy button that uses the desktop runtime's clipb
 - fpasoterm does not implement split panes or multiple-window management.
 - fpasoterm does not emulate OS-level Japanese input switching.
 - fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through portable-pty.
-- fpasoterm does not automatically expose a temporary web console to public networks.

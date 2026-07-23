@@ -5,14 +5,10 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::io::Write;
 use std::path::PathBuf;
 use std::process::Command;
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Arc, Mutex,
-};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 
@@ -37,8 +33,6 @@ struct Config {
     plugins: serde_json::Value,
     sync: serde_json::Value,
     logging: serde_json::Value,
-    #[serde(rename = "webConsole")]
-    web_console: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -157,34 +151,12 @@ struct TerminalLogStatus {
     message: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-// Current temporary web console state returned to the renderer.
-struct WebConsoleStatus {
-    enabled: bool,
-    active: bool,
-    url: String,
-    bind: String,
-    port: u16,
-    expires_at: u128,
-    message: String,
-}
-
 // Active terminal output log file and byte counter.
 struct TerminalLog {
     path: String,
     file: File,
     bytes_written: u64,
     max_bytes: u64,
-}
-
-// Running temporary web console server and its shutdown flag.
-struct WebConsoleServer {
-    url: String,
-    bind: String,
-    port: u16,
-    expires_at: u128,
-    stop: Arc<AtomicBool>,
 }
 
 // Owns the native PTY session and child shell handles.
@@ -198,9 +170,7 @@ struct TerminalSession {
 struct AppState {
     terminal: Mutex<Option<TerminalSession>>,
     diagnostics: Arc<Mutex<VecDeque<String>>>,
-    recent_output: Arc<Mutex<VecDeque<u8>>>,
     terminal_log: Arc<Mutex<Option<TerminalLog>>>,
-    web_console: Mutex<Option<WebConsoleServer>>,
     source_id: String,
 }
 
@@ -209,15 +179,13 @@ impl Default for AppState {
         Self {
             terminal: Mutex::new(None),
             diagnostics: Arc::new(Mutex::new(VecDeque::new())),
-            recent_output: Arc::new(Mutex::new(VecDeque::new())),
             terminal_log: Arc::new(Mutex::new(None)),
-            web_console: Mutex::new(None),
             source_id: format!("{}-{}", std::process::id(), now_millis()),
         }
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n      --web-console             Enable temporary read-only web console for this launch.\n      --web-console-ttl <sec>   Override the temporary web console lifetime.\n      --web-console-bind <ip>   Override the temporary web console bind address.\n      --web-console-port <port> Override the temporary web console port; 0 chooses a free port.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
@@ -303,9 +271,6 @@ fn main() {
             sync_write_clipboard,
             sync_read_clipboard,
             sync_write_diagnostics,
-            web_console_start,
-            web_console_stop,
-            web_console_status,
             window_close,
             window_minimize,
             window_toggle_maximize,
@@ -325,10 +290,6 @@ fn apply_direct_cli_env_overrides() {
     set_env_from_cli("FPASOTERM_WINDOW_TITLE", &["--title", "-t"]);
     set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
     set_env_from_cli("FPASOTERM_START_COMMAND", &["--command", "-e"]);
-    set_env_from_cli("FPASOTERM_WEB_CONSOLE_TTL", &["--web-console-ttl"]);
-    set_env_from_cli("FPASOTERM_WEB_CONSOLE_BIND", &["--web-console-bind"]);
-    set_env_from_cli("FPASOTERM_WEB_CONSOLE_PORT", &["--web-console-port"]);
-
     if let Some((width, height)) = cli_size_option() {
         env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
         env::set_var("FPASOTERM_WINDOW_HEIGHT", height.to_string());
@@ -353,9 +314,6 @@ fn apply_direct_cli_env_overrides() {
     }
     if cli_has_flag(&["--disable-dmabuf"]) {
         env::set_var("FPASOTERM_DISABLE_DMABUF", "1");
-    }
-    if cli_has_flag(&["--web-console"]) {
-        env::set_var("FPASOTERM_WEB_CONSOLE", "1");
     }
 }
 
@@ -621,14 +579,6 @@ fn default_runtime_config() -> RuntimeConfig {
                 "autoStart": false,
                 "maxBytes": 10485760
             }),
-            web_console: serde_json::json!({
-                "enabled": false,
-                "bind": "127.0.0.1",
-                "port": 0,
-                "ttlSeconds": 900,
-                "maxBytes": 1048576,
-                "allowTerminalInput": false
-            }),
         },
         config_dir: config_dir.clone(),
         config_path,
@@ -699,51 +649,6 @@ fn apply_direct_cli_overrides(runtime: &mut RuntimeConfig) {
     if let Some(shell) = cli_option_value_any(&["--shell", "-s"]) {
         if let Some(terminal) = runtime.config.terminal.as_object_mut() {
             terminal.insert("shell".to_string(), serde_json::Value::String(shell));
-        }
-    }
-    if env::var("FPASOTERM_WEB_CONSOLE").as_deref() == Ok("1") || cli_has_flag(&["--web-console"]) {
-        if let Some(web_console) = runtime.config.web_console.as_object_mut() {
-            web_console.insert("enabled".to_string(), serde_json::Value::Bool(true));
-        }
-    }
-    if let Ok(ttl) = env::var("FPASOTERM_WEB_CONSOLE_TTL")
-        .ok()
-        .or_else(|| cli_option_value_any(&["--web-console-ttl"]))
-        .unwrap_or_default()
-        .parse::<u64>()
-    {
-        if ttl > 0 {
-            if let Some(web_console) = runtime.config.web_console.as_object_mut() {
-                web_console.insert(
-                    "ttlSeconds".to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(ttl)),
-                );
-            }
-        }
-    }
-    if let Ok(bind) = env::var("FPASOTERM_WEB_CONSOLE_BIND")
-        .ok()
-        .or_else(|| cli_option_value_any(&["--web-console-bind"]))
-        .filter(|value| !value.trim().is_empty())
-        .ok_or(())
-    {
-        if let Some(web_console) = runtime.config.web_console.as_object_mut() {
-            web_console.insert("bind".to_string(), serde_json::Value::String(bind));
-        }
-    }
-    if let Ok(port) = env::var("FPASOTERM_WEB_CONSOLE_PORT")
-        .ok()
-        .or_else(|| cli_option_value_any(&["--web-console-port"]))
-        .unwrap_or_default()
-        .parse::<u64>()
-    {
-        if port <= u16::MAX as u64 {
-            if let Some(web_console) = runtime.config.web_console.as_object_mut() {
-                web_console.insert(
-                    "port".to_string(),
-                    serde_json::Value::Number(serde_json::Number::from(port)),
-                );
-            }
         }
     }
 }
@@ -1162,7 +1067,6 @@ fn terminal_start(
     }
     let writer_for_state = Arc::clone(&writer);
     let terminal_log = Arc::clone(&state.terminal_log);
-    let recent_output = Arc::clone(&state.recent_output);
     let app_for_reader = app.clone();
     let app_for_wait = app.clone();
 
@@ -1175,7 +1079,6 @@ fn terminal_start(
                     if console_diagnostics_enabled() {
                         eprintln!("terminal_read bytes={read}");
                     }
-                    append_recent_output(&recent_output, &buffer[..read]);
                     append_terminal_log(&terminal_log, &buffer[..read]);
                     let data = String::from_utf8_lossy(&buffer[..read]).to_string();
                     let _ = app_for_reader.emit("terminal:data", data);
@@ -1285,302 +1188,6 @@ fn logging_max_bytes() -> u64 {
         .and_then(|value| value.as_u64())
         .filter(|value| *value > 0)
         .unwrap_or(10_485_760)
-}
-
-// Reads the resolved [webConsole] configuration object.
-fn web_console_config() -> serde_json::Value {
-    runtime_config().config.web_console
-}
-
-// Reads a boolean from [webConsole].
-fn web_console_bool(key: &str, default: bool) -> bool {
-    web_console_config()
-        .get(key)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(default)
-}
-
-// Reads a string from [webConsole].
-fn web_console_string(key: &str, default: &str) -> String {
-    web_console_config()
-        .get(key)
-        .and_then(|value| value.as_str())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .unwrap_or(default)
-        .to_string()
-}
-
-// Reads a u64 from [webConsole].
-fn web_console_u64(key: &str, default: u64) -> u64 {
-    web_console_config()
-        .get(key)
-        .and_then(|value| value.as_u64())
-        .filter(|value| *value > 0)
-        .unwrap_or(default)
-}
-
-// Reads a u16 port from [webConsole], allowing zero for OS-selected ports.
-fn web_console_port() -> u16 {
-    web_console_config()
-        .get("port")
-        .and_then(|value| value.as_u64())
-        .filter(|value| *value <= u16::MAX as u64)
-        .unwrap_or(0) as u16
-}
-
-// Keeps recent PTY output for the temporary web console.
-fn append_recent_output(output: &Arc<Mutex<VecDeque<u8>>>, bytes: &[u8]) {
-    let max_bytes = web_console_u64("maxBytes", 1_048_576) as usize;
-    if max_bytes == 0 {
-        return;
-    }
-    let Ok(mut guard) = output.lock() else {
-        return;
-    };
-    guard.extend(bytes.iter().copied());
-    while guard.len() > max_bytes {
-        guard.pop_front();
-    }
-}
-
-// Runs the temporary read-only HTTP server until stopped or expired.
-fn run_web_console_server(
-    listener: TcpListener,
-    stop: Arc<AtomicBool>,
-    token: String,
-    expires_at: u128,
-    recent_output: Arc<Mutex<VecDeque<u8>>>,
-    diagnostics: Arc<Mutex<VecDeque<String>>>,
-) {
-    while !stop.load(Ordering::SeqCst) && now_millis() < expires_at {
-        match listener.accept() {
-            Ok((mut stream, _addr)) => {
-                handle_web_console_stream(
-                    &mut stream,
-                    &token,
-                    expires_at,
-                    &recent_output,
-                    &diagnostics,
-                );
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                std::thread::sleep(Duration::from_millis(100));
-            }
-            Err(_) => break,
-        }
-    }
-}
-
-// Handles one browser request to the temporary web console.
-fn handle_web_console_stream(
-    stream: &mut TcpStream,
-    token: &str,
-    expires_at: u128,
-    recent_output: &Arc<Mutex<VecDeque<u8>>>,
-    diagnostics: &Arc<Mutex<VecDeque<String>>>,
-) {
-    let mut buffer = [0_u8; 4096];
-    let read = stream.read(&mut buffer).unwrap_or(0);
-    let request = String::from_utf8_lossy(&buffer[..read]);
-    let request_line = request.lines().next().unwrap_or_default();
-    let path = request_line
-        .split_whitespace()
-        .nth(1)
-        .unwrap_or("/")
-        .to_string();
-
-    if !path_has_token(&path, token) {
-        let _ = write_http_response(stream, 403, "text/plain; charset=utf-8", "forbidden\n");
-        return;
-    }
-    if now_millis() >= expires_at {
-        let _ = write_http_response(stream, 410, "text/plain; charset=utf-8", "expired\n");
-        return;
-    }
-
-    let output = recent_output_text(recent_output);
-    let diagnostics_text = diagnostics
-        .lock()
-        .map(|guard| guard.iter().cloned().collect::<Vec<_>>().join("\n"))
-        .unwrap_or_else(|_| String::new());
-
-    if path.starts_with("/output.txt") {
-        let _ = write_http_response(stream, 200, "text/plain; charset=utf-8", &output);
-        return;
-    }
-    if path.starts_with("/diagnostics.txt") {
-        let _ = write_http_response(stream, 200, "text/plain; charset=utf-8", &diagnostics_text);
-        return;
-    }
-
-    let body = web_console_html(&output, &diagnostics_text, expires_at, token);
-    let _ = write_http_response(stream, 200, "text/html; charset=utf-8", &body);
-}
-
-// Checks the random token query parameter without accepting browser input.
-fn path_has_token(path: &str, token: &str) -> bool {
-    path.split('?')
-        .nth(1)
-        .unwrap_or_default()
-        .split('&')
-        .any(|part| part == format!("token={token}"))
-}
-
-// Writes a minimal HTTP/1.1 response.
-fn write_http_response(
-    stream: &mut TcpStream,
-    status: u16,
-    content_type: &str,
-    body: &str,
-) -> std::io::Result<()> {
-    let reason = match status {
-        200 => "OK",
-        403 => "Forbidden",
-        410 => "Gone",
-        _ => "Error",
-    };
-    let response = format!(
-        "HTTP/1.1 {status} {reason}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n{body}",
-        body.as_bytes().len()
-    );
-    stream.write_all(response.as_bytes())
-}
-
-// Converts the recent output ring buffer to text for browser display.
-fn recent_output_text(recent_output: &Arc<Mutex<VecDeque<u8>>>) -> String {
-    let raw = recent_output
-        .lock()
-        .map(|guard| {
-            String::from_utf8_lossy(&guard.iter().copied().collect::<Vec<_>>()).to_string()
-        })
-        .unwrap_or_else(|_| String::new());
-    clean_terminal_text_for_web(&raw)
-}
-
-// Removes terminal control sequences from the web console copy surface.
-fn clean_terminal_text_for_web(input: &str) -> String {
-    let without_ansi = strip_ansi_sequences(input);
-    normalize_terminal_newlines(&without_ansi)
-}
-
-// Strips common ANSI CSI/OSC/ESC sequences while preserving printable Unicode.
-fn strip_ansi_sequences(input: &str) -> String {
-    let chars: Vec<char> = input.chars().collect();
-    let mut output = String::new();
-    let mut index = 0;
-
-    while index < chars.len() {
-        if chars[index] == '\x1b' {
-            index += 1;
-            if index >= chars.len() {
-                break;
-            }
-            match chars[index] {
-                '[' => {
-                    index += 1;
-                    while index < chars.len() {
-                        let ch = chars[index];
-                        index += 1;
-                        if ('@'..='~').contains(&ch) {
-                            break;
-                        }
-                    }
-                }
-                ']' => {
-                    index += 1;
-                    while index < chars.len() {
-                        if chars[index] == '\x07' {
-                            index += 1;
-                            break;
-                        }
-                        if chars[index] == '\x1b'
-                            && index + 1 < chars.len()
-                            && chars[index + 1] == '\\'
-                        {
-                            index += 2;
-                            break;
-                        }
-                        index += 1;
-                    }
-                }
-                _ => {
-                    index += 1;
-                }
-            }
-            continue;
-        }
-
-        let ch = chars[index];
-        if ch == '\n' || ch == '\r' || ch == '\t' || !ch.is_control() {
-            output.push(ch);
-        }
-        index += 1;
-    }
-
-    output
-}
-
-// Converts terminal carriage returns into browser-friendly line breaks.
-fn normalize_terminal_newlines(input: &str) -> String {
-    let mut output = String::new();
-    let mut chars = input.chars().peekable();
-    while let Some(ch) = chars.next() {
-        if ch == '\r' {
-            if chars.peek() == Some(&'\n') {
-                continue;
-            }
-            output.push('\n');
-        } else {
-            output.push(ch);
-        }
-    }
-    output
-}
-
-// Builds the read-only temporary web console page.
-fn web_console_html(output: &str, diagnostics: &str, expires_at: u128, token: &str) -> String {
-    format!(
-        "<!doctype html><html><head><meta charset=\"utf-8\"><title>fpasoterm web console</title><style>body{{margin:0;background:#101317;color:#e8edf2;font:14px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}}header{{position:sticky;top:0;padding:10px 12px;background:#1565c0}}main{{display:grid;gap:12px;padding:12px}}pre{{margin:0;white-space:pre-wrap;word-break:break-word;background:#11151a;border:1px solid #35506b;border-radius:6px;padding:10px;min-height:160px}}a{{color:#9de9ea}}</style></head><body><header>fpasoterm temporary web console · read-only · expires at {}</header><main><section><h2>Recent Output</h2><p><a href=\"/output.txt{}\">plain text</a></p><pre>{}</pre></section><section><h2>Diagnostics</h2><p><a href=\"/diagnostics.txt{}\">plain text</a></p><pre>{}</pre></section></main></body></html>",
-        expires_at,
-        web_console_token_suffix(token),
-        html_escape(output),
-        web_console_token_suffix(token),
-        html_escape(diagnostics)
-    )
-}
-
-// Builds the token query string for JavaScript-free page links.
-fn web_console_token_suffix(token: &str) -> String {
-    format!("?token={token}")
-}
-
-// Escapes text for safe HTML rendering.
-fn html_escape(value: &str) -> String {
-    value
-        .replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-}
-
-// Generates an in-memory token for the temporary web console.
-fn generate_web_console_token() -> String {
-    let mut bytes = [0_u8; 24];
-    if File::open("/dev/urandom")
-        .and_then(|mut file| file.read_exact(&mut bytes))
-        .is_err()
-    {
-        let seed = format!(
-            "{}-{:?}-{}",
-            std::process::id(),
-            SystemTime::now(),
-            now_millis()
-        );
-        for (index, byte) in seed.as_bytes().iter().enumerate() {
-            bytes[index % bytes.len()] ^= *byte;
-        }
-    }
-    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 // Resolves the configured terminal log directory, defaulting to User/logs.
@@ -1770,169 +1377,6 @@ fn diagnostics_path() -> String {
 // Lets the renderer append messages to the backend diagnostics ring buffer.
 fn diagnostics_log(app: AppHandle, message: String) {
     append_diagnostic(&app, &message);
-}
-
-#[tauri::command]
-// Starts a short-lived read-only HTTP console for recent output and diagnostics.
-fn web_console_start(state: State<AppState>) -> Result<WebConsoleStatus, String> {
-    if !web_console_bool("enabled", false) {
-        return Ok(WebConsoleStatus {
-            enabled: false,
-            active: false,
-            url: String::new(),
-            bind: web_console_string("bind", "127.0.0.1"),
-            port: web_console_port(),
-            expires_at: 0,
-            message: "temporary web console is disabled; set webConsole.enabled = true or launch with --web-console".to_string(),
-        });
-    }
-
-    if let Some(status) = web_console_active_status(&state)? {
-        return Ok(status);
-    }
-
-    let bind = web_console_string("bind", "127.0.0.1");
-    let requested_port = web_console_port();
-    let ttl_seconds = web_console_u64("ttlSeconds", 900);
-    let expires_at = now_millis() + u128::from(ttl_seconds) * 1000;
-    let token = generate_web_console_token();
-    let listener = TcpListener::bind(format!("{bind}:{requested_port}"))
-        .map_err(|error| format!("failed to bind temporary web console: {error}"))?;
-    listener
-        .set_nonblocking(true)
-        .map_err(|error| error.to_string())?;
-    let port = listener
-        .local_addr()
-        .map_err(|error| error.to_string())?
-        .port();
-    let url = format!("http://{bind}:{port}/?token={token}");
-    let stop = Arc::new(AtomicBool::new(false));
-    let stop_for_thread = Arc::clone(&stop);
-    let diagnostics = Arc::clone(&state.diagnostics);
-    let recent_output = Arc::clone(&state.recent_output);
-    let token_for_thread = token.clone();
-
-    std::thread::spawn(move || {
-        run_web_console_server(
-            listener,
-            stop_for_thread,
-            token_for_thread,
-            expires_at,
-            recent_output,
-            diagnostics,
-        );
-    });
-
-    let server = WebConsoleServer {
-        url: url.clone(),
-        bind: bind.clone(),
-        port,
-        expires_at,
-        stop,
-    };
-
-    let mut guard = state
-        .web_console
-        .lock()
-        .map_err(|error| error.to_string())?;
-    *guard = Some(server);
-
-    Ok(WebConsoleStatus {
-        enabled: true,
-        active: true,
-        url,
-        bind,
-        port,
-        expires_at,
-        message: "temporary web console started".to_string(),
-    })
-}
-
-#[tauri::command]
-// Stops the temporary web console and discards its in-memory token.
-fn web_console_stop(state: State<AppState>) -> Result<WebConsoleStatus, String> {
-    stop_web_console_state(&state, "temporary web console stopped")
-}
-
-#[tauri::command]
-// Returns the temporary web console status, stopping expired servers.
-fn web_console_status(state: State<AppState>) -> Result<WebConsoleStatus, String> {
-    if !web_console_bool("enabled", false) {
-        return Ok(WebConsoleStatus {
-            enabled: false,
-            active: false,
-            url: String::new(),
-            bind: web_console_string("bind", "127.0.0.1"),
-            port: web_console_port(),
-            expires_at: 0,
-            message: "temporary web console is disabled".to_string(),
-        });
-    }
-
-    if let Some(status) = web_console_active_status(&state)? {
-        if status.expires_at > 0 && status.expires_at <= now_millis() {
-            return stop_web_console_state(&state, "temporary web console expired");
-        }
-        return Ok(status);
-    }
-
-    Ok(WebConsoleStatus {
-        enabled: true,
-        active: false,
-        url: String::new(),
-        bind: web_console_string("bind", "127.0.0.1"),
-        port: web_console_port(),
-        expires_at: 0,
-        message: "temporary web console is inactive".to_string(),
-    })
-}
-
-// Returns active web console state without mutating it.
-fn web_console_active_status(state: &AppState) -> Result<Option<WebConsoleStatus>, String> {
-    let guard = state
-        .web_console
-        .lock()
-        .map_err(|error| error.to_string())?;
-    Ok(guard.as_ref().map(|server| WebConsoleStatus {
-        enabled: true,
-        active: true,
-        url: server.url.clone(),
-        bind: server.bind.clone(),
-        port: server.port,
-        expires_at: server.expires_at,
-        message: "temporary web console is active".to_string(),
-    }))
-}
-
-// Signals an active server to stop without blocking the UI thread.
-fn stop_web_console_state(state: &AppState, message: &str) -> Result<WebConsoleStatus, String> {
-    let mut server = state
-        .web_console
-        .lock()
-        .map_err(|error| error.to_string())?
-        .take();
-    if let Some(server) = server.take() {
-        server.stop.store(true, Ordering::SeqCst);
-        return Ok(WebConsoleStatus {
-            enabled: web_console_bool("enabled", false),
-            active: false,
-            url: String::new(),
-            bind: server.bind,
-            port: server.port,
-            expires_at: 0,
-            message: message.to_string(),
-        });
-    }
-
-    Ok(WebConsoleStatus {
-        enabled: web_console_bool("enabled", false),
-        active: false,
-        url: String::new(),
-        bind: web_console_string("bind", "127.0.0.1"),
-        port: web_console_port(),
-        expires_at: 0,
-        message: "temporary web console was not active".to_string(),
-    })
 }
 
 #[tauri::command]
