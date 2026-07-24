@@ -17,8 +17,8 @@ npm run build:artifacts
 release PR を merge した後、version tag を作成して push します。
 
 ```sh
-git tag v1.2.2
-git push origin v1.2.2
+git tag v1.3.0
+git push origin v1.3.0
 ```
 
 `Release` workflow は tag version と `package.json` の version が一致することを確認し、`artifacts/` を生成して GitHub Release に添付します。

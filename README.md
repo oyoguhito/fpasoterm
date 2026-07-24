@@ -339,6 +339,14 @@ fpasoterm --reset-window-state
 
 The full default configuration and plugin setup are documented in [Configuration](docs/config.en.md). Sample configs are available in [examples/config](examples/config), and sample TypeScript plugins are available in [examples/plugins](examples/plugins).
 
+For maintenance workflows across machines, fpasoterm can share explicit
+clipboard text and diagnostics through a local sync folder such as Google Drive
+for desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
+Run `fpasoterm --setup-sync` for an interactive first-time setup.
+On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
+Terminal output logs can also be written with `Log Start` / `Log Stop`; point
+`logging.directory` at the same synced folder when you want those logs shared.
+
 Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
 ## Icon
@@ -423,10 +431,12 @@ GitHub Actions runs the same check set on pushes and pull requests.
 
 - [Specification](docs/spec.en.md)
 - [Configuration](docs/config.en.md)
+- [Sync Folder](docs/sync.en.md)
 - [Pull request review](docs/pr-review.en.md)
 - [Release checklist](docs/release-checklist.en.md)
 - [仕様](docs/spec.ja.md)
 - [設定](docs/config.ja.md)
+- [Sync Folder 日本語](docs/sync.ja.md)
 - [Pull request review 日本語](docs/pr-review.ja.md)
 - [リリースチェックリスト](docs/release-checklist.ja.md)
 
@@ -637,6 +647,11 @@ api.terminal.options.cursorBlink = true;
 二重入力が残る環境では、`config.toml` の `ime.duplicateWindowMs` または `ime.repeatedTextWindowMs` を少し大きくしてください。
 
 全デフォルト設定と plugin 設定は [設定](docs/config.ja.md) にまとめています。設定サンプルは [examples/config](examples/config)、TypeScript plugin のサンプルは [examples/plugins](examples/plugins) にあります。
+
+複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、明示的にコピーした clipboard text と diagnostics を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
+初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
+Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
+terminal output log は `Log Start` / `Log Stop` で取得できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
 
 npm registry から global install する場合:
 

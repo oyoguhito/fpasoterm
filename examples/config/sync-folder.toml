@@ -1,0 +1,20 @@
+# Sync folder sample.
+# Use a local folder that is already synchronized by Google Drive for desktop
+# or another sync tool. fpasoterm does not call Google Drive APIs.
+
+[sync]
+enabled = true
+provider = "folder"
+path = "~/Google Drive/fpasoterm-sync"
+channel = "default"
+clipboard = true
+diagnostics = true
+pasteRequiresConfirm = true
+maxBytes = 1048576
+ttlSeconds = 86400
+
+[logging]
+enabled = true
+directory = "~/Google Drive/fpasoterm-sync/logs"
+autoStart = false
+maxBytes = 10485760

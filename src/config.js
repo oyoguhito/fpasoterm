@@ -62,6 +62,23 @@ const defaultConfig = Object.freeze({
   plugins: {
     enabled: [],
   },
+  sync: {
+    enabled: false,
+    provider: 'folder',
+    path: '',
+    channel: 'default',
+    clipboard: true,
+    diagnostics: true,
+    pasteRequiresConfirm: true,
+    maxBytes: 1048576,
+    ttlSeconds: 86400,
+  },
+  logging: {
+    enabled: true,
+    directory: '',
+    autoStart: false,
+    maxBytes: 10485760,
+  },
 });
 
 // Writes the default TOML with comments so users can copy it to config.toml
@@ -139,6 +156,29 @@ repeatedTextWindowMs = 140
 # Example: enabled = ["plugins/hello.ts", "plugins/theme.ts"]
 [plugins]
 enabled = []
+
+# Sync folder options use an already-synced local folder, such as Google Drive.
+# fpasoterm does not call Google Drive APIs or perform OAuth.
+[sync]
+enabled = false
+provider = "folder"
+# Example: path = "~/Google Drive/fpasoterm-sync"
+path = ""
+channel = "default"
+clipboard = true
+diagnostics = true
+pasteRequiresConfirm = true
+maxBytes = 1048576
+ttlSeconds = 86400
+
+# Terminal output logging records raw PTY output when started from the titlebar
+# or an OSC 777 command. The default directory is User/logs.
+[logging]
+enabled = true
+# Example: directory = "~/Google Drive/fpasoterm-sync/logs"
+directory = ""
+autoStart = false
+maxBytes = 10485760
 `;
 }
 
@@ -192,6 +232,12 @@ function mergeConfig(base, override) {
     }
   }
   return merged;
+}
+
+// Drops config sections that were removed from the supported schema.
+function removeUnsupportedConfigSections(config) {
+  delete config[['web', 'Console'].join('')];
+  return config;
 }
 
 // Keeps config.toml.example in sync without overwriting the user's config.toml.
@@ -378,7 +424,7 @@ function loadConfig() {
   writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
-  const config = mergeConfig(defaultConfig, userConfig);
+  const config = removeUnsupportedConfigSections(mergeConfig(defaultConfig, userConfig));
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {

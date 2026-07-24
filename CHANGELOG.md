@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.0
+
+- Added folder-based sync for explicit clipboard text and diagnostics using local sync folders such as Google Drive for desktop.
+- Added terminal output logging with `Log Start` / `Log Stop` and OSC 777 controls.
+- Added interactive `--setup-sync` configuration for first-time sync folder setup.
+- Removed the temporary web console feature and related `--web-console` options.
+
 ## 1.2.2
 
 - Allowed multiple fpasoterm windows on ChromeOS/Linux by disabling GTK application-id activation.

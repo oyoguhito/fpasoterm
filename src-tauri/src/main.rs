@@ -4,11 +4,12 @@ use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, Pt
 use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
-use std::fs;
-use std::io::{Read, Write};
+use std::fs::{self, File, OpenOptions};
+use std::io::Write;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -30,6 +31,8 @@ struct Config {
     terminal: serde_json::Value,
     ime: serde_json::Value,
     plugins: serde_json::Value,
+    sync: serde_json::Value,
+    logging: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -98,6 +101,64 @@ struct WindowBounds {
     height: u32,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Text payload requested by the renderer for sync-folder publishing.
+struct SyncWriteRequest {
+    text: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current sync-folder state returned to the renderer.
+struct SyncStatus {
+    enabled: bool,
+    provider: String,
+    path: String,
+    channel: String,
+    clipboard_path: String,
+    diagnostics_path: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A sync-folder item shared between fpasoterm instances.
+struct SyncItem {
+    schema_version: u8,
+    kind: String,
+    channel: String,
+    source_id: String,
+    updated_at: u128,
+    text: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Optional terminal log start request from the renderer.
+struct TerminalLogStartRequest {
+    path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current terminal output log state returned to the renderer.
+struct TerminalLogStatus {
+    enabled: bool,
+    active: bool,
+    path: String,
+    bytes_written: u64,
+    message: String,
+}
+
+// Active terminal output log file and byte counter.
+struct TerminalLog {
+    path: String,
+    file: File,
+    bytes_written: u64,
+    max_bytes: u64,
+}
+
 // Owns the native PTY session and child shell handles.
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
@@ -105,11 +166,23 @@ struct TerminalSession {
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
 }
 
-#[derive(Default)]
 // Shared runtime state for the active PTY session and recent diagnostics.
 struct AppState {
     terminal: Mutex<Option<TerminalSession>>,
-    diagnostics: Mutex<VecDeque<String>>,
+    diagnostics: Arc<Mutex<VecDeque<String>>>,
+    terminal_log: Arc<Mutex<Option<TerminalLog>>>,
+    source_id: String,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            terminal: Mutex::new(None),
+            diagnostics: Arc::new(Mutex::new(VecDeque::new())),
+            terminal_log: Arc::new(Mutex::new(None)),
+            source_id: format!("{}-{}", std::process::id(), now_millis()),
+        }
+    }
 }
 
 const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
@@ -186,11 +259,18 @@ fn main() {
             terminal_start,
             terminal_write,
             terminal_resize,
+            terminal_log_start,
+            terminal_log_stop,
+            terminal_log_status,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
             config_get,
             config_apply_path,
+            sync_status,
+            sync_write_clipboard,
+            sync_read_clipboard,
+            sync_write_diagnostics,
             window_close,
             window_minimize,
             window_toggle_maximize,
@@ -210,7 +290,6 @@ fn apply_direct_cli_env_overrides() {
     set_env_from_cli("FPASOTERM_WINDOW_TITLE", &["--title", "-t"]);
     set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
     set_env_from_cli("FPASOTERM_START_COMMAND", &["--command", "-e"]);
-
     if let Some((width, height)) = cli_size_option() {
         env::set_var("FPASOTERM_WINDOW_WIDTH", width.to_string());
         env::set_var("FPASOTERM_WINDOW_HEIGHT", height.to_string());
@@ -483,6 +562,23 @@ fn default_runtime_config() -> RuntimeConfig {
                 "repeatedTextWindowMs": 140
             }),
             plugins: serde_json::json!({ "enabled": [] }),
+            sync: serde_json::json!({
+                "enabled": false,
+                "provider": "folder",
+                "path": "",
+                "channel": "default",
+                "clipboard": true,
+                "diagnostics": true,
+                "pasteRequiresConfirm": true,
+                "maxBytes": 1048576,
+                "ttlSeconds": 86400
+            }),
+            logging: serde_json::json!({
+                "enabled": true,
+                "directory": "",
+                "autoStart": false,
+                "maxBytes": 10485760
+            }),
         },
         config_dir: config_dir.clone(),
         config_path,
@@ -959,7 +1055,18 @@ fn terminal_start(
             .take_writer()
             .map_err(|error| error.to_string())?,
     ));
+    if logging_bool("autoStart", false) {
+        match start_terminal_log_state(state.inner(), None) {
+            Ok(status) => {
+                append_diagnostic(&app, &format!("terminal log auto-started {}", status.path))
+            }
+            Err(error) => {
+                append_diagnostic(&app, &format!("terminal log auto-start failed: {error}"))
+            }
+        }
+    }
     let writer_for_state = Arc::clone(&writer);
+    let terminal_log = Arc::clone(&state.terminal_log);
     let app_for_reader = app.clone();
     let app_for_wait = app.clone();
 
@@ -972,6 +1079,7 @@ fn terminal_start(
                     if console_diagnostics_enabled() {
                         eprintln!("terminal_read bytes={read}");
                     }
+                    append_terminal_log(&terminal_log, &buffer[..read]);
                     let data = String::from_utf8_lossy(&buffer[..read]).to_string();
                     let _ = app_for_reader.emit("terminal:data", data);
                 }
@@ -1055,9 +1163,203 @@ fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), Str
     Ok(())
 }
 
+// Returns the current logging section as a JSON object for tolerant access.
+fn logging_config() -> serde_json::Map<String, serde_json::Value> {
+    runtime_config()
+        .config
+        .logging
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+// Reads a boolean key from [logging], falling back to a default.
+fn logging_bool(key: &str, default: bool) -> bool {
+    logging_config()
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+// Reads a positive byte limit from [logging].
+fn logging_max_bytes() -> u64 {
+    logging_config()
+        .get("maxBytes")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(10_485_760)
+}
+
+// Resolves the configured terminal log directory, defaulting to User/logs.
+fn terminal_log_directory() -> PathBuf {
+    let configured = logging_config()
+        .get("directory")
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(expand_sync_path);
+
+    configured.unwrap_or_else(|| PathBuf::from(runtime_config().config_dir).join("logs"))
+}
+
+// Builds a timestamped default terminal output log path.
+fn default_terminal_log_path() -> PathBuf {
+    terminal_log_directory().join(format!("terminal-{}.log", now_millis()))
+}
+
+// Resolves an optional requested log path against the configured log directory.
+fn resolve_terminal_log_path(path: Option<String>) -> PathBuf {
+    match path
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    {
+        Some(value) => {
+            let path = expand_sync_path(&value);
+            if path.is_absolute() {
+                path
+            } else {
+                terminal_log_directory().join(path)
+            }
+        }
+        None => default_terminal_log_path(),
+    }
+}
+
+// Appends raw PTY output bytes to the active terminal log if logging is active.
+fn append_terminal_log(log_state: &Arc<Mutex<Option<TerminalLog>>>, bytes: &[u8]) {
+    let Ok(mut guard) = log_state.lock() else {
+        return;
+    };
+    let Some(log) = guard.as_mut() else {
+        return;
+    };
+
+    let max_bytes = log.max_bytes;
+    if log.bytes_written >= max_bytes {
+        return;
+    }
+
+    let remaining = (max_bytes - log.bytes_written) as usize;
+    let write_len = bytes.len().min(remaining);
+    if write_len == 0 {
+        return;
+    }
+
+    if log.file.write_all(&bytes[..write_len]).is_ok() {
+        log.bytes_written += write_len as u64;
+        let _ = log.file.flush();
+    }
+}
+
+#[tauri::command]
+// Starts writing raw terminal output to a log file.
+fn terminal_log_start(
+    state: State<AppState>,
+    request: Option<TerminalLogStartRequest>,
+) -> Result<TerminalLogStatus, String> {
+    start_terminal_log_state(state.inner(), request.and_then(|value| value.path))
+}
+
+// Opens a terminal output log file and stores it in shared application state.
+fn start_terminal_log_state(
+    state: &AppState,
+    path_request: Option<String>,
+) -> Result<TerminalLogStatus, String> {
+    if !logging_bool("enabled", true) {
+        return Err("terminal logging is disabled; set logging.enabled = true".to_string());
+    }
+
+    let path = resolve_terminal_log_path(path_request);
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let file = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&path)
+        .map_err(|error| error.to_string())?;
+    let path_text = path.display().to_string();
+
+    let mut guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    *guard = Some(TerminalLog {
+        path: path_text.clone(),
+        file,
+        bytes_written: 0,
+        max_bytes: logging_max_bytes(),
+    });
+    Ok(TerminalLogStatus {
+        enabled: true,
+        active: true,
+        path: path_text,
+        bytes_written: 0,
+        message: "terminal output logging started".to_string(),
+    })
+}
+
+#[tauri::command]
+// Stops the active terminal output log and returns the final path/counter.
+fn terminal_log_stop(state: State<AppState>) -> Result<TerminalLogStatus, String> {
+    let mut guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(mut log) = guard.take() {
+        let _ = log.file.flush();
+        return Ok(TerminalLogStatus {
+            enabled: logging_bool("enabled", true),
+            active: false,
+            path: log.path,
+            bytes_written: log.bytes_written,
+            message: "terminal output logging stopped".to_string(),
+        });
+    }
+
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        message: "terminal output logging was not active".to_string(),
+    })
+}
+
+#[tauri::command]
+// Returns the active terminal output log state.
+fn terminal_log_status(state: State<AppState>) -> Result<TerminalLogStatus, String> {
+    let guard = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(log) = guard.as_ref() {
+        return Ok(TerminalLogStatus {
+            enabled: logging_bool("enabled", true),
+            active: true,
+            path: log.path.clone(),
+            bytes_written: log.bytes_written,
+            message: "terminal output logging is active".to_string(),
+        });
+    }
+
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        message: "terminal output logging is inactive".to_string(),
+    })
+}
+
 #[tauri::command]
 // Returns recent diagnostics as plain text for copying from the UI.
 fn diagnostics_copy(state: State<AppState>) -> Result<String, String> {
+    diagnostics_text(&state)
+}
+
+// Returns recent diagnostics from shared runtime state.
+fn diagnostics_text(state: &AppState) -> Result<String, String> {
     let diagnostics = state
         .diagnostics
         .lock()
@@ -1101,6 +1403,305 @@ fn config_apply_path(app: AppHandle, path: String) -> Result<RuntimeConfig, Stri
         &format!("applied runtime config {}", config.config_path),
     );
     Ok(config)
+}
+
+// Resolved sync-folder paths for the active channel.
+struct SyncFolderPaths {
+    provider: String,
+    root: std::path::PathBuf,
+    channel: String,
+    clipboard: std::path::PathBuf,
+    diagnostics: std::path::PathBuf,
+}
+
+// Returns the current sync section as a JSON object for tolerant access.
+fn sync_config() -> serde_json::Map<String, serde_json::Value> {
+    runtime_config()
+        .config
+        .sync
+        .as_object()
+        .cloned()
+        .unwrap_or_default()
+}
+
+// Reads a string key from [sync], falling back to a default.
+fn sync_string(key: &str, default: &str) -> String {
+    sync_config()
+        .get(key)
+        .and_then(|value| value.as_str())
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(default)
+        .to_string()
+}
+
+// Reads a boolean key from [sync], falling back to a default.
+fn sync_bool(key: &str, default: bool) -> bool {
+    sync_config()
+        .get(key)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(default)
+}
+
+// Reads a positive byte limit from [sync].
+fn sync_max_bytes() -> usize {
+    sync_config()
+        .get("maxBytes")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(1_048_576) as usize
+}
+
+// Reads the sync item lifetime in milliseconds; zero disables expiration.
+fn sync_ttl_millis() -> u128 {
+    sync_config()
+        .get("ttlSeconds")
+        .and_then(|value| value.as_u64())
+        .map(|seconds| seconds as u128 * 1000)
+        .unwrap_or(86_400_000)
+}
+
+// Normalizes channel names so they can safely be used as directory names.
+fn sync_channel() -> String {
+    let raw = sync_string("channel", "default");
+    let sanitized = raw
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    sanitized
+        .trim_matches('.')
+        .trim_matches('_')
+        .chars()
+        .take(80)
+        .collect::<String>()
+}
+
+// Expands %VAR% and $VAR references commonly used in config paths.
+fn expand_path_variables(path: &str) -> String {
+    let mut result = String::new();
+    let chars: Vec<char> = path.chars().collect();
+    let mut index = 0;
+
+    while index < chars.len() {
+        if chars[index] == '%' {
+            if let Some(end) = chars[index + 1..]
+                .iter()
+                .position(|character| *character == '%')
+            {
+                let end_index = index + 1 + end;
+                let name = chars[index + 1..end_index].iter().collect::<String>();
+                if !name.is_empty() {
+                    if let Ok(value) = env::var(&name) {
+                        result.push_str(&value);
+                    } else {
+                        result.push('%');
+                        result.push_str(&name);
+                        result.push('%');
+                    }
+                    index = end_index + 1;
+                    continue;
+                }
+            }
+        }
+
+        if chars[index] == '$' {
+            let mut end_index = index + 1;
+            while end_index < chars.len()
+                && (chars[end_index].is_ascii_alphanumeric() || chars[end_index] == '_')
+            {
+                end_index += 1;
+            }
+            if end_index > index + 1 {
+                let name = chars[index + 1..end_index].iter().collect::<String>();
+                if let Ok(value) = env::var(&name) {
+                    result.push_str(&value);
+                } else {
+                    result.push('$');
+                    result.push_str(&name);
+                }
+                index = end_index;
+                continue;
+            }
+        }
+
+        result.push(chars[index]);
+        index += 1;
+    }
+
+    result
+}
+
+// Expands a leading ~/ and environment variables so config files can be portable.
+fn expand_sync_path(path: &str) -> std::path::PathBuf {
+    let expanded = expand_path_variables(path.trim());
+    if expanded == "~" {
+        return std::path::PathBuf::from(home_dir());
+    }
+    if let Some(rest) = expanded
+        .strip_prefix("~/")
+        .or_else(|| expanded.strip_prefix("~\\"))
+    {
+        return std::path::PathBuf::from(home_dir()).join(rest);
+    }
+    std::path::PathBuf::from(expanded)
+}
+
+// Resolves and creates the sync channel directory for a specific operation.
+fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
+    if !sync_bool("enabled", false) {
+        return Err("sync folder is disabled; set sync.enabled = true".to_string());
+    }
+
+    let provider = sync_string("provider", "folder");
+    if provider != "folder" {
+        return Err(format!("unsupported sync provider: {provider}"));
+    }
+
+    if kind == "clipboard" && !sync_bool("clipboard", true) {
+        return Err("sync clipboard is disabled; set sync.clipboard = true".to_string());
+    }
+    if kind == "diagnostics" && !sync_bool("diagnostics", true) {
+        return Err("sync diagnostics is disabled; set sync.diagnostics = true".to_string());
+    }
+
+    let root_text = sync_string("path", "");
+    if root_text.is_empty() {
+        return Err("sync path is empty; set sync.path to a synced local folder".to_string());
+    }
+
+    let channel = {
+        let value = sync_channel();
+        if value.is_empty() {
+            "default".to_string()
+        } else {
+            value
+        }
+    };
+    let root = expand_sync_path(&root_text);
+    let channel_dir = root.join(&channel);
+    fs::create_dir_all(&channel_dir).map_err(|error| error.to_string())?;
+
+    Ok(SyncFolderPaths {
+        provider,
+        root,
+        channel,
+        clipboard: channel_dir.join("clipboard.json"),
+        diagnostics: channel_dir.join("diagnostics.json"),
+    })
+}
+
+// Selects the only supported sync item file names.
+fn sync_item_path(kind: &str) -> Result<std::path::PathBuf, String> {
+    let paths = sync_folder_paths(kind)?;
+    match kind {
+        "clipboard" => Ok(paths.clipboard),
+        "diagnostics" => Ok(paths.diagnostics),
+        _ => Err(format!("unsupported sync item kind: {kind}")),
+    }
+}
+
+// Returns the current UNIX timestamp in milliseconds.
+fn now_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis()
+}
+
+// Writes a sync item through a temporary file and atomic rename.
+fn write_sync_item(kind: &str, text: String, source_id: &str) -> Result<SyncItem, String> {
+    let max_bytes = sync_max_bytes();
+    if text.len() > max_bytes {
+        return Err(format!(
+            "sync {kind} payload is too large: {} bytes > {max_bytes} bytes",
+            text.len()
+        ));
+    }
+
+    let paths = sync_folder_paths(kind)?;
+    let path = sync_item_path(kind)?;
+    let item = SyncItem {
+        schema_version: 1,
+        kind: kind.to_string(),
+        channel: paths.channel,
+        source_id: source_id.to_string(),
+        updated_at: now_millis(),
+        text,
+    };
+    let json = serde_json::to_string_pretty(&item).map_err(|error| error.to_string())?;
+    let temp_path = path.with_extension(format!("json.tmp.{}", source_id.replace('/', "_")));
+    fs::write(&temp_path, format!("{json}\n")).map_err(|error| error.to_string())?;
+    fs::rename(&temp_path, &path).map_err(|error| error.to_string())?;
+    Ok(item)
+}
+
+// Reads a sync item if the configured file exists.
+fn read_sync_item(kind: &str) -> Result<Option<SyncItem>, String> {
+    let path = sync_item_path(kind)?;
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let item: SyncItem = serde_json::from_str(&text).map_err(|error| error.to_string())?;
+    let ttl_millis = sync_ttl_millis();
+    if ttl_millis > 0 && now_millis().saturating_sub(item.updated_at) > ttl_millis {
+        return Ok(None);
+    }
+    Ok(Some(item))
+}
+
+#[tauri::command]
+// Returns where sync-folder files would be read and written.
+fn sync_status() -> SyncStatus {
+    match sync_folder_paths("status") {
+        Ok(paths) => SyncStatus {
+            enabled: true,
+            provider: paths.provider,
+            path: paths.root.display().to_string(),
+            channel: paths.channel,
+            clipboard_path: paths.clipboard.display().to_string(),
+            diagnostics_path: paths.diagnostics.display().to_string(),
+            message: "sync folder is enabled".to_string(),
+        },
+        Err(message) => SyncStatus {
+            enabled: false,
+            provider: sync_string("provider", "folder"),
+            path: sync_string("path", ""),
+            channel: sync_channel(),
+            clipboard_path: String::new(),
+            diagnostics_path: String::new(),
+            message,
+        },
+    }
+}
+
+#[tauri::command]
+// Publishes explicit clipboard text to the configured sync folder.
+fn sync_write_clipboard(
+    state: State<AppState>,
+    request: SyncWriteRequest,
+) -> Result<SyncItem, String> {
+    write_sync_item("clipboard", request.text, &state.source_id)
+}
+
+#[tauri::command]
+// Reads the latest clipboard text from the configured sync folder.
+fn sync_read_clipboard() -> Result<Option<SyncItem>, String> {
+    read_sync_item("clipboard")
+}
+
+#[tauri::command]
+// Publishes recent diagnostics to the configured sync folder.
+fn sync_write_diagnostics(state: State<AppState>) -> Result<SyncItem, String> {
+    let text = diagnostics_text(&state)?;
+    write_sync_item("diagnostics", text, &state.source_id)
 }
 
 #[tauri::command]

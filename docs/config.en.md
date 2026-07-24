@@ -132,6 +132,23 @@ repeatedTextWindowMs = 140
 
 [plugins]
 enabled = []
+
+[sync]
+enabled = false
+provider = "folder"
+path = ""
+channel = "default"
+clipboard = true
+diagnostics = true
+pasteRequiresConfirm = true
+maxBytes = 1048576
+ttlSeconds = 86400
+
+[logging]
+enabled = true
+directory = ""
+autoStart = false
+maxBytes = 10485760
 ```
 
 ## Sections
@@ -140,6 +157,8 @@ enabled = []
 - `terminal`: xterm.js options passed when the terminal is created. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
+- `sync`: optional sync-folder integration for explicit clipboard text and diagnostics. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. See [Sync Folder](sync.en.md).
+- `logging`: terminal output logging. `Log Start` / `Log Stop` writes raw PTY output to a local file. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
@@ -156,6 +175,8 @@ printf '\033]0;work\a\r\n'
 printf '\033]777;titlebarColor=#2e7d32\a\r\n'
 printf '\033]777;opacity=0.65\a\r\n'
 printf '\033]777;title=work;titlebarColor=#2e7d32\a\r\n'
+printf '\033]777;log=start\a\r\n'
+printf '\033]777;log=stop\a\r\n'
 ```
 
 In PowerShell, emit the same fpasoterm OSC 777 sequence with:
