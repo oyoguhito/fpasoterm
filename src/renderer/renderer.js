@@ -945,7 +945,7 @@ async function writeDiagnosticsSnapshot() {
   }
   setSyncStatus('Sync: Writing');
   const item = await window.fpasoterm.syncWriteDiagnostics();
-  setSyncStatus(item.text ? 'Sync: Synced' : 'Sync: Empty');
+  setSyncStatus(item.text ? 'Sync: Updated' : 'Sync: Empty');
   console.error(`sync diagnostics auto-wrote bytes=${item.text.length} channel=${item.channel}`);
 }
 

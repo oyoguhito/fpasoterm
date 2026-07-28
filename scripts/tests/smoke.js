@@ -34,7 +34,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.3.1');
+assert.equal(packageJson.version, '1.3.2');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -116,6 +116,8 @@ for (const size of [16, 32, 48, 64, 128, 192, 256, 512]) {
 
 const bin = read('bin/fpasoterm');
 assert.match(bin, /--help/);
+assert.match(bin, /--version/);
+assert.match(bin, /-v, --version/);
 assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
@@ -193,6 +195,14 @@ const runCli = (...args) => spawnSync(
   [path.join(root, 'bin', 'fpasoterm'), '--config', cliConfigPath, ...args],
   { encoding: 'utf8' },
 );
+
+const versionResult = runCli('--version');
+assert.equal(versionResult.status, 0, versionResult.stderr);
+assert.equal(versionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+
+const shortVersionResult = runCli('-v');
+assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
+assert.equal(shortVersionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
 
 const enableResult = runCli('--enable-plugin', 'hello.ts, theme.js');
 assert.equal(enableResult.status, 0, enableResult.stderr);
@@ -376,6 +386,8 @@ assert.match(rustMain, /title_locked/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_START_COMMAND"/);
 assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
 assert.match(rustMain, /print_cli_text\(HELP_TEXT\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
+assert.match(rustMain, /CARGO_PKG_VERSION/);
 assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
 assert.match(rustMain, /print_show_config/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-window-state", "-r"\]\)/);
@@ -551,6 +563,8 @@ assert.match(readme, /ChromeOS shelf/);
 assert.match(readme, /removes fpasoterm-specific directories from the[\s\S]*current user's `Path`/);
 assert.match(readme, /By default, fpasoterm keeps its configured title/);
 assert.match(readme, /--command/);
+assert.match(readme, /--version/);
+assert.match(readme, /fpasoterm -v/);
 assert.match(readme, /--reset-window-state/);
 assert.match(readme, /--disable-dmabuf/);
 assert.match(readme, /OSC 777|033\]777/);
@@ -768,7 +782,8 @@ assert.match(syncDocsEn, /Log Show/);
 assert.match(syncDocsEn, /copies only that selection/);
 assert.match(syncDocsEn, /tmux capture-pane/);
 assert.match(syncDocsEn, /Store terminal output logs in the sync folder/);
-assert.match(syncDocsEn, /Synced terminal log directory/);
+assert.match(syncDocsEn, /Terminal log directory/);
+assert.doesNotMatch(syncDocsEn, /Synced terminal log directory/);
 assert.match(syncDocsEn, /G:\\マイドライブ\\fpasoterm-sync\\logs/);
 assert.match(syncDocsEn, /That is still a local Windows path/);
 assert.match(syncDocsEn, /%USERPROFILE%/);
@@ -810,7 +825,8 @@ assert.match(syncDocsJa, /Log Show/);
 assert.match(syncDocsJa, /選択範囲だけをコピー/);
 assert.match(syncDocsJa, /tmux capture-pane/);
 assert.match(syncDocsJa, /Store terminal output logs in the sync folder/);
-assert.match(syncDocsJa, /Synced terminal log directory/);
+assert.match(syncDocsJa, /Terminal log directory/);
+assert.doesNotMatch(syncDocsJa, /Synced terminal log directory/);
 assert.match(syncDocsJa, /G:\\マイドライブ\\fpasoterm-sync\\logs/);
 assert.match(syncDocsJa, /Windows 上のローカル path/);
 assert.match(syncDocsJa, /%USERPROFILE%/);
@@ -929,6 +945,8 @@ assert.doesNotMatch(renderer, /setPointerCapture/);
 assert.match(renderer, /syncStatusElement/);
 assert.match(renderer, /scheduleSyncDiagnosticsWrite/);
 assert.match(renderer, /writeDiagnosticsSnapshot/);
+assert.match(renderer, /Sync: Updated/);
+assert.doesNotMatch(renderer, /Sync: Synced/);
 assert.doesNotMatch(renderer, /syncMenuToggleButton/);
 assert.doesNotMatch(renderer, /setSyncMenuOpen/);
 assert.doesNotMatch(renderer, /closeSyncMenu/);
@@ -1063,6 +1081,8 @@ assert.match(config, /transpileModule/);
 
 const launcher = read('bin/fpasoterm');
 assert.match(launcher, /--setup-sync/);
+assert.match(launcher, /--version/);
+assert.match(launcher, /printVersion/);
 assert.doesNotMatch(launcher, removedKebabHttpUiPattern);
 assert.doesNotMatch(launcher, removedHttpUiEnvPattern);
 assert.match(launcher, /setupSync/);
@@ -1080,7 +1100,8 @@ assert.match(launcher, /Use the same sync channel on devices that should share d
 assert.match(launcher, /Press Enter to keep "default"/);
 assert.match(launcher, /Terminal output logs stay local by default/);
 assert.match(launcher, /Answer y only when you want raw terminal output logs stored in the selected sync folder/);
-assert.match(launcher, /Synced terminal log directory/);
+assert.match(launcher, /Terminal log directory/);
+assert.doesNotMatch(launcher, /Synced terminal log directory/);
 assert.match(launcher, /G:\\\\My Drive/);
 assert.match(launcher, /マイドライブ/);
 assert.match(launcher, /DEFGHIJKLMNOPQRSTUVWXYZ/);

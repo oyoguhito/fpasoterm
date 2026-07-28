@@ -199,7 +199,7 @@ When running tmux, screen, byobu, or herdr, fpasoterm receives the already-rende
 
 When `--setup-sync` asks `Store terminal output logs in the sync folder?`, choose `N` or press Enter if you do not want terminal output logs in the sync folder. This is the normal choice.
 
-If you choose `y`, the following `Synced terminal log directory` default is under the selected sync folder. On Windows it may look like `G:\マイドライブ\fpasoterm-sync\logs`. That is still a local Windows path, but Google Drive for desktop synchronizes it to other machines.
+If you choose `y`, the following `Terminal log directory` default is under the selected sync folder. On Windows it may look like `G:\マイドライブ\fpasoterm-sync\logs`. That is still a local Windows path, but Google Drive for desktop synchronizes it to other machines.
 
 Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. When sharing config across ChromeOS, macOS, and Windows, `~` or explicit per-OS paths are usually easier to reason about.
 

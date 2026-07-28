@@ -10,6 +10,14 @@ fpasoterm
 ```
 
 If your network makes npm's automatic audit request noisy, use `--no-audit` for local installs. CI still runs the explicit security checks in this repository.
+Check which version is on the command path:
+
+```sh
+fpasoterm --version
+fpasoterm -v
+```
+
+On Windows, run `fpasoterm --version` after installing a newer `.exe` or `.msi`. If it still prints the old version, the old executable is still being launched from `Path`, the Start menu, or a pinned shortcut. Close running fpasoterm windows, install the newer package again, then start fpasoterm from the updated shortcut.
 
 ## Development Build
 
@@ -166,6 +174,15 @@ npm でインストールした package を terminal から更新する場合:
 ```sh
 fpasoterm --self-update
 ```
+
+起動せずに現在使われている version を確認する場合:
+
+```sh
+fpasoterm --version
+fpasoterm -v
+```
+
+Windows で新しい `.exe` または `.msi` を古い版へ上書きインストールした後も古い UI が表示される場合は、まず `fpasoterm --version` を確認してください。古い version が表示される場合、`Path`、Start menu、pinned shortcut のいずれかが古い executable を起動しています。起動中の fpasoterm を閉じ、新しい installer を再実行してから更新後の shortcut で起動してください。
 
 source checkout の場合は、通常の git または jj workflow で checkout を更新した後、
 installed command、launcher entry、icons を更新します。

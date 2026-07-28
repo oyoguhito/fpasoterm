@@ -199,7 +199,7 @@ tmux、screen、byobu、herdr を使っている場合、fpasoterm が受け取�
 
 `--setup-sync` の `Store terminal output logs in the sync folder?` で `N` または Enter を選ぶと、terminal output log は同期フォルダへ置かれません。通常はこのままで構いません。
 
-`y` を選ぶと、次の `Synced terminal log directory` の既定値は Google Drive などの同期フォルダ配下になります。例えば Windows では `G:\マイドライブ\fpasoterm-sync\logs` のように表示されることがあります。これは Windows 上のローカル path ですが、Google Drive for desktop によって他端末へ同期されます。
+`y` を選ぶと、次の `Terminal log directory` の既定値は Google Drive などの同期フォルダ配下になります。例えば Windows では `G:\マイドライブ\fpasoterm-sync\logs` のように表示されることがあります。これは Windows 上のローカル path ですが、Google Drive for desktop によって他端末へ同期されます。
 
 path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。ただし、ChromeOS、macOS、Windows で同じ設定を共有する場合は、`~` または各 OS ごとの実 path を使う方が分かりやすいです。
 
