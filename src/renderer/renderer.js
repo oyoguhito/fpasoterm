@@ -1,18 +1,20 @@
 const terminalElement = document.getElementById('terminal');
 const diagnosticsPanel = document.getElementById('diagnostics-panel');
+const diagnosticsTitleElement = document.getElementById('diagnostics-title');
 const diagnosticsElement = document.getElementById('diagnostics');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
+const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
 const syncMenu = document.getElementById('sync-menu');
-const syncMenuToggleButton = document.getElementById('sync-menu-toggle');
-const syncMenuItems = document.getElementById('sync-menu-items');
-const syncCopyButton = document.getElementById('sync-copy');
-const syncPasteButton = document.getElementById('sync-paste');
-const syncDiagnosticsButton = document.getElementById('sync-diagnostics');
+const syncStatusElement = document.getElementById('sync-status');
+const logMenu = document.getElementById('log-menu');
+const logMenuToggleButton = document.getElementById('log-menu-toggle');
+const logMenuItems = document.getElementById('log-menu-items');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
+const terminalLogShowButton = document.getElementById('terminal-log-show');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
@@ -31,6 +33,7 @@ const fallbackConfig = {
     cursorStyle: 'block',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
+    lineHeight: 1.12,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -70,11 +73,8 @@ const fallbackConfig = {
     provider: 'folder',
     path: '',
     channel: 'default',
-    clipboard: true,
     diagnostics: true,
-    pasteRequiresConfirm: true,
     maxBytes: 1048576,
-    ttlSeconds: 86400,
   },
   logging: {
     enabled: true,
@@ -99,6 +99,9 @@ let terminalResizeTimer = null;
 let terminalDeferredResizeTimer = null;
 let xtermOverlayObserver = null;
 let pendingOscData = '';
+let diagnosticsPanelMode = 'diagnostics';
+let syncDiagnosticsEnabled = false;
+let syncDiagnosticsTimer = null;
 
 // Provides the renderer API shape expected by the rest of this file when the
 // backend is injected by Tauri.
@@ -116,6 +119,7 @@ function installTauriApiAdapter() {
     startTerminalLog: (path) => invoke('terminal_log_start', { request: { path: path || null } }),
     stopTerminalLog: () => invoke('terminal_log_stop'),
     terminalLogStatus: () => invoke('terminal_log_status'),
+    showTerminalLog: () => invoke('terminal_log_show'),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
@@ -132,11 +136,11 @@ function installTauriApiAdapter() {
     },
     getDiagnosticsPath: () => invoke('diagnostics_path'),
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
+    readClipboard: () => invoke('clipboard_read'),
+    writeClipboard: (text) => invoke('clipboard_write', { text }),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
     syncStatus: () => invoke('sync_status'),
-    syncWriteClipboard: (text) => invoke('sync_write_clipboard', { request: { text } }),
-    syncReadClipboard: () => invoke('sync_read_clipboard'),
     syncWriteDiagnostics: () => invoke('sync_write_diagnostics'),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
@@ -334,6 +338,10 @@ function appendDiagnosticLine(message) {
   if (diagnosticLines.length > 80) {
     diagnosticLines.shift();
   }
+  diagnosticsPanelMode = 'diagnostics';
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Diagnostics';
+  }
   diagnosticsPanel.hidden = false;
   diagnosticsElement.value = diagnosticLines.join('\n');
   diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
@@ -344,6 +352,7 @@ function showDiagnostic(message) {
   console.error(message);
   window.fpasoterm?.logDiagnostic?.(message).catch(() => {});
   appendDiagnosticLine(message);
+  scheduleSyncDiagnosticsWrite();
 }
 
 // Emits verbose diagnostics only when key/debug logging is enabled.
@@ -388,6 +397,114 @@ function showTerminalError(message) {
 
   terminalElement.textContent = message;
   terminalElement.classList.add('terminal-error');
+}
+
+// Sends terminal input through the same duplicate guard and PTY write path.
+function sendTerminalInput(data, source = 'input') {
+  showDebugDiagnostic(`renderer terminal ${source} bytes=${data.length}`);
+  const correctedData = correctCompositionData(data);
+
+  if (!correctedData) {
+    showDiagnostic(`renderer dropped duplicate composition data=${data}`);
+    return;
+  }
+
+  if (correctedData !== data) {
+    showDiagnostic(`renderer corrected duplicate composition data=${data} corrected=${correctedData}`);
+  }
+
+  rememberPlainTextWrite(correctedData);
+  window.fpasoterm.writeTerminal(correctedData).catch((error) => {
+    showTerminalError(`terminal write failed: ${error}`);
+  });
+}
+
+// Converts OS clipboard text into terminal paste input.
+function normalizePasteText(text) {
+  return String(text || '').replace(/\r\n/g, '\r').replace(/\n/g, '\r');
+}
+
+// Reads the OS clipboard in a user-triggered event and sends it to the shell.
+async function pasteClipboardToTerminal() {
+  let text = '';
+  try {
+    text = await window.fpasoterm.readClipboard();
+  } catch (backendError) {
+    showDiagnostic(`backend clipboard read failed: ${backendError}`);
+    text = await navigator.clipboard.readText();
+  }
+  if (!text) {
+    showDiagnostic('terminal paste skipped: clipboard is empty');
+    return;
+  }
+  sendTerminalInput(normalizePasteText(text), 'paste');
+}
+
+// Writes text to the OS clipboard through the backend, with WebView fallback.
+async function writeClipboardText(text) {
+  try {
+    await window.fpasoterm.writeClipboard(text);
+  } catch (backendError) {
+    showDiagnostic(`backend clipboard write failed: ${backendError}`);
+    await navigator.clipboard.writeText(text);
+  }
+  return text.length;
+}
+
+// Installs explicit paste handling for desktop webviews where xterm defaults can be skipped.
+function installTerminalPasteHandlers() {
+  terminalElement.addEventListener('paste', (event) => {
+    const text = event.clipboardData?.getData('text/plain') || '';
+    if (!text) {
+      return;
+    }
+    event.preventDefault();
+    sendTerminalInput(normalizePasteText(text), 'paste');
+  });
+
+  terminalElement.addEventListener('contextmenu', (event) => {
+    event.preventDefault();
+    pasteClipboardToTerminal().catch((error) => {
+      showDiagnostic(`terminal context paste failed: ${error}`);
+    });
+  });
+
+  window.addEventListener('keydown', (event) => {
+    const isPasteShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') ||
+      (event.metaKey && event.key.toLowerCase() === 'v');
+    if (!isPasteShortcut) {
+      return;
+    }
+    event.preventDefault();
+    pasteClipboardToTerminal().catch((error) => {
+      showDiagnostic(`terminal paste failed: ${error}`);
+    });
+  });
+}
+
+// Decodes the base64 payload used by terminal OSC 52 clipboard commands.
+function decodeOsc52Text(encodedText) {
+  const binary = atob(String(encodedText || ''));
+  const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+// Applies terminal OSC 52 clipboard write requests from tools such as multiplexers.
+function applyOsc52Clipboard(selection, encodedText) {
+  if (!encodedText) {
+    return;
+  }
+  try {
+    const text = decodeOsc52Text(encodedText);
+    window.fpasoterm.writeClipboard(text).then(() => {
+      showDiagnostic(`OSC 52 clipboard wrote bytes=${text.length} selection=${selection || 'clipboard'}`);
+    }).catch((error) => {
+      showDiagnostic(`OSC 52 clipboard write failed: ${error}`);
+    });
+  } catch (error) {
+    showDiagnostic(`OSC 52 clipboard decode failed: ${error}`);
+  }
 }
 
 // Deep-merges renderer fallback settings with main-process settings.
@@ -517,7 +634,7 @@ function applyTerminalAppearance() {
   }
 
   const terminalConfig = appConfig.terminal || {};
-  for (const key of ['cursorBlink', 'cursorStyle', 'fontFamily', 'fontSize', 'scrollback']) {
+  for (const key of ['cursorBlink', 'cursorStyle', 'fontFamily', 'fontSize', 'lineHeight', 'scrollback']) {
     if (terminalConfig[key] !== undefined) {
       term.options[key] = terminalConfig[key];
     }
@@ -634,21 +751,28 @@ function applyFpasotermOsc(command) {
   }
 }
 
-// Watches PTY output for custom runtime appearance commands before xterm draws it.
+// Watches PTY output for runtime OSC commands before xterm draws it.
 function processRuntimeOsc(data) {
   pendingOscData = `${pendingOscData}${data}`;
-  const oscPattern = /\x1b\]777;([\s\S]*?)(?:\x07|\x1b\\)/g;
+  const oscPattern = /\x1b\](\d+);([\s\S]*?)(?:\x07|\x1b\\)/g;
   let match;
   let lastMatchEnd = 0;
   while ((match = oscPattern.exec(pendingOscData)) !== null) {
-    applyFpasotermOsc(match[1]);
+    if (match[1] === '777') {
+      applyFpasotermOsc(match[2]);
+    } else if (match[1] === '52') {
+      const separator = match[2].indexOf(';');
+      if (separator !== -1) {
+        applyOsc52Clipboard(match[2].slice(0, separator), match[2].slice(separator + 1));
+      }
+    }
     lastMatchEnd = oscPattern.lastIndex;
   }
 
   if (lastMatchEnd > 0) {
     pendingOscData = pendingOscData.slice(lastMatchEnd);
   }
-  if (pendingOscData.length > 4096 || !pendingOscData.includes('\x1b]777;')) {
+  if (pendingOscData.length > 8192 || !/\x1b\](777|52);/.test(pendingOscData)) {
     pendingOscData = pendingOscData.slice(-64);
   }
 }
@@ -807,72 +931,46 @@ function syncEnabled() {
   return sync.enabled === true && sync.provider === 'folder' && Boolean(String(sync.path || '').trim());
 }
 
-// Shows a short state label on a sync button, then restores the original text.
-function flashSyncButton(button, label) {
-  if (!button) {
+// Updates the compact sync status label in the titlebar.
+function setSyncStatus(label) {
+  if (syncStatusElement) {
+    syncStatusElement.textContent = label;
+  }
+}
+
+// Publishes the backend diagnostics ring buffer without creating a feedback loop.
+async function writeDiagnosticsSnapshot() {
+  if (!syncDiagnosticsEnabled || !window.fpasoterm?.syncWriteDiagnostics) {
     return;
   }
-  const original = button.dataset.label || button.textContent;
-  button.dataset.label = original;
-  button.textContent = label;
-  setTimeout(() => {
-    button.textContent = button.dataset.label || original;
-  }, 1400);
-}
-
-// Reads selected terminal text first, then falls back to the local clipboard.
-async function textForSyncClipboard() {
-  const selectedText = term?.getSelection?.() || '';
-  if (selectedText) {
-    return selectedText;
-  }
-  try {
-    return await navigator.clipboard.readText();
-  } catch (error) {
-    showDiagnostic(`sync clipboard read failed: ${error}`);
-    return '';
-  }
-}
-
-// Publishes explicit text to the sync folder for another fpasoterm to pull.
-async function syncCopyText() {
-  const text = await textForSyncClipboard();
-  if (!text) {
-    flashSyncButton(syncCopyButton, 'Empty');
-    showDiagnostic('sync copy skipped: no selected text or clipboard text');
-    return;
-  }
-  const item = await window.fpasoterm.syncWriteClipboard(text);
-  flashSyncButton(syncCopyButton, 'Synced');
-  showDiagnostic(`sync clipboard wrote bytes=${item.text.length} channel=${item.channel}`);
-}
-
-// Pulls the latest sync clipboard item into the local OS clipboard.
-async function syncPullClipboard() {
-  const item = await window.fpasoterm.syncReadClipboard();
-  if (!item?.text) {
-    flashSyncButton(syncPasteButton, 'None');
-    showDiagnostic('sync clipboard pull found no item');
-    return;
-  }
-  await navigator.clipboard.writeText(item.text);
-  flashSyncButton(syncPasteButton, 'Pulled');
-  showDiagnostic(`sync clipboard pulled to OS clipboard bytes=${item.text.length} channel=${item.channel}`);
-}
-
-// Publishes the backend diagnostics ring buffer to the sync folder.
-async function syncDiagnostics() {
+  setSyncStatus('Sync: Writing');
   const item = await window.fpasoterm.syncWriteDiagnostics();
-  flashSyncButton(syncDiagnosticsButton, item.text ? 'Synced' : 'Empty');
-  showDiagnostic(`sync diagnostics wrote bytes=${item.text.length} channel=${item.channel}`);
+  setSyncStatus(item.text ? 'Sync: Synced' : 'Sync: Empty');
+  console.error(`sync diagnostics auto-wrote bytes=${item.text.length} channel=${item.channel}`);
 }
 
-// Enables sync controls only when [sync] is configured.
+// Debounces diagnostics writes so sync folders are not updated on every line.
+function scheduleSyncDiagnosticsWrite(delayMs = 1200) {
+  if (!syncDiagnosticsEnabled) {
+    return;
+  }
+  if (syncDiagnosticsTimer) {
+    clearTimeout(syncDiagnosticsTimer);
+  }
+  syncDiagnosticsTimer = setTimeout(() => {
+    writeDiagnosticsSnapshot().catch((error) => {
+      setSyncStatus('Sync: Error');
+      console.error(`sync diagnostics auto-write failed: ${error}`);
+    });
+  }, delayMs);
+}
+
+// Enables automatic diagnostics sync only when [sync] is configured.
 async function installSyncControls() {
+  syncDiagnosticsEnabled = false;
   if (syncMenu) {
     syncMenu.hidden = true;
   }
-  closeSyncMenu();
   if (!syncEnabled()) {
     return;
   }
@@ -886,32 +984,40 @@ async function installSyncControls() {
   if (syncMenu) {
     syncMenu.hidden = false;
   }
+  syncDiagnosticsEnabled = true;
+  setSyncStatus('Sync: Ready');
   showDiagnostic(`sync folder enabled channel=${status.channel} path=${status.path}`);
-}
-
-// Opens or closes the compact sync action menu in the custom titlebar.
-function setSyncMenuOpen(open) {
-  if (!syncMenuItems || !syncMenuToggleButton) {
-    return;
-  }
-  syncMenuItems.hidden = !open;
-  syncMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-}
-
-// Closes the sync menu after actions or outside clicks.
-function closeSyncMenu() {
-  setSyncMenuOpen(false);
+  scheduleSyncDiagnosticsWrite(0);
 }
 
 // Updates the terminal output log button label from backend state.
 async function refreshTerminalLogControl() {
-  if (!terminalLogToggleButton) {
+  if (!terminalLogToggleButton || !logMenuToggleButton) {
     return;
   }
   const status = await window.fpasoterm.terminalLogStatus();
-  terminalLogToggleButton.hidden = status.enabled === false;
-  terminalLogToggleButton.textContent = status.active ? 'Log Stop' : 'Log Start';
+  if (logMenu) {
+    logMenu.hidden = status.enabled === false;
+  }
+  terminalLogToggleButton.textContent = status.active ? 'Stop' : 'Start';
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
+  logMenuToggleButton.dataset.active = status.active ? 'true' : 'false';
+  logMenuToggleButton.textContent = status.active ? 'Logging' : 'Log';
+  logMenuToggleButton.setAttribute('aria-label', status.active ? 'Log capture is running' : 'Open log menu');
+}
+
+// Opens or closes the compact log action menu in the custom titlebar.
+function setLogMenuOpen(open) {
+  if (!logMenuItems || !logMenuToggleButton) {
+    return;
+  }
+  logMenuItems.hidden = !open;
+  logMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+}
+
+// Closes the log menu after actions or outside clicks.
+function closeLogMenu() {
+  setLogMenuOpen(false);
 }
 
 // Starts terminal output logging to the configured or requested file.
@@ -930,55 +1036,107 @@ async function stopTerminalOutputLog() {
   return status;
 }
 
+// Displays the active or most recent terminal output log in the diagnostics panel.
+async function showTerminalOutputLog() {
+  const preview = await window.fpasoterm.showTerminalLog();
+  diagnosticsPanelMode = 'terminal-log';
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Terminal Log';
+  }
+  const lines = [];
+  if (preview.message) {
+    lines.push(preview.message);
+  }
+  if (preview.path) {
+    lines.push(`path: ${preview.path}`);
+  }
+  if (preview.bytes === 0) {
+    lines.push('No terminal output has been captured yet. Use Log Start, run commands, press Log Stop when finished, then press Log Show again.');
+  }
+  if (preview.truncated) {
+    lines.push('The log is truncated in this view; showing the latest part only.');
+  }
+  if (preview.text) {
+    lines.push('', preview.text);
+  }
+  diagnosticsPanel.hidden = false;
+  diagnosticsElement.value = lines.join('\n') || 'No terminal output log found.';
+  diagnosticsElement.scrollTop = 0;
+  diagnosticsPathElement.textContent = preview.path || '';
+  const message = `terminal log shown path=${preview.path || '(none)'} bytes=${preview.bytes || 0} truncated=${preview.truncated ? 'true' : 'false'}`;
+  console.error(message);
+  window.fpasoterm?.logDiagnostic?.(message).catch(() => {});
+}
+
+// Returns selected log text when the diagnostics textarea has a selection.
+function selectedDiagnosticsText() {
+  const value = diagnosticsElement.value || '';
+  const start = diagnosticsElement.selectionStart;
+  const end = diagnosticsElement.selectionEnd;
+  if (Number.isInteger(start) && Number.isInteger(end) && end > start) {
+    return value.slice(start, end);
+  }
+  return value;
+}
+
 // Copies diagnostics even when terminal copy shortcuts are captured by xterm.js.
 copyDiagnosticsButton.addEventListener('click', async () => {
-  const copiedLength = await window.fpasoterm.copyDiagnostics();
+  let copiedLength = 0;
+  try {
+    if (diagnosticsPanelMode === 'terminal-log') {
+      const text = selectedDiagnosticsText();
+      copiedLength = await writeClipboardText(text);
+    } else {
+      copiedLength = await window.fpasoterm.copyDiagnostics();
+    }
+  } catch (error) {
+    showDiagnostic(`diagnostics copy failed: ${error}`);
+    copyDiagnosticsButton.textContent = 'Copy Failed';
+    setTimeout(() => {
+      copyDiagnosticsButton.textContent = 'Copy';
+    }, 1200);
+    return;
+  }
   copyDiagnosticsButton.textContent = copiedLength > 0 ? 'Copied' : 'No Logs';
   setTimeout(() => {
     copyDiagnosticsButton.textContent = 'Copy';
   }, 1200);
 });
 
-syncCopyButton.addEventListener('click', () => {
-  syncCopyText().catch((error) => {
-    flashSyncButton(syncCopyButton, 'Error');
-    showDiagnostic(`sync copy failed: ${error}`);
-  }).finally(closeSyncMenu);
-});
-
-syncPasteButton.addEventListener('click', () => {
-  syncPullClipboard().catch((error) => {
-    flashSyncButton(syncPasteButton, 'Error');
-    showDiagnostic(`sync pull failed: ${error}`);
-  }).finally(closeSyncMenu);
-});
-
-syncDiagnosticsButton.addEventListener('click', () => {
-  syncDiagnostics().catch((error) => {
-    flashSyncButton(syncDiagnosticsButton, 'Error');
-    showDiagnostic(`sync diagnostics failed: ${error}`);
-  }).finally(closeSyncMenu);
-});
-
-syncMenuToggleButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  setSyncMenuOpen(syncMenuItems?.hidden !== false);
-});
-
-document.addEventListener('pointerdown', (event) => {
-  if (syncMenu && !syncMenu.hidden && !syncMenu.contains(event.target)) {
-    closeSyncMenu();
-  }
+// Hides the diagnostics/log panel when it blocks the terminal view.
+closeDiagnosticsButton.addEventListener('click', () => {
+  diagnosticsPanel.hidden = true;
 });
 
 terminalLogToggleButton.addEventListener('click', () => {
   const active = terminalLogToggleButton.dataset.active === 'true';
   const action = active ? stopTerminalOutputLog() : startTerminalOutputLog();
   action.catch((error) => {
-    terminalLogToggleButton.textContent = 'Log Error';
+    terminalLogToggleButton.textContent = 'Error';
     setTimeout(() => refreshTerminalLogControl().catch(() => {}), 1400);
     showDiagnostic(`terminal log toggle failed: ${error}`);
-  });
+  }).finally(closeLogMenu);
+});
+
+terminalLogShowButton.addEventListener('click', () => {
+  showTerminalOutputLog().catch((error) => {
+    terminalLogShowButton.textContent = 'Error';
+    setTimeout(() => {
+      terminalLogShowButton.textContent = 'Show';
+    }, 1400);
+    showDiagnostic(`terminal log show failed: ${error}`);
+  }).finally(closeLogMenu);
+});
+
+logMenuToggleButton.addEventListener('click', (event) => {
+  event.stopPropagation();
+  setLogMenuOpen(logMenuItems?.hidden !== false);
+});
+
+document.addEventListener('pointerdown', (event) => {
+  if (logMenu && !logMenu.hidden && !logMenu.contains(event.target)) {
+    closeLogMenu();
+  }
 });
 
 
@@ -1154,22 +1312,7 @@ async function initialize() {
   });
 
   term.onData((data) => {
-    showDebugDiagnostic(`renderer terminal input bytes=${data.length}`);
-    const correctedData = correctCompositionData(data);
-
-    if (!correctedData) {
-      showDiagnostic(`renderer dropped duplicate composition data=${data}`);
-      return;
-    }
-
-    if (correctedData !== data) {
-      showDiagnostic(`renderer corrected duplicate composition data=${data} corrected=${correctedData}`);
-    }
-
-    rememberPlainTextWrite(correctedData);
-    window.fpasoterm.writeTerminal(correctedData).catch((error) => {
-      showTerminalError(`terminal write failed: ${error}`);
-    });
+    sendTerminalInput(data, 'input');
   });
 
   Promise.resolve(window.fpasoterm.onTerminalData((data) => {
@@ -1198,6 +1341,7 @@ async function initialize() {
     const message = `${event.source}: ${event.message}`;
     console.error(message);
     appendDiagnosticLine(message);
+    scheduleSyncDiagnosticsWrite();
   })).catch((error) => {
     showDiagnostic(`diagnostic listener failed: ${error}`);
   });
@@ -1218,6 +1362,7 @@ async function initialize() {
   });
 
   await loadPlugins();
+  installTerminalPasteHandlers();
   await afterNextPaint();
   fitAddon.fit();
   try {

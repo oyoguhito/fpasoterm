@@ -8,6 +8,7 @@ title = "fpasoterm"
 titlebarColor = "#1565c0"
 
 [terminal]
+lineHeight = 1.12
 backgroundOpacity = 0.8
 
 [terminal.theme]

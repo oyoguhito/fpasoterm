@@ -27,6 +27,7 @@ const defaultConfig = Object.freeze({
     cursorStyle: 'block',
     fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
     fontSize: 14,
+    lineHeight: 1.12,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -67,11 +68,8 @@ const defaultConfig = Object.freeze({
     provider: 'folder',
     path: '',
     channel: 'default',
-    clipboard: true,
     diagnostics: true,
-    pasteRequiresConfirm: true,
     maxBytes: 1048576,
-    ttlSeconds: 86400,
   },
   logging: {
     enabled: true,
@@ -113,6 +111,8 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \\"Noto Sans Mono CJK JP\\", monospace"
 fontSize = 14
+# lineHeight leaves enough vertical room for underscores and descenders.
+lineHeight = 1.12
 # backgroundOpacity changes only the terminal background alpha, not text opacity.
 backgroundOpacity = 0.8
 scrollback = 1000
@@ -165,11 +165,8 @@ provider = "folder"
 # Example: path = "~/Google Drive/fpasoterm-sync"
 path = ""
 channel = "default"
-clipboard = true
 diagnostics = true
-pasteRequiresConfirm = true
 maxBytes = 1048576
-ttlSeconds = 86400
 
 # Terminal output logging records raw PTY output when started from the titlebar
 # or an OSC 777 command. The default directory is User/logs.

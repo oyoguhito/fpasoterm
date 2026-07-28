@@ -90,24 +90,48 @@ body {
 }
 
 #sync-menu[hidden],
-#sync-menu-items[hidden] {
+#log-menu-items[hidden] {
   display: none;
 }
 
-#sync-menu-toggle,
-#terminal-log-toggle {
+#sync-status,
+#log-menu-toggle {
   width: auto;
-  min-width: 70px;
+  min-width: 74px;
   padding: 0 8px;
+  white-space: nowrap;
 }
 
-#sync-menu-items {
+#sync-status {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  color: #dce7f3;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#log-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#log-menu-toggle[data-active="true"] {
+  min-width: 86px;
+  background: rgba(245, 215, 110, 0.16);
+  color: #f5d76e;
+}
+
+#log-menu-items {
   position: absolute;
   top: 28px;
   right: 0;
   z-index: 10020;
   display: grid;
-  min-width: 170px;
+  min-width: 104px;
   gap: 4px;
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.34);
@@ -118,11 +142,12 @@ body {
   -webkit-app-region: no-drag;
 }
 
-#sync-menu-items button {
+#log-menu-items button {
   width: 100%;
   min-width: 0;
   padding: 0 8px;
   text-align: left;
+  white-space: nowrap;
 }
 
 #window-controls button[hidden] {
@@ -142,7 +167,7 @@ body {
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  padding: 0;
+  padding: 0 2px 8px;
   background: transparent;
   app-region: no-drag;
   -webkit-app-region: no-drag;
@@ -191,7 +216,7 @@ body {
 .resize-edge-bottom {
   right: 12px;
   left: 12px;
-  height: 10px;
+  height: 6px;
   cursor: ns-resize;
 }
 
@@ -213,10 +238,13 @@ body {
 
 .resize-edge-bottom {
   bottom: 0;
+  left: 96px;
+  height: 4px;
 }
 
 .resize-edge-left {
   left: 0;
+  bottom: 64px;
 }
 
 .resize-corner {
@@ -245,6 +273,7 @@ body {
 .resize-corner-bottom-left {
   bottom: 0;
   left: 0;
+  display: none;
   cursor: nesw-resize;
 }
 
@@ -254,7 +283,7 @@ body {
   bottom: 8px;
   z-index: 10;
   width: min(760px, calc(100vw - 16px));
-  height: 190px;
+  height: min(320px, calc(100vh - var(--titlebar-height) - 16px));
   display: grid;
   grid-template-rows: 28px 1fr 22px;
   border: 1px solid #3b4652;
@@ -277,6 +306,21 @@ body {
 }
 
 #copy-diagnostics {
+  height: 22px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: inherit;
+}
+
+.diagnostics-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#close-diagnostics {
   height: 22px;
   border: 1px solid #3b4652;
   border-radius: 4px;

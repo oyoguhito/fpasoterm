@@ -1,6 +1,6 @@
 # Sync Folder
 
-fpasoterm は、Google Drive for desktop、OneDrive、Dropbox、Syncthing、rsync などが同期しているローカルフォルダを使って、明示的に選択した clipboard text と diagnostics を共有できます。
+fpasoterm は、Google Drive for desktop、OneDrive、Dropbox、Syncthing、rsync などが同期しているローカルフォルダを使って、diagnostics と terminal output log を共有できます。
 
 fpasoterm は Google Drive API を呼びません。OAuth、API key、Google Cloud project は不要です。Google Drive は、fpasoterm がローカルフォルダに書いたファイルを同期するだけです。
 
@@ -40,7 +40,7 @@ ChromeOS で `shared` や `temp` など複数の folder を `Linux と共有` �
 
 `Sync channel` は、同じ sync folder の中で同期データを分けるための名前です。通常は `default` のままで問題ありません。
 
-同じ `path` と同じ `channel` を指定した fpasoterm 同士だけが、clipboard text、diagnostics、logs を同じ場所で共有します。ChromeOS と Windows で同じ clipboard sync を使いたい場合は、両方で同じ channel 名を指定してください。
+同じ `path` と同じ `channel` を指定した fpasoterm 同士だけが、diagnostics と logs を同じ場所で共有します。ChromeOS と Windows で同じ同期領域を使いたい場合は、両方で同じ channel 名を指定してください。
 
 例:
 
@@ -145,11 +145,8 @@ enabled = true
 provider = "folder"
 path = "~/Google Drive/fpasoterm-sync"
 channel = "work"
-clipboard = true
 diagnostics = true
-pasteRequiresConfirm = true
 maxBytes = 1048576
-ttlSeconds = 86400
 ```
 
 同期したい別の fpasoterm でも同じ `path` と `channel` を指定します。Google Drive のローカルフォルダ名が異なる場合は、その環境の実際の path を指定してください。
@@ -172,27 +169,33 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 `channel = "work"` の場合、fpasoterm は次のファイルを読み書きします。
 
 ```text
-<sync path>/work/clipboard.json
 <sync path>/work/diagnostics.json
 ```
 
-JSON には `kind`、`channel`、`sourceId`、`updatedAt`、`text` が入ります。
+`diagnostics.json` の JSON には `kind`、`channel`、`sourceId`、`updatedAt`、`text` が入ります。
 
 ## 使用方法
 
-sync が有効な場合、titlebar に次のボタンが表示されます。
+sync が有効な場合、titlebar に `Sync:` status が表示されます。fpasoterm は diagnostics が変わった時に debounce して、`diagnostics.json` へ diagnostics snapshot を自動書き込みします。snapshot の内容は、この app session で保持している in-memory diagnostics ring buffer、つまり直近の fpasoterm diagnostics/debug log です。これは config 読み込み、PTY event、renderer error、sync status など fpasoterm 自体の調査用で、terminal output log ではありません。
 
-titlebar の `Sync` menu から次の操作を選べます。
+titlebar に sync status を表示せず、`diagnostics.json` の書き込みも止めたい場合は、`config.toml` で sync を無効にします。
 
-- `Copy Selection`: terminal の選択テキストを `clipboard.json` に書き込みます。選択が無い場合は現在のローカル clipboard text を書き込みます。
-- `Pull to Clipboard`: `clipboard.json` を読み、text をローカル OS clipboard へコピーします。terminal へ直接 paste はしません。
-- `Write Diagnostics`: 最近の fpasoterm diagnostics/debug log を `diagnostics.json` に書き込みます。terminal output log ではありません。
+```toml
+[sync]
+enabled = false
+```
 
-`Pull to Clipboard` は terminal に直接 paste しません。まずローカル OS clipboard にコピーするため、内容を確認してから明示的に paste できます。
+`sync.path` を空にした場合も、書き込み先が無いため sync は無効になります。`config.toml` を編集した後は、fpasoterm を再起動するか、起動中の terminal から config を適用してください。
+
+要点として、`sync.enabled = false` が Sync status を出さないローカル専用の設定です。
 
 ## Terminal Output Logs
 
-sync folder の diagnostics と terminal output logging は別機能です。titlebar の `Log Start` ボタンで raw terminal output を local log file に記録し、`Log Stop` で閉じます。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
+sync folder の diagnostics と terminal output logging は別機能です。titlebar の `Log Start` ボタンで raw terminal output を local log file に記録し、`Log Stop` で閉じ、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示します。`Log Show` は読みやすさのため一般的な ANSI/control sequence を除去しますが、保存される log file は raw PTY output のままです。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
+
+`Log Show` では、表示された log の一部を選択して `Copy` を押すと選択範囲だけをコピーします。選択が無い場合は、表示中の log 全体をコピーします。
+
+tmux、screen、byobu、herdr を使っている場合、fpasoterm が受け取るのは multiplexer が描画した後の PTY output stream です。どの pane がどの byte を出したかを fpasoterm 側で確実に判定できないため、pane 単位の log は `tmux capture-pane` や multiplexer 側の pane logging 機能で取得してください。
 
 `--setup-sync` の `Store terminal output logs in the sync folder?` で `N` または Enter を選ぶと、terminal output log は同期フォルダへ置かれません。通常はこのままで構いません。
 
@@ -227,7 +230,7 @@ PowerShell の場合:
 
 ## セキュリティ
 
-同期されるのは、明示的にコピーした text と diagnostics だけです。terminal 全出力は自動同期しません。
+sync status 機能で自動同期されるのは diagnostics だけです。terminal 全出力は自動同期しません。
 
 terminal log には command output、prompt、その他の機密情報が含まれる可能性があります。`logging.directory` を同期フォルダに向ける場合は、そのフォルダの保護に注意してください。
 

@@ -5,9 +5,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::VecDeque;
 use std::env;
 use std::fs::{self, File, OpenOptions};
-use std::io::Write;
-use std::path::PathBuf;
-use std::process::Command;
+use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::{Path, PathBuf};
+use std::process::{Command, Output, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
@@ -101,13 +101,6 @@ struct WindowBounds {
     height: u32,
 }
 
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-// Text payload requested by the renderer for sync-folder publishing.
-struct SyncWriteRequest {
-    text: String,
-}
-
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 // Current sync-folder state returned to the renderer.
@@ -116,7 +109,6 @@ struct SyncStatus {
     provider: String,
     path: String,
     channel: String,
-    clipboard_path: String,
     diagnostics_path: String,
     message: String,
 }
@@ -151,6 +143,17 @@ struct TerminalLogStatus {
     message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Tail preview of the active or most recent terminal output log.
+struct TerminalLogPreview {
+    path: String,
+    text: String,
+    bytes: u64,
+    truncated: bool,
+    message: String,
+}
+
 // Active terminal output log file and byte counter.
 struct TerminalLog {
     path: String,
@@ -171,6 +174,7 @@ struct AppState {
     terminal: Mutex<Option<TerminalSession>>,
     diagnostics: Arc<Mutex<VecDeque<String>>>,
     terminal_log: Arc<Mutex<Option<TerminalLog>>>,
+    last_terminal_log_path: Arc<Mutex<Option<String>>>,
     source_id: String,
 }
 
@@ -180,6 +184,7 @@ impl Default for AppState {
             terminal: Mutex::new(None),
             diagnostics: Arc::new(Mutex::new(VecDeque::new())),
             terminal_log: Arc::new(Mutex::new(None)),
+            last_terminal_log_path: Arc::new(Mutex::new(None)),
             source_id: format!("{}-{}", std::process::id(), now_millis()),
         }
     }
@@ -228,7 +233,7 @@ fn main() {
                 let restore_size =
                     PhysicalSize::new(config.config.window.width, config.config.window.height);
                 let _ = window.set_title(&config.config.window.title);
-                set_window_icon(&window, app.default_window_icon());
+                set_fpasoterm_window_icon(app.handle(), &window);
                 let _ = window.set_size(restore_size);
                 append_diagnostic(
                     app.handle(),
@@ -262,14 +267,15 @@ fn main() {
             terminal_log_start,
             terminal_log_stop,
             terminal_log_status,
+            terminal_log_show,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
+            clipboard_read,
+            clipboard_write,
             config_get,
             config_apply_path,
             sync_status,
-            sync_write_clipboard,
-            sync_read_clipboard,
             sync_write_diagnostics,
             window_close,
             window_minimize,
@@ -324,11 +330,26 @@ fn set_env_from_cli(name: &str, flags: &[&str]) {
     }
 }
 
-// Applies the runtime icon shown by Linux shelves, task switchers, and window managers.
-fn set_window_icon(window: &tauri::WebviewWindow, icon: Option<&tauri::image::Image<'_>>) {
-    if let Some(icon) = icon {
-        if let Err(error) = window.set_icon(icon.clone()) {
-            eprintln!("failed to set window icon: {error}");
+// Applies the project icon shown by Linux shelves, task switchers, and window managers.
+fn set_fpasoterm_window_icon(app: &AppHandle, window: &tauri::WebviewWindow) {
+    match tauri::image::Image::from_bytes(include_bytes!("../../extra/logo/fpasoterm.png")) {
+        Ok(icon) => {
+            if let Err(error) = window.set_icon(icon) {
+                eprintln!("failed to set fpasoterm window icon: {error}");
+                append_diagnostic(
+                    app,
+                    &format!("failed to set fpasoterm window icon: {error}"),
+                );
+            } else {
+                append_diagnostic(app, "set fpasoterm window icon");
+            }
+        }
+        Err(error) => {
+            eprintln!("failed to load fpasoterm window icon: {error}");
+            append_diagnostic(
+                app,
+                &format!("failed to load fpasoterm window icon: {error}"),
+            );
         }
     }
 }
@@ -567,11 +588,8 @@ fn default_runtime_config() -> RuntimeConfig {
                 "provider": "folder",
                 "path": "",
                 "channel": "default",
-                "clipboard": true,
                 "diagnostics": true,
-                "pasteRequiresConfirm": true,
-                "maxBytes": 1048576,
-                "ttlSeconds": 86400
+                "maxBytes": 1048576
             }),
             logging: serde_json::json!({
                 "enabled": true,
@@ -1290,6 +1308,9 @@ fn start_terminal_log_state(
         bytes_written: 0,
         max_bytes: logging_max_bytes(),
     });
+    if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
+        *last_path = Some(path_text.clone());
+    }
     Ok(TerminalLogStatus {
         enabled: true,
         active: true,
@@ -1308,6 +1329,9 @@ fn terminal_log_stop(state: State<AppState>) -> Result<TerminalLogStatus, String
         .map_err(|error| error.to_string())?;
     if let Some(mut log) = guard.take() {
         let _ = log.file.flush();
+        if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
+            *last_path = Some(log.path.clone());
+        }
         return Ok(TerminalLogStatus {
             enabled: logging_bool("enabled", true),
             active: false,
@@ -1343,12 +1367,204 @@ fn terminal_log_status(state: State<AppState>) -> Result<TerminalLogStatus, Stri
         });
     }
 
+    let last_path = state
+        .last_terminal_log_path
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone())
+        .unwrap_or_default();
+
     Ok(TerminalLogStatus {
         enabled: logging_bool("enabled", true),
         active: false,
-        path: String::new(),
+        path: last_path,
         bytes_written: 0,
         message: "terminal output logging is inactive".to_string(),
+    })
+}
+
+// Finds the newest timestamped terminal output log in the configured log directory.
+fn latest_terminal_log_path() -> Result<Option<PathBuf>, String> {
+    let directory = terminal_log_directory();
+    if !directory.exists() {
+        return Ok(None);
+    }
+
+    let mut latest: Option<(SystemTime, PathBuf)> = None;
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let is_terminal_log = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with("terminal-") && name.ends_with(".log"))
+            .unwrap_or(false);
+        if !is_terminal_log {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH);
+        if latest
+            .as_ref()
+            .map(|(latest_modified, _)| modified > *latest_modified)
+            .unwrap_or(true)
+        {
+            latest = Some((modified, path));
+        }
+    }
+
+    Ok(latest.map(|(_, path)| path))
+}
+
+// Reads the tail of a log file without loading very large logs into memory.
+fn read_terminal_log_tail(path: &Path, max_bytes: u64) -> Result<(String, u64, bool), String> {
+    let mut file = File::open(path).map_err(|error| error.to_string())?;
+    let bytes = file.metadata().map_err(|error| error.to_string())?.len();
+    let start = bytes.saturating_sub(max_bytes);
+    file.seek(SeekFrom::Start(start))
+        .map_err(|error| error.to_string())?;
+    let mut buffer = Vec::new();
+    file.read_to_end(&mut buffer)
+        .map_err(|error| error.to_string())?;
+    Ok((
+        String::from_utf8_lossy(&buffer).to_string(),
+        bytes,
+        start > 0,
+    ))
+}
+
+// Removes common terminal control sequences from raw PTY output for Log Show.
+fn clean_terminal_log_preview_text(text: &str) -> String {
+    normalize_terminal_preview_lines(&strip_terminal_escape_sequences(text))
+}
+
+// Strips CSI, OSC, and simple ESC control sequences while preserving printable text.
+fn strip_terminal_escape_sequences(text: &str) -> String {
+    let mut result = String::new();
+    let mut chars = text.chars().peekable();
+
+    while let Some(character) = chars.next() {
+        if character != '\x1b' {
+            result.push(character);
+            continue;
+        }
+
+        match chars.peek().copied() {
+            Some('[') => {
+                chars.next();
+                for next in chars.by_ref() {
+                    if ('@'..='~').contains(&next) {
+                        break;
+                    }
+                }
+            }
+            Some(']') => {
+                chars.next();
+                let mut previous_was_escape = false;
+                for next in chars.by_ref() {
+                    if next == '\x07' {
+                        break;
+                    }
+                    if previous_was_escape && next == '\\' {
+                        break;
+                    }
+                    previous_was_escape = next == '\x1b';
+                }
+            }
+            Some('(') | Some(')') | Some('*') | Some('+') => {
+                chars.next();
+                let _ = chars.next();
+            }
+            Some(_) => {
+                let _ = chars.next();
+            }
+            None => {}
+        }
+    }
+
+    result
+}
+
+// Applies terminal-like carriage return and backspace handling for text preview.
+fn normalize_terminal_preview_lines(text: &str) -> String {
+    let mut lines: Vec<String> = vec![String::new()];
+    for character in text.chars() {
+        match character {
+            '\r' => {
+                if !lines.last().map(|line| line.is_empty()).unwrap_or(true) {
+                    lines.push(String::new());
+                }
+            }
+            '\n' => {
+                if !lines.last().map(|line| line.is_empty()).unwrap_or(true) {
+                    lines.push(String::new());
+                }
+            }
+            '\x08' => {
+                if let Some(line) = lines.last_mut() {
+                    line.pop();
+                }
+            }
+            '\x00'..='\x1f' | '\x7f' => {}
+            _ => {
+                if let Some(line) = lines.last_mut() {
+                    line.push(character);
+                }
+            }
+        }
+    }
+
+    while lines.last().map(|line| line.is_empty()).unwrap_or(false) {
+        lines.pop();
+    }
+    lines.join("\n")
+}
+
+#[tauri::command]
+// Returns the active, last stopped, or most recent terminal output log for quick inspection.
+fn terminal_log_show(state: State<AppState>) -> Result<TerminalLogPreview, String> {
+    let tracked_path = {
+        let guard = state
+            .terminal_log
+            .lock()
+            .map_err(|error| error.to_string())?;
+        guard.as_ref().map(|log| log.path.clone())
+    };
+    let last_path = state
+        .last_terminal_log_path
+        .lock()
+        .ok()
+        .and_then(|guard| guard.clone());
+
+    let path = match tracked_path.or(last_path) {
+        Some(value) => PathBuf::from(value),
+        None => match latest_terminal_log_path()? {
+            Some(path) => path,
+            None => {
+                return Ok(TerminalLogPreview {
+                    path: String::new(),
+                    text: String::new(),
+                    bytes: 0,
+                    truncated: false,
+                    message: "terminal output log was not found".to_string(),
+                });
+            }
+        },
+    };
+
+    let (text, bytes, truncated) = read_terminal_log_tail(&path, 65_536)?;
+    Ok(TerminalLogPreview {
+        path: path.display().to_string(),
+        text: clean_terminal_log_preview_text(&text),
+        bytes,
+        truncated,
+        message: if truncated {
+            "showing the last 65536 bytes of the terminal output log".to_string()
+        } else {
+            "showing the terminal output log".to_string()
+        },
     })
 }
 
@@ -1377,6 +1593,168 @@ fn diagnostics_path() -> String {
 // Lets the renderer append messages to the backend diagnostics ring buffer.
 fn diagnostics_log(app: AppHandle, message: String) {
     append_diagnostic(&app, &message);
+}
+
+// Runs a clipboard read command and lets Unix builds use coreutils timeout when available.
+fn clipboard_read_output(program: &str, args: &[&str]) -> Result<Output, std::io::Error> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let mut timeout_args = vec!["2s", program];
+        timeout_args.extend_from_slice(args);
+        if let Ok(output) = Command::new("timeout").args(timeout_args).output() {
+            return Ok(output);
+        }
+    }
+
+    Command::new(program).args(args).output()
+}
+
+// Attempts each command until one can read text from the OS clipboard.
+fn read_clipboard_with_commands(commands: &[(&str, &[&str])]) -> Result<String, String> {
+    let mut errors = Vec::new();
+    for (program, args) in commands {
+        match clipboard_read_output(program, args) {
+            Ok(output) if output.status.success() => {
+                return Ok(String::from_utf8_lossy(&output.stdout).to_string());
+            }
+            Ok(output) => {
+                errors.push(format!(
+                    "{} exited with {}: {}",
+                    program,
+                    output.status,
+                    String::from_utf8_lossy(&output.stderr)
+                ));
+            }
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    Err(errors.join("; "))
+}
+
+// Attempts each command until one can write text to the OS clipboard.
+fn write_clipboard_with_commands(commands: &[(&str, &[&str])], text: &str) -> Result<(), String> {
+    let mut errors = Vec::new();
+    for (program, args) in commands {
+        match Command::new(program)
+            .args(*args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+        {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    if let Err(error) = stdin.write_all(text.as_bytes()) {
+                        errors.push(format!("{program} stdin: {error}"));
+                        let _ = child.kill();
+                        continue;
+                    }
+                }
+
+                #[cfg(all(unix, not(target_os = "macos")))]
+                {
+                    // xclip/xsel commonly remain alive as the clipboard owner. Waiting for
+                    // them blocks the Tauri command and freezes the UI, so success is spawn
+                    // plus stdin delivery on Unix desktops.
+                    return Ok(());
+                }
+
+                #[cfg(any(not(unix), target_os = "macos"))]
+                {
+                    match child.wait_with_output() {
+                        Ok(output) if output.status.success() => return Ok(()),
+                        Ok(output) => errors.push(format!(
+                            "{} exited with {}: {}",
+                            program,
+                            output.status,
+                            String::from_utf8_lossy(&output.stderr)
+                        )),
+                        Err(error) => errors.push(format!("{program}: {error}")),
+                    }
+                }
+            }
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    Err(errors.join("; "))
+}
+
+#[tauri::command]
+// Reads text from the OS clipboard for terminal paste shortcuts.
+fn clipboard_read() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        return read_clipboard_with_commands(&[("pbpaste", &[])]);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return read_clipboard_with_commands(&[
+            (
+                "pwsh.exe",
+                &["-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            ),
+            (
+                "powershell.exe",
+                &["-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            ),
+        ]);
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        read_clipboard_with_commands(&[
+            ("wl-paste", &["--no-newline"]),
+            ("xclip", &["-selection", "clipboard", "-out"]),
+            ("xsel", &["--clipboard", "--output"]),
+        ])
+    }
+}
+
+#[tauri::command]
+// Writes text to the OS clipboard for terminal OSC 52 copy requests.
+fn clipboard_write(text: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        return write_clipboard_with_commands(&[("pbcopy", &[])], &text);
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        return write_clipboard_with_commands(
+            &[
+                (
+                    "pwsh.exe",
+                    &[
+                        "-NoProfile",
+                        "-Command",
+                        "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+                    ],
+                ),
+                (
+                    "powershell.exe",
+                    &[
+                        "-NoProfile",
+                        "-Command",
+                        "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
+                    ],
+                ),
+            ],
+            &text,
+        );
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        write_clipboard_with_commands(
+            &[
+                ("wl-copy", &[]),
+                ("xclip", &["-selection", "clipboard"]),
+                ("xsel", &["--clipboard", "--input"]),
+            ],
+            &text,
+        )
+    }
 }
 
 #[tauri::command]
@@ -1410,7 +1788,6 @@ struct SyncFolderPaths {
     provider: String,
     root: std::path::PathBuf,
     channel: String,
-    clipboard: std::path::PathBuf,
     diagnostics: std::path::PathBuf,
 }
 
@@ -1450,15 +1827,6 @@ fn sync_max_bytes() -> usize {
         .and_then(|value| value.as_u64())
         .filter(|value| *value > 0)
         .unwrap_or(1_048_576) as usize
-}
-
-// Reads the sync item lifetime in milliseconds; zero disables expiration.
-fn sync_ttl_millis() -> u128 {
-    sync_config()
-        .get("ttlSeconds")
-        .and_then(|value| value.as_u64())
-        .map(|seconds| seconds as u128 * 1000)
-        .unwrap_or(86_400_000)
 }
 
 // Normalizes channel names so they can safely be used as directory names.
@@ -1563,9 +1931,6 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
         return Err(format!("unsupported sync provider: {provider}"));
     }
 
-    if kind == "clipboard" && !sync_bool("clipboard", true) {
-        return Err("sync clipboard is disabled; set sync.clipboard = true".to_string());
-    }
     if kind == "diagnostics" && !sync_bool("diagnostics", true) {
         return Err("sync diagnostics is disabled; set sync.diagnostics = true".to_string());
     }
@@ -1591,7 +1956,6 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
         provider,
         root,
         channel,
-        clipboard: channel_dir.join("clipboard.json"),
         diagnostics: channel_dir.join("diagnostics.json"),
     })
 }
@@ -1600,7 +1964,6 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
 fn sync_item_path(kind: &str) -> Result<std::path::PathBuf, String> {
     let paths = sync_folder_paths(kind)?;
     match kind {
-        "clipboard" => Ok(paths.clipboard),
         "diagnostics" => Ok(paths.diagnostics),
         _ => Err(format!("unsupported sync item kind: {kind}")),
     }
@@ -1641,22 +2004,6 @@ fn write_sync_item(kind: &str, text: String, source_id: &str) -> Result<SyncItem
     Ok(item)
 }
 
-// Reads a sync item if the configured file exists.
-fn read_sync_item(kind: &str) -> Result<Option<SyncItem>, String> {
-    let path = sync_item_path(kind)?;
-    if !path.exists() {
-        return Ok(None);
-    }
-
-    let text = fs::read_to_string(&path).map_err(|error| error.to_string())?;
-    let item: SyncItem = serde_json::from_str(&text).map_err(|error| error.to_string())?;
-    let ttl_millis = sync_ttl_millis();
-    if ttl_millis > 0 && now_millis().saturating_sub(item.updated_at) > ttl_millis {
-        return Ok(None);
-    }
-    Ok(Some(item))
-}
-
 #[tauri::command]
 // Returns where sync-folder files would be read and written.
 fn sync_status() -> SyncStatus {
@@ -1666,7 +2013,6 @@ fn sync_status() -> SyncStatus {
             provider: paths.provider,
             path: paths.root.display().to_string(),
             channel: paths.channel,
-            clipboard_path: paths.clipboard.display().to_string(),
             diagnostics_path: paths.diagnostics.display().to_string(),
             message: "sync folder is enabled".to_string(),
         },
@@ -1675,26 +2021,10 @@ fn sync_status() -> SyncStatus {
             provider: sync_string("provider", "folder"),
             path: sync_string("path", ""),
             channel: sync_channel(),
-            clipboard_path: String::new(),
             diagnostics_path: String::new(),
             message,
         },
     }
-}
-
-#[tauri::command]
-// Publishes explicit clipboard text to the configured sync folder.
-fn sync_write_clipboard(
-    state: State<AppState>,
-    request: SyncWriteRequest,
-) -> Result<SyncItem, String> {
-    write_sync_item("clipboard", request.text, &state.source_id)
-}
-
-#[tauri::command]
-// Reads the latest clipboard text from the configured sync folder.
-fn sync_read_clipboard() -> Result<Option<SyncItem>, String> {
-    read_sync_item("clipboard")
 }
 
 #[tauri::command]
