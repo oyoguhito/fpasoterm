@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.2
+
+- Removed the retired `Synced` titlebar/status wording from sync diagnostics and setup prompts.
+- Added `--version` and `-v` to both the Node launcher and packaged app binary.
+- Documented Windows overwrite-update checks for verifying the installed executable version.
+
 ## 1.3.0
 
 - Added folder-based sync for explicit clipboard text and diagnostics using local sync folders such as Google Drive for desktop.

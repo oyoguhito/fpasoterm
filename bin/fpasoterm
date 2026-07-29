@@ -17,11 +17,13 @@ const {
   resolvePluginSelector,
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
+const packageJson = require(path.join(root, 'package.json'));
 
 const helpText = `Usage: fpasoterm [options]
 
 Options:
   -h, --help                    Show this help.
+  -v, --version                 Show the fpasoterm version.
   -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
@@ -85,6 +87,10 @@ function parseArgs(argv) {
 
     if (arg === '--help' || arg === '-h') {
       return { help: true };
+    }
+
+    if (arg === '--version' || arg === '-v') {
+      return { help: false, version: true };
     }
 
     if (arg === '--foreground' || arg === '-F') {
@@ -219,6 +225,7 @@ function parseArgs(argv) {
 
   return {
     help: false,
+    version: false,
     foreground,
     dev,
     showConfig,
@@ -236,6 +243,11 @@ function parseArgs(argv) {
     disablePlugins,
     runtimeArgs,
   };
+}
+
+// Prints the package version without starting the desktop process.
+function printVersion() {
+  console.log(`fpasoterm ${packageJson.version}`);
 }
 
 // Selects the npm executable in a way that works on Windows and Unix.
@@ -622,7 +634,7 @@ async function setupSync(options) {
   const defaultPath = currentSync.path || defaultSyncPath();
   const defaultChannel = currentSync.channel || 'default';
   const localDefaultLogDirectory = path.join(path.dirname(targetPath), 'logs');
-  const syncedDefaultLogDirectory = currentLogging.directory || path.join(defaultPath, 'logs');
+  const syncDefaultLogDirectory = currentLogging.directory || path.join(defaultPath, 'logs');
 
   printSyncSetupHelp();
   console.log(`Config file: ${targetPath}`);
@@ -638,7 +650,7 @@ async function setupSync(options) {
     console.log('Answer y only when you want raw terminal output logs stored in the selected sync folder.');
     const enableLogs = isYes(await askQuestion(rl, 'Store terminal output logs in the sync folder? (y/N)', 'N'), false);
     const logDirectory = enableLogs
-      ? await askQuestion(rl, 'Synced terminal log directory', syncedDefaultLogDirectory)
+      ? await askQuestion(rl, 'Terminal log directory', syncDefaultLogDirectory)
       : currentLogging.directory || '';
 
     const resolvedSyncPath = expandHome(syncPath);
@@ -917,6 +929,8 @@ try {
   const options = parseArgs(process.argv.slice(2));
   if (options.help) {
     process.stdout.write(helpText);
+  } else if (options.version) {
+    printVersion();
   } else if (updatePluginConfig(options)) {
     // The config command has completed without starting the desktop process.
   } else if (options.resetWindowState) {

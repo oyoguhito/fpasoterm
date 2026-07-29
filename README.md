@@ -107,6 +107,14 @@ fpasoterm
 ```
 
 The npm package name and command are both `fpasoterm`.
+Check the installed version without opening a window:
+
+```sh
+fpasoterm --version
+fpasoterm -v
+```
+
+On Windows, run the same check against the installed executable after replacing an older installer build. If the old UI is still visible but `fpasoterm --version` prints the older version, the previous executable is still the one being launched from `Path` or the Start menu.
 
 During development, link the package to expose a `fpasoterm` command:
 
@@ -491,6 +499,13 @@ fpasoterm
 fpasoterm --help
 ```
 
+起動せずに version を確認:
+
+```sh
+fpasoterm --version
+fpasoterm -v
+```
+
 一時的な設定上書き:
 
 ```sh
@@ -583,6 +598,8 @@ fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 Windows の packaged `fpasoterm.exe` を直接起動した場合、`--show-config` は
 解決済み runtime config を JSON で出力します。Node launcher を使える場合は
 TOML と plugin load detail を表示します。
+Windows で古い installer から上書き更新した後は `fpasoterm --version` を確認してください。
+古い UI が表示され、かつ `--version` も古い version を返す場合、`Path`、Start menu、pinned shortcut のいずれかが古い executable を起動しています。起動中の fpasoterm を閉じ、新しい installer を再実行してから更新後の shortcut で起動してください。
 
 `config.toml` の plugin を有効化・無効化:
 
