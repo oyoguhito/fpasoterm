@@ -9,6 +9,7 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 14
+lineHeight = 1.12
 backgroundOpacity = 0.8
 fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
 termName = "xterm-256color"

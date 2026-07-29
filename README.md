@@ -231,7 +231,8 @@ $configPath = Resolve-Path .\examples\config\runtime-appearance.toml
 Runtime config application keeps the current shell session running. It applies
 live window and terminal appearance settings such as `window.title`,
 `window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`,
-`terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`.
+`terminal.lineHeight`, `terminal.fontFamily`, `terminal.backgroundOpacity`, and
+`terminal.theme`.
 Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
 
 Inspect the resolved settings and plugin load status without launching:
@@ -298,6 +299,7 @@ rememberBounds = true
 frame = false
 [terminal]
 fontSize = 15
+lineHeight = 1.12
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [terminal.theme]
@@ -339,13 +341,15 @@ fpasoterm --reset-window-state
 
 The full default configuration and plugin setup are documented in [Configuration](docs/config.en.md). Sample configs are available in [examples/config](examples/config), and sample TypeScript plugins are available in [examples/plugins](examples/plugins).
 
-For maintenance workflows across machines, fpasoterm can share explicit
-clipboard text and diagnostics through a local sync folder such as Google Drive
-for desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
+For maintenance workflows across machines, fpasoterm can share diagnostics and
+terminal output logs through a local sync folder such as Google Drive for
+desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
 Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
-Terminal output logs can also be written with `Log Start` / `Log Stop`; point
-`logging.directory` at the same synced folder when you want those logs shared.
+Terminal output logs can be written with `Log Start` / `Log Stop` and inspected
+with `Log Show`; `Log Show` displays the active log or the last log closed by
+`Log Stop`. Point `logging.directory` at the same synced folder when you want
+those logs shared.
 
 Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
@@ -357,11 +361,17 @@ The project icon is a PNG asset:
 extra/logo/fpasoterm.png
 ```
 
-The desktop entry uses `Icon=fpasoterm`; ChromeOS/Linux launchers resolve that name through the hicolor icon theme files under:
+The desktop entry uses `Icon=io.github.oyoguhito.fpasoterm`; ChromeOS/Linux launchers resolve that name through the hicolor icon theme files under:
 
 ```text
 extra/linux/icons/hicolor/
 ```
+
+The installed entry uses `StartupWMClass=io.github.oyoguhito.fpasoterm`, and
+Linux builds enable the GTK application id. This lets ChromeOS match the running
+window back to the desktop entry, so the shelf shows the fpasoterm icon and
+hover name instead of a generic runtime icon. The installer also writes a
+legacy `fpasoterm` icon alias for environments that prefer short icon names.
 
 For unpacked checkout installs, `npm run install:desktop` writes the installed
 desktop entry with an absolute `Exec=` path to the local wrapper and no
@@ -370,9 +380,10 @@ and also falls back to common `node` paths. This lets the ChromeOS launcher
 start fpasoterm from the icon even when it does not inherit the user's shell
 `PATH`.
 
-Linux builds do not enable GTK application-id activation. This keeps ChromeOS
-from treating a second launcher start as an activation of the existing window,
-so multiple fpasoterm windows can be opened.
+Linux builds enable GTK application-id matching for correct ChromeOS shelf
+identity. If a window manager treats repeated launcher starts as activation of
+the existing window, start additional instances from the terminal with the
+`fpasoterm` command.
 
 When packaging a macOS `.app` bundle, use the generated icon at:
 
@@ -559,7 +570,7 @@ $configPath = Resolve-Path .\examples\config\runtime-appearance.toml
 
 runtime config 適用では、現在の shell session は維持されます。
 `window.title`、`window.titlebarColor`、`window.width`、`window.height`、
-`terminal.fontSize`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。
+`terminal.fontSize`、`terminal.lineHeight`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。
 `terminal.shell` のように新しい PTY が必要な設定は次回起動時に反映されます。
 
 起動せずに解決済み設定と plugin 読み込み状況を確認:
@@ -621,6 +632,7 @@ fpasoterm は以下の設定を読み込みます。
 ```toml
 [terminal]
 fontSize = 15
+lineHeight = 1.12
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [ime]
@@ -648,10 +660,10 @@ api.terminal.options.cursorBlink = true;
 
 全デフォルト設定と plugin 設定は [設定](docs/config.ja.md) にまとめています。設定サンプルは [examples/config](examples/config)、TypeScript plugin のサンプルは [examples/plugins](examples/plugins) にあります。
 
-複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、明示的にコピーした clipboard text と diagnostics を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
+複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
-terminal output log は `Log Start` / `Log Stop` で取得できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+terminal output log は `Log Start` / `Log Stop` で取得し、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
 
 npm registry から global install する場合:
 

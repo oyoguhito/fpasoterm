@@ -84,7 +84,7 @@ function installDesktopEntry(commandPath) {
   const target = path.join(applicationsDir, 'io.github.oyoguhito.fpasoterm.desktop');
   const desktop = fs.readFileSync(source, 'utf8')
     .replace(/^Exec=.*$/m, `Exec=${desktopExec(commandPath)}`)
-    .replace(/^Icon=.*$/m, 'Icon=fpasoterm');
+    .replace(/^Icon=.*$/m, 'Icon=io.github.oyoguhito.fpasoterm');
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, desktop);
   console.log(`${source} -> ${target}`);
@@ -154,10 +154,10 @@ installDesktopEntry(commandPath);
 removeFile(path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'));
 
 for (const size of iconSizes) {
-  copyFile(
-    path.join(root, 'extra', 'linux', 'icons', 'hicolor', `${size}x${size}`, 'apps', 'fpasoterm.png'),
-    path.join(iconsDir, `${size}x${size}`, 'apps', 'fpasoterm.png'),
-  );
+  const sourceIcon = path.join(root, 'extra', 'linux', 'icons', 'hicolor', `${size}x${size}`, 'apps', 'fpasoterm.png');
+  const targetIconDir = path.join(iconsDir, `${size}x${size}`, 'apps');
+  copyFile(sourceIcon, path.join(targetIconDir, 'fpasoterm.png'));
+  copyFile(sourceIcon, path.join(targetIconDir, 'io.github.oyoguhito.fpasoterm.png'));
 }
 
 runOptional('update-desktop-database', [applicationsDir]);

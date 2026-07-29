@@ -9,6 +9,7 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 15
+lineHeight = 1.12
 backgroundOpacity = 0.8
 scrollback = 3000
 termName = "xterm-256color"

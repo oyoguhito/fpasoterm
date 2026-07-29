@@ -1,6 +1,6 @@
 # Sync Folder
 
-fpasoterm can share explicit clipboard text and diagnostics through a local folder that is synchronized by another tool, such as Google Drive for desktop, OneDrive, Dropbox, Syncthing, or rsync.
+fpasoterm can share diagnostics and terminal output logs through a local folder that is synchronized by another tool, such as Google Drive for desktop, OneDrive, Dropbox, Syncthing, or rsync.
 
 fpasoterm does not call the Google Drive API. It does not require OAuth, API keys, or a Google Cloud project. Google Drive is only responsible for syncing files that fpasoterm writes to a local folder.
 
@@ -40,7 +40,7 @@ On ChromeOS, if folders such as `shared` and `temp` are shared with Linux, `--se
 
 `Sync channel` is a name that separates sync data inside the same sync folder. In normal use, keep `default`.
 
-Only fpasoterm instances with the same `path` and the same `channel` share clipboard text, diagnostics, and logs in the same location. If ChromeOS and Windows should share the same clipboard sync, use the same channel name on both machines.
+Only fpasoterm instances with the same `path` and the same `channel` share diagnostics and logs in the same location. If ChromeOS and Windows should share the same sync area, use the same channel name on both machines.
 
 Examples:
 
@@ -145,11 +145,8 @@ enabled = true
 provider = "folder"
 path = "~/Google Drive/fpasoterm-sync"
 channel = "work"
-clipboard = true
 diagnostics = true
-pasteRequiresConfirm = true
 maxBytes = 1048576
-ttlSeconds = 86400
 ```
 
 Use the same `path` and `channel` on the other fpasoterm instance. If your Google Drive folder uses another name, set `path` to that exact local directory.
@@ -172,27 +169,33 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 For `channel = "work"`, fpasoterm writes:
 
 ```text
-<sync path>/work/clipboard.json
 <sync path>/work/diagnostics.json
 ```
 
-These files contain JSON payloads with `kind`, `channel`, `sourceId`, `updatedAt`, and `text`.
+`diagnostics.json` contains a JSON payload with `kind`, `channel`, `sourceId`, `updatedAt`, and `text`.
 
 ## Usage
 
-When sync is enabled, the titlebar shows:
+When sync is enabled, the titlebar shows a compact `Sync:` status. fpasoterm automatically writes a debounced diagnostics snapshot to `diagnostics.json` as diagnostics change. The snapshot contains the current in-memory diagnostics ring buffer, which is the most recent fpasoterm diagnostics/debug log lines from this app session. It is for troubleshooting fpasoterm itself, such as config loading, PTY events, renderer errors, and sync status. It is not the terminal output log.
 
-The titlebar `Sync` menu provides:
+To make the titlebar show no sync status and stop writing `diagnostics.json`, disable sync in `config.toml`:
 
-- `Copy Selection`: writes the selected terminal text to `clipboard.json`. If no text is selected, it writes the current local clipboard text.
-- `Pull to Clipboard`: reads `clipboard.json` and copies the text to the local OS clipboard. It does not paste directly into the terminal.
-- `Write Diagnostics`: writes recent fpasoterm diagnostics/debug logs to `diagnostics.json`. This is not the terminal output log.
+```toml
+[sync]
+enabled = false
+```
 
-`Pull to Clipboard` does not paste directly into the terminal. It copies text to the local OS clipboard first, so you can review it and paste intentionally.
+Clearing `sync.path` also disables sync because there is no destination folder. After editing `config.toml`, restart fpasoterm or apply the config from the running terminal.
+
+In short, `sync.enabled = false` is the setting for a local-only session with no Sync status.
 
 ## Terminal Output Logs
 
-Sync folder diagnostics are separate from terminal output logging. The titlebar `Log Start` button records raw terminal output to a local log file, and `Log Stop` closes that file. By default logs are written under `~/.config/fpasoterm/User/logs`.
+Sync folder diagnostics are separate from terminal output logging. The titlebar `Log Start` button records raw terminal output to a local log file, `Log Stop` closes that file, and `Log Show` displays the active log or the last log closed by `Log Stop`. `Log Show` removes common ANSI/control sequences for readability, while the saved log file remains raw PTY output. By default logs are written under `~/.config/fpasoterm/User/logs`.
+
+In `Log Show`, selecting part of the displayed log and pressing `Copy` copies only that selection. If nothing is selected, `Copy` copies the whole displayed log.
+
+When running tmux, screen, byobu, or herdr, fpasoterm receives the already-rendered PTY output stream. It cannot reliably know which multiplexer pane produced each byte, so pane-specific logging should be done with the multiplexer itself, such as `tmux capture-pane` or a pane-level logging feature.
 
 When `--setup-sync` asks `Store terminal output logs in the sync folder?`, choose `N` or press Enter if you do not want terminal output logs in the sync folder. This is the normal choice.
 
@@ -227,7 +230,7 @@ In PowerShell:
 
 ## Security
 
-Only explicitly copied text and diagnostics are synchronized. fpasoterm does not synchronize full terminal output automatically.
+Only diagnostics are synchronized automatically by the sync status feature. fpasoterm does not synchronize full terminal output automatically.
 
 Terminal logs may contain command output, prompts, and other sensitive data. If `logging.directory` points to a synced folder, protect that folder appropriately.
 

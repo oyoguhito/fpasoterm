@@ -75,6 +75,7 @@ removeFile(path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'));
 for (const size of iconSizes) {
   const iconDir = path.join(iconsDir, `${size}x${size}`, 'apps');
   removeFile(path.join(iconDir, 'fpasoterm.png'));
+  removeFile(path.join(iconDir, 'io.github.oyoguhito.fpasoterm.png'));
   removeEmptyDir(iconDir);
   removeEmptyDir(path.dirname(iconDir));
 }

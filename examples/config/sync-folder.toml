@@ -7,11 +7,8 @@ enabled = true
 provider = "folder"
 path = "~/Google Drive/fpasoterm-sync"
 channel = "default"
-clipboard = true
 diagnostics = true
-pasteRequiresConfirm = true
 maxBytes = 1048576
-ttlSeconds = 86400
 
 [logging]
 enabled = true
