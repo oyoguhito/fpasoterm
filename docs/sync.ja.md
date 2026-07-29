@@ -176,9 +176,9 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 
 ## 使用方法
 
-sync が有効な場合、titlebar に `Sync:` status が表示されます。fpasoterm は diagnostics が変わった時に debounce して、`diagnostics.json` へ diagnostics snapshot を自動書き込みします。snapshot の内容は、この app session で保持している in-memory diagnostics ring buffer、つまり直近の fpasoterm diagnostics/debug log です。これは config 読み込み、PTY event、renderer error、sync status など fpasoterm 自体の調査用で、terminal output log ではありません。
+sync が有効な場合、fpasoterm は diagnostics が変わった時に debounce して、`diagnostics.json` へ diagnostics snapshot を自動書き込みします。snapshot の内容は、この app session で保持している in-memory diagnostics ring buffer、つまり直近の fpasoterm diagnostics/debug log です。これは config 読み込み、PTY event、renderer error、sync folder activity など fpasoterm 自体の調査用で、terminal output log ではありません。
 
-titlebar に sync status を表示せず、`diagnostics.json` の書き込みも止めたい場合は、`config.toml` で sync を無効にします。
+`diagnostics.json` の書き込みを止めたい場合は、`config.toml` で sync を無効にします。
 
 ```toml
 [sync]
@@ -187,7 +187,7 @@ enabled = false
 
 `sync.path` を空にした場合も、書き込み先が無いため sync は無効になります。`config.toml` を編集した後は、fpasoterm を再起動するか、起動中の terminal から config を適用してください。
 
-要点として、`sync.enabled = false` が Sync status を出さないローカル専用の設定です。
+要点として、`sync.enabled = false` が sync folder diagnostics を書き込まないローカル専用の設定です。
 
 ## Terminal Output Logs
 
@@ -230,7 +230,7 @@ PowerShell の場合:
 
 ## セキュリティ
 
-sync status 機能で自動同期されるのは diagnostics だけです。terminal 全出力は自動同期しません。
+sync folder diagnostics 機能で自動同期されるのは diagnostics だけです。terminal 全出力は自動同期しません。
 
 terminal log には command output、prompt、その他の機密情報が含まれる可能性があります。`logging.directory` を同期フォルダに向ける場合は、そのフォルダの保護に注意してください。
 
