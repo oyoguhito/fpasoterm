@@ -34,7 +34,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.3.3');
+assert.equal(packageJson.version, '1.3.4');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -485,6 +485,12 @@ assert.match(rustMain, /wl-paste/);
 assert.match(rustMain, /xclip/);
 assert.match(rustMain, /pbpaste/);
 assert.match(rustMain, /Get-Clipboard -Raw/);
+assert.match(rustMain, /WINDOWS_CF_UNICODETEXT/);
+assert.match(rustMain, /read_windows_clipboard_native/);
+assert.match(rustMain, /write_windows_clipboard_native/);
+assert.match(rustMain, /String::from_utf16_lossy/);
+assert.match(rustMain, /SetClipboardData\(WINDOWS_CF_UNICODETEXT/);
+assert.match(rustMain, /text\.encode_utf16\(\)/);
 assert.match(rustMain, /read_windows_clipboard_with_powershell/);
 assert.match(rustMain, /write_windows_clipboard_with_powershell/);
 assert.match(rustMain, /windows_clipboard_temp_path/);
