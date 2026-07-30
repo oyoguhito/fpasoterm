@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.4
+
+- Fixed Windows clipboard handling for Japanese paths copied from `Log Show` by writing native UTF-16 `CF_UNICODETEXT` clipboard data directly.
+
 ## 1.3.3
 
 - Removed the retired `Sync:` titlebar status UI entirely while keeping silent sync diagnostics snapshots.

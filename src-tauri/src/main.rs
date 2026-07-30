@@ -10,9 +10,25 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use std::process::Output;
 use std::process::{Command, Stdio};
+#[cfg(target_os = "windows")]
+use std::{ptr, slice};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::Foundation::GlobalFree;
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::DataExchange::{
+    CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
+    SetClipboardData,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Memory::{
+    GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
+
+#[cfg(target_os = "windows")]
+const WINDOWS_CF_UNICODETEXT: u32 = 13;
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1640,6 +1656,93 @@ fn read_clipboard_with_commands(commands: &[(&str, &[&str])]) -> Result<String, 
 }
 
 #[cfg(target_os = "windows")]
+// Opens the Windows clipboard for a short native read/write operation.
+fn open_windows_clipboard() -> Result<(), String> {
+    let opened = unsafe { OpenClipboard(ptr::null_mut()) };
+    if opened == 0 {
+        Err("OpenClipboard failed".to_string())
+    } else {
+        Ok(())
+    }
+}
+
+#[cfg(target_os = "windows")]
+// Reads Windows clipboard text from the native UTF-16 CF_UNICODETEXT format.
+fn read_windows_clipboard_native() -> Result<String, String> {
+    let available = unsafe { IsClipboardFormatAvailable(WINDOWS_CF_UNICODETEXT) };
+    if available == 0 {
+        return Ok(String::new());
+    }
+
+    open_windows_clipboard()?;
+    let result = unsafe {
+        let handle = GetClipboardData(WINDOWS_CF_UNICODETEXT);
+        if handle.is_null() {
+            Err("GetClipboardData(CF_UNICODETEXT) failed".to_string())
+        } else {
+            let locked = GlobalLock(handle) as *const u16;
+            if locked.is_null() {
+                Err("GlobalLock clipboard data failed".to_string())
+            } else {
+                let unit_capacity = GlobalSize(handle) / std::mem::size_of::<u16>();
+                let units = slice::from_raw_parts(locked, unit_capacity);
+                let len = units
+                    .iter()
+                    .position(|unit| *unit == 0)
+                    .unwrap_or(unit_capacity);
+                let text = String::from_utf16_lossy(&units[..len]);
+                let _ = GlobalUnlock(handle);
+                Ok(text)
+            }
+        }
+    };
+    unsafe {
+        CloseClipboard();
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
+// Writes Windows clipboard text as native UTF-16 CF_UNICODETEXT to avoid code page loss.
+fn write_windows_clipboard_native(text: &str) -> Result<(), String> {
+    let mut wide_text: Vec<u16> = text.encode_utf16().collect();
+    wide_text.push(0);
+    let byte_len = wide_text.len() * std::mem::size_of::<u16>();
+
+    open_windows_clipboard()?;
+    let result = unsafe {
+        let handle = GlobalAlloc(GMEM_MOVEABLE, byte_len);
+        if handle.is_null() {
+            Err("GlobalAlloc clipboard data failed".to_string())
+        } else {
+            let locked = GlobalLock(handle) as *mut u16;
+            if locked.is_null() {
+                let _ = GlobalFree(handle);
+                Err("GlobalLock clipboard data failed".to_string())
+            } else {
+                ptr::copy_nonoverlapping(wide_text.as_ptr(), locked, wide_text.len());
+                let _ = GlobalUnlock(handle);
+
+                if EmptyClipboard() == 0 {
+                    let _ = GlobalFree(handle);
+                    Err("EmptyClipboard failed".to_string())
+                } else if SetClipboardData(WINDOWS_CF_UNICODETEXT, handle).is_null() {
+                    let _ = GlobalFree(handle);
+                    Err("SetClipboardData(CF_UNICODETEXT) failed".to_string())
+                } else {
+                    // SetClipboardData owns the handle after success.
+                    Ok(())
+                }
+            }
+        }
+    };
+    unsafe {
+        CloseClipboard();
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
 // Removes the UTF-8 BOM that Windows PowerShell may write with Set-Content -Encoding UTF8.
 fn strip_utf8_bom(text: String) -> String {
     if let Some(stripped) = text.strip_prefix('\u{feff}') {
@@ -1829,7 +1932,8 @@ fn clipboard_read() -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        return read_windows_clipboard_with_powershell();
+        return read_windows_clipboard_native()
+            .or_else(|_| read_windows_clipboard_with_powershell());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1852,7 +1956,8 @@ fn clipboard_write(text: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        return write_windows_clipboard_with_powershell(&text);
+        return write_windows_clipboard_native(&text)
+            .or_else(|_| write_windows_clipboard_with_powershell(&text));
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
