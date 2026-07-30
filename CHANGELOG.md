@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.3.3
+
+- Removed the retired `Sync:` titlebar status UI entirely while keeping silent sync diagnostics snapshots.
+- Fixed Windows clipboard copy/paste of Japanese paths from `Log Show` by routing PowerShell clipboard fallback through UTF-8 temporary files.
+
 ## 1.3.2
 
 - Removed the retired `Synced` titlebar/status wording from sync diagnostics and setup prompts.

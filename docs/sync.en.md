@@ -176,9 +176,9 @@ For `channel = "work"`, fpasoterm writes:
 
 ## Usage
 
-When sync is enabled, the titlebar shows a compact `Sync:` status. fpasoterm automatically writes a debounced diagnostics snapshot to `diagnostics.json` as diagnostics change. The snapshot contains the current in-memory diagnostics ring buffer, which is the most recent fpasoterm diagnostics/debug log lines from this app session. It is for troubleshooting fpasoterm itself, such as config loading, PTY events, renderer errors, and sync status. It is not the terminal output log.
+When sync is enabled, fpasoterm automatically writes a debounced diagnostics snapshot to `diagnostics.json` as diagnostics change. The snapshot contains the current in-memory diagnostics ring buffer, which is the most recent fpasoterm diagnostics/debug log lines from this app session. It is for troubleshooting fpasoterm itself, such as config loading, PTY events, renderer errors, and sync folder activity. It is not the terminal output log.
 
-To make the titlebar show no sync status and stop writing `diagnostics.json`, disable sync in `config.toml`:
+To stop writing `diagnostics.json`, disable sync in `config.toml`:
 
 ```toml
 [sync]
@@ -187,7 +187,7 @@ enabled = false
 
 Clearing `sync.path` also disables sync because there is no destination folder. After editing `config.toml`, restart fpasoterm or apply the config from the running terminal.
 
-In short, `sync.enabled = false` is the setting for a local-only session with no Sync status.
+In short, `sync.enabled = false` is the setting for a local-only session with no sync-folder diagnostics writes.
 
 ## Terminal Output Logs
 
@@ -230,7 +230,7 @@ In PowerShell:
 
 ## Security
 
-Only diagnostics are synchronized automatically by the sync status feature. fpasoterm does not synchronize full terminal output automatically.
+Only diagnostics are synchronized automatically by the sync-folder diagnostics feature. fpasoterm does not synchronize full terminal output automatically.
 
 Terminal logs may contain command output, prompts, and other sensitive data. If `logging.directory` points to a synced folder, protect that folder appropriately.
 

@@ -8,8 +8,6 @@ const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
-const syncMenu = document.getElementById('sync-menu');
-const syncStatusElement = document.getElementById('sync-status');
 const logMenu = document.getElementById('log-menu');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
@@ -931,21 +929,12 @@ function syncEnabled() {
   return sync.enabled === true && sync.provider === 'folder' && Boolean(String(sync.path || '').trim());
 }
 
-// Updates the compact sync status label in the titlebar.
-function setSyncStatus(label) {
-  if (syncStatusElement) {
-    syncStatusElement.textContent = label;
-  }
-}
-
 // Publishes the backend diagnostics ring buffer without creating a feedback loop.
 async function writeDiagnosticsSnapshot() {
   if (!syncDiagnosticsEnabled || !window.fpasoterm?.syncWriteDiagnostics) {
     return;
   }
-  setSyncStatus('Sync: Writing');
   const item = await window.fpasoterm.syncWriteDiagnostics();
-  setSyncStatus(item.text ? 'Sync: Updated' : 'Sync: Empty');
   console.error(`sync diagnostics auto-wrote bytes=${item.text.length} channel=${item.channel}`);
 }
 
@@ -959,7 +948,6 @@ function scheduleSyncDiagnosticsWrite(delayMs = 1200) {
   }
   syncDiagnosticsTimer = setTimeout(() => {
     writeDiagnosticsSnapshot().catch((error) => {
-      setSyncStatus('Sync: Error');
       console.error(`sync diagnostics auto-write failed: ${error}`);
     });
   }, delayMs);
@@ -968,9 +956,6 @@ function scheduleSyncDiagnosticsWrite(delayMs = 1200) {
 // Enables automatic diagnostics sync only when [sync] is configured.
 async function installSyncControls() {
   syncDiagnosticsEnabled = false;
-  if (syncMenu) {
-    syncMenu.hidden = true;
-  }
   if (!syncEnabled()) {
     return;
   }
@@ -981,11 +966,7 @@ async function installSyncControls() {
     return;
   }
 
-  if (syncMenu) {
-    syncMenu.hidden = false;
-  }
   syncDiagnosticsEnabled = true;
-  setSyncStatus('Sync: Ready');
   showDiagnostic(`sync folder enabled channel=${status.channel} path=${status.path}`);
   scheduleSyncDiagnosticsWrite(0);
 }

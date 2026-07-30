@@ -7,7 +7,9 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
+#[cfg(not(target_os = "windows"))]
+use std::process::Output;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
@@ -1600,6 +1602,7 @@ fn diagnostics_log(app: AppHandle, message: String) {
 }
 
 // Runs a clipboard read command and lets Unix builds use coreutils timeout when available.
+#[cfg(not(target_os = "windows"))]
 fn clipboard_read_output(program: &str, args: &[&str]) -> Result<Output, std::io::Error> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
@@ -1614,6 +1617,7 @@ fn clipboard_read_output(program: &str, args: &[&str]) -> Result<Output, std::io
 }
 
 // Attempts each command until one can read text from the OS clipboard.
+#[cfg(not(target_os = "windows"))]
 fn read_clipboard_with_commands(commands: &[(&str, &[&str])]) -> Result<String, String> {
     let mut errors = Vec::new();
     for (program, args) in commands {
@@ -1635,7 +1639,139 @@ fn read_clipboard_with_commands(commands: &[(&str, &[&str])]) -> Result<String, 
     Err(errors.join("; "))
 }
 
+#[cfg(target_os = "windows")]
+// Removes the UTF-8 BOM that Windows PowerShell may write with Set-Content -Encoding UTF8.
+fn strip_utf8_bom(text: String) -> String {
+    if let Some(stripped) = text.strip_prefix('\u{feff}') {
+        stripped.to_string()
+    } else {
+        text
+    }
+}
+
+#[cfg(target_os = "windows")]
+// Builds a per-process temporary path for passing clipboard text without stdin encoding loss.
+fn windows_clipboard_temp_path(name: &str) -> PathBuf {
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|value| value.as_millis())
+        .unwrap_or(0);
+    env::temp_dir().join(format!(
+        "fpasoterm-{name}-{}-{timestamp}.txt",
+        std::process::id()
+    ))
+}
+
+#[cfg(target_os = "windows")]
+// Reads Windows clipboard text through a UTF-8 temp file to avoid PowerShell stdout code pages.
+fn read_windows_clipboard_with_powershell() -> Result<String, String> {
+    let path = windows_clipboard_temp_path("clipboard-read");
+    let path_string = path.display().to_string();
+    let commands: [(&str, [&str; 5]); 2] = [
+        (
+            "pwsh.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-Clipboard -Raw | Set-Content -LiteralPath $args[0] -Encoding UTF8",
+                &path_string,
+            ],
+        ),
+        (
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Get-Clipboard -Raw | Set-Content -LiteralPath $args[0] -Encoding UTF8",
+                &path_string,
+            ],
+        ),
+    ];
+
+    let mut errors = Vec::new();
+    for (program, args) in commands {
+        match Command::new(program)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let text = fs::read_to_string(&path).map_err(|error| error.to_string());
+                let _ = fs::remove_file(&path);
+                return text.map(strip_utf8_bom);
+            }
+            Ok(output) => errors.push(format!(
+                "{} exited with {}: {}",
+                program,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            )),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    let _ = fs::remove_file(&path);
+    Err(errors.join("; "))
+}
+
+#[cfg(target_os = "windows")]
+// Writes Windows clipboard text through a UTF-8 temp file so Japanese paths survive Set-Clipboard.
+fn write_windows_clipboard_with_powershell(text: &str) -> Result<(), String> {
+    let path = windows_clipboard_temp_path("clipboard-write");
+    fs::write(&path, text.as_bytes()).map_err(|error| error.to_string())?;
+    let path_string = path.display().to_string();
+    let commands: [(&str, [&str; 5]); 2] = [
+        (
+            "pwsh.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Set-Clipboard -Value (Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8)",
+                &path_string,
+            ],
+        ),
+        (
+            "powershell.exe",
+            [
+                "-NoProfile",
+                "-NonInteractive",
+                "-Command",
+                "Set-Clipboard -Value (Get-Content -LiteralPath $args[0] -Raw -Encoding UTF8)",
+                &path_string,
+            ],
+        ),
+    ];
+
+    let mut errors = Vec::new();
+    for (program, args) in commands {
+        match Command::new(program)
+            .args(args)
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let _ = fs::remove_file(&path);
+                return Ok(());
+            }
+            Ok(output) => errors.push(format!(
+                "{} exited with {}: {}",
+                program,
+                output.status,
+                String::from_utf8_lossy(&output.stderr)
+            )),
+            Err(error) => errors.push(format!("{program}: {error}")),
+        }
+    }
+    let _ = fs::remove_file(&path);
+    Err(errors.join("; "))
+}
+
 // Attempts each command until one can write text to the OS clipboard.
+#[cfg(not(target_os = "windows"))]
 fn write_clipboard_with_commands(commands: &[(&str, &[&str])], text: &str) -> Result<(), String> {
     let mut errors = Vec::new();
     for (program, args) in commands {
@@ -1693,16 +1829,7 @@ fn clipboard_read() -> Result<String, String> {
 
     #[cfg(target_os = "windows")]
     {
-        return read_clipboard_with_commands(&[
-            (
-                "pwsh.exe",
-                &["-NoProfile", "-Command", "Get-Clipboard -Raw"],
-            ),
-            (
-                "powershell.exe",
-                &["-NoProfile", "-Command", "Get-Clipboard -Raw"],
-            ),
-        ]);
+        return read_windows_clipboard_with_powershell();
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
@@ -1725,27 +1852,7 @@ fn clipboard_write(text: String) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        return write_clipboard_with_commands(
-            &[
-                (
-                    "pwsh.exe",
-                    &[
-                        "-NoProfile",
-                        "-Command",
-                        "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
-                    ],
-                ),
-                (
-                    "powershell.exe",
-                    &[
-                        "-NoProfile",
-                        "-Command",
-                        "Set-Clipboard -Value ([Console]::In.ReadToEnd())",
-                    ],
-                ),
-            ],
-            &text,
-        );
+        return write_windows_clipboard_with_powershell(&text);
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
