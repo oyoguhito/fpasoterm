@@ -10,14 +10,14 @@ fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクト�
 - xterm.js が renderer process で Terminal UI を描画します。
 - portable-pty が Rust backend で shell 付き PTY を作成します。
 - renderer と backend の通信は Tauri command / event に限定します。
-- terminal clipboard integration は multiplexer からの OSC 52 copy request を処理し、paste shortcut は backend の OS clipboard fallback 経由で PTY へ送ります。
-- terminal output logging は fpasoterm が受け取る PTY stream を記録します。fpasoterm は split-pane を認識しないため、pane 単位の log は tmux、screen、byobu、herdr などの multiplexer 側に委ねます。
+- terminal clipboard integration は選択した terminal text の copy、multiplexer からの OSC 52 copy request、paste shortcut の backend OS clipboard fallback 経由送信を処理します。
+- terminal output logging は fpasoterm が受け取る PTY stream から一般的な terminal control sequence を除去して記録します。fpasoterm は split-pane を認識しないため、pane 単位の log は tmux、screen、byobu、herdr などの multiplexer 側に委ねます。
 
 ## ChromeOS Linux の入力方針
 
 fpasoterm は `かな` / `英数` などの日本語キーボードキーを横取りしません。IME の切替と composition は platform webview と OS に任せます。
 
-terminal paste は `Ctrl+Shift+V` と右クリック paste で OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。
+terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。titlebar の Log menu には keyboard 操作用の `Copy` / `Paste` button も表示します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は `Ctrl+Shift+V`、Log menu の `Paste` button、右クリック paste で OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。
 
 npm binary 名は `fpasoterm` です。Linux では `--disable-dmabuf` により、WebKitGTK の描画診断用に `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定できます。
 既定では launcher はコンソールから切り離して起動します。debug 時は `--foreground` で接続したままにできます。
@@ -73,7 +73,7 @@ renderer plugin は `window.fpasotermPluginApi` から terminal、fit addon、�
 diagnostics/fpasoterm-debug.log
 ```
 
-debug panel の Copy ボタンは desktop runtime の clipboard API を使うため、xterm.js が通常のコピー操作を奪う場合でもログをコピーできます。
+diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shift+C` copy 経路を使います。
 
 ## 非目標
 

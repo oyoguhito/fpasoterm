@@ -96,9 +96,11 @@ frame = false
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
+fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 lineHeight = 1.12
+minimumContrastRatio = 4.5
+rescaleOverlappingGlyphs = true
 backgroundOpacity = 0.8
 scrollback = 1000
 termName = "xterm-256color"
@@ -152,11 +154,11 @@ maxBytes = 10485760
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` puts Japanese-capable fonts first so half-width kana and CJK characters are preferred during rendering. `minimumContrastRatio` is enabled by default so ANSI foreground colors that are too close to the dark terminal background remain readable. `rescaleOverlappingGlyphs` is enabled by default to reduce CJK glyph clipping and overlap. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. See [Sync Folder](sync.en.md).
-- `logging`: terminal output logging. `Log Start` / `Log Stop` writes raw PTY output to a local file, and `Log Show` displays the active log or the last log closed by `Log Stop`. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
+- `logging`: terminal output logging. `Log Start` / `Log Stop` writes readable terminal output with control sequences removed to a local file, and `Log Show` opens a selector so you can choose which captured `terminal-*.log` to view. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
@@ -225,7 +227,7 @@ $configPath = Resolve-Path .\examples\config\runtime-appearance.toml
 [Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
-Runtime config application keeps the current shell session running. It applies live window and terminal appearance settings such as `window.title`, `window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`, `terminal.lineHeight`, `terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`. Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
+Runtime config application keeps the current shell session running. It applies live window and terminal appearance settings such as `window.title`, `window.titlebarColor`, `window.width`, `window.height`, `terminal.fontSize`, `terminal.lineHeight`, `terminal.minimumContrastRatio`, `terminal.fontFamily`, `terminal.backgroundOpacity`, and `terminal.theme`. Settings that require a new PTY, such as `terminal.shell`, take effect on the next launch.
 
 TOML does not allow the same table to be defined more than once. To test values such as `frame = true`, edit the existing `[window]` section. Adding another `[window]` section at the end of the file causes a config parse error.
 

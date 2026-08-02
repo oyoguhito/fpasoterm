@@ -96,9 +96,11 @@ frame = false
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace"
+fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 lineHeight = 1.12
+minimumContrastRatio = 4.5
+rescaleOverlappingGlyphs = true
 backgroundOpacity = 0.8
 scrollback = 1000
 termName = "xterm-256color"
@@ -152,11 +154,11 @@ maxBytes = 10485760
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は半角カタカナや CJK 文字を優先して描画するため、日本語対応フォントを先頭にしています。`minimumContrastRatio` は既定で有効で、暗い terminal background と近すぎる ANSI foreground 色も読めるように補正します。`rescaleOverlappingGlyphs` は CJK glyph の欠けや重なりを抑えるため既定で有効です。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: diagnostics を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。詳細は [Sync Folder](sync.ja.md) を参照してください。
-- `logging`: terminal output logging 設定。`Log Start` / `Log Stop` で raw PTY output を local file に記録し、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
+- `logging`: terminal output logging 設定。`Log Start` / `Log Stop` で制御シーケンスを除去した readable terminal output を local file に記録し、`Log Show` で captured `terminal-*.log` の一覧から表示対象を選択できます。log panel では選択した停止済み log の削除ができ、`Delete All` は実行前に確認し、承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 
@@ -225,7 +227,7 @@ $configPath = Resolve-Path .\examples\config\runtime-appearance.toml
 [Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
 ```
 
-runtime config 適用では、現在の shell session は維持されます。`window.title`、`window.titlebarColor`、`window.width`、`window.height`、`terminal.fontSize`、`terminal.lineHeight`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。`terminal.shell` のように新しい PTY が必要な設定は次回起動時に反映されます。
+runtime config 適用では、現在の shell session は維持されます。`window.title`、`window.titlebarColor`、`window.width`、`window.height`、`terminal.fontSize`、`terminal.lineHeight`、`terminal.minimumContrastRatio`、`terminal.fontFamily`、`terminal.backgroundOpacity`、`terminal.theme` など、起動中に反映可能な表示設定を適用します。`terminal.shell` のように新しい PTY が必要な設定は次回起動時に反映されます。
 
 TOML では同じ table を複数回定義できません。`frame = true` などを試す場合は、既存の `[window]` section 内の値を編集してください。ファイル末尾へ新しく `[window]` を追加すると config parse error になります。
 

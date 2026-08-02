@@ -10,14 +10,14 @@ fpasoterm is a desktop terminal application focused on Japanese input in ChromeO
 - xterm.js renders the terminal UI in the renderer process.
 - portable-pty creates the shell-backed pseudoterminal in the Rust backend.
 - The renderer communicates with the backend through narrow Tauri commands and events.
-- Terminal clipboard integration handles OSC 52 copy requests from multiplexers and sends paste shortcuts through a backend OS clipboard fallback.
-- Terminal output logging records the PTY stream that fpasoterm receives. Pane-specific logging is delegated to multiplexers such as tmux, screen, byobu, or herdr because fpasoterm does not implement split-pane awareness.
+- Terminal clipboard integration copies selected terminal text, handles OSC 52 copy requests from multiplexers, and sends paste shortcuts through a backend OS clipboard fallback.
+- Terminal output logging records the PTY stream that fpasoterm receives after removing common terminal control sequences for readability. Pane-specific logging is delegated to multiplexers such as tmux, screen, byobu, or herdr because fpasoterm does not implement split-pane awareness.
 
 ## ChromeOS Linux Input Policy
 
 fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to the platform webview and the operating system.
 
-For terminal paste, `Ctrl+Shift+V` and right-click paste read the OS clipboard through the backend and send it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard.
+For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The titlebar Log menu also exposes `Copy` and `Paste` buttons for keyboard-driven operation. Right-click copies when a terminal selection exists; otherwise it pastes. For terminal paste, `Ctrl+Shift+V`, the Log menu `Paste` button, and right-click paste read the OS clipboard through the backend and send it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard.
 
 The npm binary name is `fpasoterm`. On Linux, `--disable-dmabuf` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` for WebKitGTK rendering diagnostics.
 By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
@@ -73,7 +73,7 @@ Diagnostics are written to:
 diagnostics/fpasoterm-debug.log
 ```
 
-The debug panel also exposes a Copy button that uses the desktop runtime's clipboard API.
+The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as the terminal selection.
 
 ## Non-goals
 

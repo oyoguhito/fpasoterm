@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.3.5
+
+- Preserved half-width katakana in terminal display and readable terminal logs instead of normalizing it to full-width katakana.
+- Added terminal selection copy support for `Ctrl+Shift+C`, right-click copy when text is selected, and host WebView clipboard integration for paste into other applications.
+- Removed the Log Show copy button and made Log Show textarea selections copy with `Ctrl+Shift+C`.
+- Added keyboard-accessible Log menu Copy/Paste buttons and arrow-key menu navigation.
+
 ## 1.3.4
 
 - Fixed Windows clipboard handling for Japanese paths copied from `Log Show` by writing native UTF-16 `CF_UNICODETEXT` clipboard data directly.

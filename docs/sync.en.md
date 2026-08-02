@@ -191,9 +191,9 @@ In short, `sync.enabled = false` is the setting for a local-only session with no
 
 ## Terminal Output Logs
 
-Sync folder diagnostics are separate from terminal output logging. The titlebar `Log Start` button records raw terminal output to a local log file, `Log Stop` closes that file, and `Log Show` displays the active log or the last log closed by `Log Stop`. `Log Show` removes common ANSI/control sequences for readability, while the saved log file remains raw PTY output. By default logs are written under `~/.config/fpasoterm/User/logs`.
+Sync folder diagnostics are separate from terminal output logging. The titlebar `Log Start` button records terminal output to a local log file, `Log Stop` closes that file, and `Log Show` opens a selector so you can choose which captured `terminal-*.log` to view. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after confirmation. Saved log files are normalized for readability by removing common ANSI/control sequences, OSC sequences, and CR/control characters or replacing them with line breaks. By default logs are written under `~/.config/fpasoterm/User/logs`.
 
-In `Log Show`, selecting part of the displayed log and pressing `Copy` copies only that selection. If nothing is selected, `Copy` copies the whole displayed log.
+In `Log Show`, select the displayed log text and press `Ctrl+Shift+C` to copy that selection through the same clipboard path used by terminal selection copy.
 
 When running tmux, screen, byobu, or herdr, fpasoterm receives the already-rendered PTY output stream. It cannot reliably know which multiplexer pane produced each byte, so pane-specific logging should be done with the multiplexer itself, such as `tmux capture-pane` or a pane-level logging feature.
 
