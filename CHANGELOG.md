@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.3.6
+
+- Improved Log menu keyboard labels and shortcuts for logging, copy, and paste operations.
+- Added keyboard-accessible Log Show search with match counts, next/previous navigation, visible focus states, and panel-contained focus cycling.
+- Replaced native delete confirmations with an in-panel confirmation dialog so Delete Selected and Delete All keep focus inside the log panel.
+
 ## 1.3.5
 
 - Preserved half-width katakana in terminal display and readable terminal logs instead of normalizing it to full-width katakana.

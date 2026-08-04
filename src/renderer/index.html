@@ -12,12 +12,12 @@
       <span id="window-title">fpasoterm</span>
       <div id="window-controls" aria-label="Window controls">
         <div id="log-menu">
-          <button id="log-menu-toggle" type="button" aria-label="Open log menu" aria-expanded="false">Log</button>
+          <button id="log-menu-toggle" type="button" aria-label="Open log menu" aria-expanded="false" aria-keyshortcuts="Control+Shift+L">Log (^L)</button>
           <div id="log-menu-items" role="menu" hidden>
-            <button id="terminal-log-toggle" type="button" role="menuitem">Start</button>
-            <button id="terminal-log-show" type="button" role="menuitem">Show</button>
-            <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy Ctrl+Shift+C</button>
-            <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste Ctrl+Shift+V</button>
+            <button id="terminal-log-toggle" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+S">Start (^S)</button>
+            <button id="terminal-log-show" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+P">Show (^P)</button>
+            <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (^C)</button>
+            <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (^V)</button>
           </div>
         </div>
         <button id="minimize-window" type="button" aria-label="Minimize">-</button>
@@ -35,11 +35,14 @@
     <div class="resize-corner resize-corner-top-right" data-resize-direction="northEast"></div>
     <div class="resize-corner resize-corner-bottom-right" data-resize-direction="southEast"></div>
     <div class="resize-corner resize-corner-bottom-left" data-resize-direction="southWest"></div>
-    <section id="diagnostics-panel" hidden>
+    <section id="diagnostics-panel" hidden tabindex="-1">
       <div class="diagnostics-toolbar">
         <span id="diagnostics-title">Diagnostics</span>
         <div class="diagnostics-actions">
           <select id="terminal-log-select" hidden aria-label="Terminal log files"></select>
+          <input id="terminal-log-search" type="search" hidden aria-label="Search terminal log text" placeholder="Search">
+          <button id="terminal-log-search-next" type="button" hidden aria-label="Search next match. Use N for next and P for previous.">Search</button>
+          <span id="terminal-log-search-status" hidden aria-live="polite"></span>
           <button id="terminal-log-show-selected" type="button" hidden>Show Selected</button>
           <button id="terminal-log-delete-selected" type="button" hidden>Delete Selected</button>
           <button id="terminal-log-delete-all" type="button" hidden>Delete All</button>
@@ -48,6 +51,16 @@
       </div>
       <textarea id="diagnostics" readonly aria-label="Diagnostics"></textarea>
       <div id="diagnostics-path"></div>
+      <div id="terminal-log-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-log-confirm-title">
+        <div class="terminal-log-confirm-card">
+          <div id="terminal-log-confirm-title">Confirm</div>
+          <pre id="terminal-log-confirm-message"></pre>
+          <div class="terminal-log-confirm-actions">
+            <button id="terminal-log-confirm-ok" type="button">OK</button>
+            <button id="terminal-log-confirm-cancel" type="button">Cancel</button>
+          </div>
+        </div>
+      </div>
     </section>
     <script src="./vendor/xterm/xterm.js"></script>
     <script src="./vendor/addon-fit/addon-fit.js"></script>

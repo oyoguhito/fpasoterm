@@ -158,7 +158,7 @@ maxBytes = 10485760
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: diagnostics を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。詳細は [Sync Folder](sync.ja.md) を参照してください。
-- `logging`: terminal output logging 設定。`Log Start` / `Log Stop` で制御シーケンスを除去した readable terminal output を local file に記録し、`Log Show` で captured `terminal-*.log` の一覧から表示対象を選択できます。log panel では選択した停止済み log の削除ができ、`Delete All` は実行前に確認し、承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
+- `logging`: terminal output logging 設定。`Log (^L)` menu は `Ctrl+Shift+L` で開き、`Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で制御シーケンスを除去した readable terminal output を local file に記録または停止し、`Show (^P)` または `Ctrl+Shift+P` で captured `terminal-*.log` の一覧から表示対象を選択できます。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 

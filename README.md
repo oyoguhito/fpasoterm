@@ -354,10 +354,15 @@ terminal output logs through a local sync folder such as Google Drive for
 desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
 Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
-Terminal output logs can be written with `Log Start` / `Log Stop` and inspected
-with `Log Show`; `Log Show` displays the active log or the last log closed by
-`Log Stop`. Point `logging.directory` at the same synced folder when you want
-those logs shared.
+Terminal output logs can be written with the `Log (^L)` menu `Start (^S)` /
+`Stop (^S)` actions or `Ctrl+Shift+S`, and inspected with `Show (^P)` or `Ctrl+Shift+P`.
+`Show` displays the active log or the last log closed by `Stop`. Point
+`logging.directory` at the same synced folder when you want those logs shared.
+The log panel includes a search field and `Search` button for selecting and
+scrolling to the next matching string in the displayed log. `N` moves to the
+next match, `P` moves to the previous match, and `j` / `k` provide the same
+navigation when the log text area has focus. Arrow keys remain available for
+normal log scrolling.
 
 Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
@@ -680,7 +685,8 @@ api.terminal.options.cursorBlink = true;
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
-terminal output log は `Log Start` / `Log Stop` で取得し、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+terminal output log は `Log (^L)` menu の `Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で取得し、`Show (^P)` または `Ctrl+Shift+P` で active log または `Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
 npm registry から global install する場合:
 
