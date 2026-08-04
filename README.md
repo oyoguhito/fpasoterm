@@ -4,7 +4,7 @@
 
 Cross-platform terminal app built with Tauri, xterm.js, and a Rust PTY bridge.
 
-fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not plan to manage split panes or multiple windows itself.
+fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
 
 日本語の概要は [日本語](#日本語) を参照してください。
 
@@ -16,7 +16,7 @@ Japanese IME composition and keyboard layout switching are handled by the OS web
 
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
-Debug logs are also written to `diagnostics/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
+Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 
@@ -380,11 +380,11 @@ The desktop entry uses `Icon=io.github.oyoguhito.fpasoterm`; ChromeOS/Linux laun
 extra/linux/icons/hicolor/
 ```
 
-The installed entry uses `StartupWMClass=io.github.oyoguhito.fpasoterm`, and
-Linux builds enable the GTK application id. This lets ChromeOS match the running
-window back to the desktop entry, so the shelf shows the fpasoterm icon and
-hover name instead of a generic runtime icon. The installer also writes a
-legacy `fpasoterm` icon alias for environments that prefer short icon names.
+The installed entry uses `StartupWMClass=fpasoterm` and keeps the GTK
+application id disabled so multiple fpasoterm windows can be started from the
+CLI or launcher. ChromeOS/Linux launchers still resolve the shelf icon from
+`Icon=io.github.oyoguhito.fpasoterm` for the ChromeOS shelf. The installer also writes a legacy
+`fpasoterm` icon alias for environments that prefer short icon names.
 
 For unpacked checkout installs, `npm run install:desktop` writes the installed
 desktop entry with an absolute `Exec=` path to the local wrapper and no
@@ -393,10 +393,15 @@ and also falls back to common `node` paths. This lets the ChromeOS launcher
 start fpasoterm from the icon even when it does not inherit the user's shell
 `PATH`.
 
-Linux builds enable GTK application-id matching for correct ChromeOS shelf
-identity. If a window manager treats repeated launcher starts as activation of
-the existing window, start additional instances from the terminal with the
-`fpasoterm` command.
+The GTK application id is disabled so multiple fpasoterm processes can run.
+When multiple fpasoterm windows are open, use `Tile (^T)` in the titlebar window
+menu, or press `Ctrl+Shift+T`,
+to arrange them into a grid on the current monitor. Windows and X11 support
+native placement. Wayland compositors may reject application-controlled
+positions; the terminal remains usable and the diagnostic panel reports the
+placement error.
+Use `Close All (^X)` in the same menu, or press `Ctrl+Shift+X`, to close every
+running fpasoterm window.
 
 When packaging a macOS `.app` bundle, use the generated icon at:
 
@@ -468,7 +473,7 @@ GitHub Actions runs the same check set on pushes and pull requests.
 
 fpasoterm は Tauri、xterm.js、Rust PTY bridge を使った Terminal アプリです。ChromeOS Linux での日本語入力を重視しつつ、将来的に他 OS へ展開しやすい構成にしています。
 
-screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身で画面分割や複数 window の管理は行いません。
+screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身では画面分割を行いませんが、titlebar の `Tile` button で複数 window を並べられます。
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
@@ -713,7 +718,7 @@ fpasoterm
 
 ```sh
 FPASOTERM_DEBUG_KEYS=1 ./scripts/run
-cat diagnostics/fpasoterm-debug.log
+cat ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 アイコンを変更する場合は `extra/logo/fpasoterm.png` を差し替え、以下を実行します。

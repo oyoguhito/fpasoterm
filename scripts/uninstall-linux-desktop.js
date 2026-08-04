@@ -70,6 +70,7 @@ function runOptional(command, args) {
 
 removeFile(path.join(binHome, 'fpasoterm'));
 removeFile(path.join(applicationsDir, 'io.github.oyoguhito.fpasoterm.desktop'));
+removeFile(path.join(applicationsDir, 'fpasoterm.desktop'));
 removeFile(path.join(applicationsDir, 'io.github.oyoguhito.FpasoTerm.desktop'));
 
 for (const size of iconSizes) {

@@ -47,7 +47,7 @@ body {
 #window-title {
   grid-column: 2;
   min-width: 0;
-  max-width: max(120px, calc(100vw - 430px));
+  max-width: max(120px, calc(100vw - 250px));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,6 +84,10 @@ body {
   display: none;
 }
 
+#window-menu-items[hidden] {
+  display: none;
+}
+
 #log-menu-toggle {
   width: auto;
   min-width: 74px;
@@ -98,6 +102,46 @@ body {
   height: 24px;
   app-region: no-drag;
   -webkit-app-region: no-drag;
+}
+
+#window-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#window-menu-toggle {
+  width: 28px;
+  padding: 0;
+  font-size: 16px;
+}
+
+#window-menu-items {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 10020;
+  display: grid;
+  min-width: 128px;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(17, 21, 26, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#window-menu-items button {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  text-align: left;
+  white-space: nowrap;
 }
 
 #log-menu-toggle[data-active="true"] {
@@ -377,7 +421,8 @@ body {
   display: none;
 }
 
-#terminal-log-confirm {
+#terminal-log-confirm,
+#close-all-confirm {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -385,6 +430,10 @@ body {
   place-items: center;
   padding: 16px;
   background: rgba(10, 14, 18, 0.72);
+}
+
+#close-all-confirm[hidden] {
+  display: none;
 }
 
 .terminal-log-confirm-card {
@@ -398,6 +447,11 @@ body {
 }
 
 #terminal-log-confirm-title {
+  color: #f5d76e;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#close-all-confirm-title {
   color: #f5d76e;
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }

@@ -14,7 +14,10 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
+    WebviewWindowBuilder, WindowEvent,
+};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::GlobalFree;
 #[cfg(target_os = "windows")]
@@ -117,6 +120,42 @@ struct WindowBounds {
     y: i32,
     width: u32,
     height: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One native window placement delivered to a running fpasoterm process.
+struct ArrangeWindowBounds {
+    pid: u32,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A short-lived broadcast that asks every instance to tile its window.
+struct ArrangeRequest {
+    created_at: u128,
+    windows: Vec<ArrangeWindowBounds>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Renderer-reported available screen area, including ChromeOS shelf/scaling.
+struct ArrangeScreen {
+    width: f64,
+    height: f64,
+    left: f64,
+    top: f64,
+    device_pixel_ratio: f64,
+}
+
+// Keeps a lightweight marker for this process so new windows can avoid stacking
+// exactly on top of already running windows.
+struct InstanceMarker {
+    path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -241,11 +280,25 @@ impl Default for AppState {
     }
 }
 
+impl Drop for InstanceMarker {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the fpasoterm version.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     apply_direct_cli_env_overrides();
+
+    // GTK must select its backend before Tauri initializes. X11 is useful on
+    // ChromeOS/Baguette when Wayland rejects native window positioning.
+    if cfg!(target_os = "linux")
+        && (env::var("FPASOTERM_X11").as_deref() == Ok("1") || cli_has_flag(&["--x11"]))
+    {
+        env::set_var("GDK_BACKEND", "x11");
+    }
 
     if cli_has_flag(&["--help", "-h"]) {
         print_cli_text(HELP_TEXT);
@@ -274,7 +327,10 @@ fn main() {
     tauri::Builder::default()
         .manage(AppState::default())
         .setup(|app| {
-            let config = runtime_config();
+            let mut config = runtime_config();
+            let instance_index = claim_instance_index(app.handle(), &config.config.window.title);
+            apply_instance_identity(&mut config, instance_index);
+            publish_runtime_config(&config);
             append_diagnostic(
                 app.handle(),
                 &format!(
@@ -297,7 +353,7 @@ fn main() {
                         config.config.window.width, config.config.window.height
                     ),
                 );
-                let _ = window.set_min_size(Some(tauri::LogicalSize::new(
+                let _ = window.set_min_size(Some(PhysicalSize::new(
                     config.config.window.min_width,
                     config.config.window.min_height,
                 )));
@@ -308,6 +364,24 @@ fn main() {
                     config.config.window.remember_bounds,
                     restore_size,
                 );
+                start_arrange_listener(
+                    app.handle().clone(),
+                    cache_dir_path()
+                        .join("instances")
+                        .join(format!("{}.pid", std::process::id())),
+                    config.config.window.min_width,
+                    config.config.window.min_height,
+                );
+                let focus_app = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(Duration::from_millis(120));
+                    let app_for_main = focus_app.clone();
+                    let _ = focus_app.run_on_main_thread(move || {
+                        if let Some(window) = app_for_main.get_webview_window("main") {
+                            let _ = window.set_focus();
+                        }
+                    });
+                });
             }
             append_diagnostic(
                 app.handle(),
@@ -339,6 +413,12 @@ fn main() {
             window_minimize,
             window_toggle_maximize,
             window_start_drag,
+            window_arrange,
+            window_close_all,
+            window_confirm_close_all,
+            window_close_all_confirmed,
+            window_focus_main,
+            window_cancel_close_all,
             window_save_bounds,
             window_get_bounds,
             window_set_bounds,
@@ -420,10 +500,22 @@ fn schedule_startup_size_restore(
     remember: bool,
     size: PhysicalSize<u32>,
 ) {
+    let startup_started_at = now_millis();
     std::thread::spawn(move || {
         std::thread::sleep(Duration::from_millis(650));
         let event_app = app.clone();
         let _ = app.run_on_main_thread(move || {
+            if latest_arrange_request_timestamp()
+                .map(|created_at| created_at > startup_started_at)
+                .unwrap_or(false)
+            {
+                append_diagnostic(
+                    &event_app,
+                    "startup window size restore skipped because Tile was requested",
+                );
+                install_window_state_persistence(event_app, window, state_path, remember);
+                return;
+            }
             let before = window.outer_size().ok();
             let _ = window.set_size(size);
             let after = window.outer_size().ok();
@@ -437,6 +529,585 @@ fn schedule_startup_size_restore(
             install_window_state_persistence(event_app, window, state_path, remember);
         });
     });
+}
+
+// Reads the timestamp of the latest cross-process Tile request.
+fn latest_arrange_request_timestamp() -> Option<u128> {
+    let value: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(arrange_request_path()).ok()?).ok()?;
+    value
+        .get("createdAt")
+        .and_then(serde_json::Value::as_u64)
+        .map(u128::from)
+}
+
+// Registers this process and returns the count of live windows with the same
+// configured title. Stale Linux markers are removed by checking /proc/<pid>.
+fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
+    let dir = cache_dir_path().join("instances");
+    if let Err(error) = fs::create_dir_all(&dir) {
+        append_diagnostic(
+            app,
+            &format!("failed to create instance marker dir: {error}"),
+        );
+        return 0;
+    }
+
+    let current_pid = std::process::id();
+    let mut matching_title_count = 0usize;
+    if let Ok(entries) = fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("pid") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let Ok(pid) = stem.parse::<u32>() else {
+                let _ = fs::remove_file(&path);
+                continue;
+            };
+            if pid == current_pid || instance_marker_is_live(pid, &path) {
+                if read_instance_marker_title(&path).as_deref() == Some(title) {
+                    matching_title_count += 1;
+                }
+            } else {
+                let _ = fs::remove_file(&path);
+            }
+        }
+    }
+
+    let marker_path = dir.join(format!("{current_pid}.pid"));
+    let marker = serde_json::json!({
+        "pid": current_pid,
+        "title": title,
+        "createdAt": now_millis()
+    });
+    if let Err(error) = fs::write(&marker_path, marker.to_string()) {
+        append_diagnostic(app, &format!("failed to write instance marker: {error}"));
+        return matching_title_count;
+    }
+    app.manage(InstanceMarker { path: marker_path });
+    append_diagnostic(
+        app,
+        &format!("startup same-title instance index={matching_title_count} title={title}"),
+    );
+    matching_title_count
+}
+
+// Reads the configured title stored in a live instance marker.
+fn read_instance_marker_title(path: &Path) -> Option<String> {
+    let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    value.get("title")?.as_str().map(str::to_string)
+}
+
+// Returns true when a previous marker should still be considered active.
+fn instance_marker_is_live(pid: u32, path: &Path) -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        let _ = path;
+        return Path::new("/proc").join(pid.to_string()).exists();
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        fs::metadata(path)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|modified| modified.elapsed().ok())
+            .map(|age| age < Duration::from_secs(24 * 60 * 60))
+            .unwrap_or(false)
+    }
+}
+
+// Returns the shared local file used to broadcast tile requests between instances.
+fn arrange_request_path() -> PathBuf {
+    cache_dir_path().join("arrange.json")
+}
+
+// Returns the shared request file used to close every running instance.
+fn close_all_request_path() -> PathBuf {
+    cache_dir_path().join("close-all.json")
+}
+
+// Listens for placement broadcasts while this process owns its instance marker.
+fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, min_height: u32) {
+    std::thread::spawn(move || {
+        let mut last_request = now_millis();
+        // Ignore a close request left by an earlier application session. Only
+        // requests created after this process started may close this window.
+        let last_close_request =
+            request_timestamp(&close_all_request_path()).unwrap_or_else(now_millis);
+        loop {
+            if !marker_path.exists() {
+                break;
+            }
+            if let Ok(text) = fs::read_to_string(arrange_request_path()) {
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) {
+                    let created_at = request
+                        .get("createdAt")
+                        .and_then(serde_json::Value::as_u64)
+                        .map(u128::from)
+                        .unwrap_or_default();
+                    if created_at > last_request {
+                        last_request = created_at;
+                        if let Some(bounds) = request
+                            .get("windows")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|windows| {
+                                windows.iter().find(|item| {
+                                    item.get("pid").and_then(serde_json::Value::as_u64)
+                                        == Some(u64::from(std::process::id()))
+                                })
+                            })
+                        {
+                            let result = app.run_on_main_thread({
+                                let app = app.clone();
+                                let bounds = bounds.clone();
+                                move || {
+                                    if let Some(window) = app.get_webview_window("main") {
+                                        let x = bounds
+                                            .get("x")
+                                            .and_then(serde_json::Value::as_i64)
+                                            .unwrap_or_default() as i32;
+                                        let y = bounds
+                                            .get("y")
+                                            .and_then(serde_json::Value::as_i64)
+                                            .unwrap_or_default() as i32;
+                                        let width = bounds
+                                            .get("width")
+                                            .and_then(serde_json::Value::as_u64)
+                                            .unwrap_or(640) as u32;
+                                        let height = bounds
+                                            .get("height")
+                                            .and_then(serde_json::Value::as_u64)
+                                            .unwrap_or(480) as u32;
+                                        // Tiling may require a cell smaller than the normal
+                                        // interactive minimum. Restore the minimum afterwards.
+                                        let _ = window.set_min_size(None::<tauri::LogicalSize<u32>>);
+                                        let size_result = window.set_size(PhysicalSize::new(width, height));
+                                        let position_result = window.set_position(PhysicalPosition::new(x, y));
+                                        let _ = window.set_min_size(Some(PhysicalSize::new(
+                                            min_width,
+                                            min_height,
+                                        )));
+                                        let actual_position = window.outer_position().ok();
+                                        if actual_position
+                                            .map(|position| position.x != x || position.y != y)
+                                            .unwrap_or(true)
+                                        {
+                                            append_diagnostic(
+                                                &app,
+                                                &format!(
+                                                    "arrange position rejected pid={} requested=({}, {}) actual={:?}",
+                                                    std::process::id(), x, y, actual_position
+                                                ),
+                                            );
+                                        }
+                                        append_diagnostic(
+                                            &app,
+                                            &format!(
+                                                "arrange window pid={} x={} y={} width={} height={} size={:?} position={:?}",
+                                                std::process::id(), x, y, width, height, size_result, position_result
+                                            ),
+                                        );
+                                    }
+                                }
+                            });
+                            if let Err(error) = result {
+                                append_diagnostic(
+                                    &app,
+                                    &format!("arrange dispatch failed: {error}"),
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+            if let Some(created_at) = request_timestamp(&close_all_request_path()) {
+                if created_at > last_close_request {
+                    let close_app = app.clone();
+                    let result = app.run_on_main_thread(move || {
+                        if let Some(window) = close_app.get_webview_window("main") {
+                            let _ = window.close();
+                        }
+                    });
+                    if let Err(error) = result {
+                        append_diagnostic(&app, &format!("close all dispatch failed: {error}"));
+                    }
+                    break;
+                }
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+}
+
+// Reads a createdAt timestamp from a shared inter-process request file.
+fn request_timestamp(path: &Path) -> Option<u128> {
+    let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
+    value
+        .get("createdAt")
+        .and_then(serde_json::Value::as_u64)
+        .map(u128::from)
+}
+
+#[tauri::command]
+// Collects live instance PIDs and writes a grid placement request for all of them.
+fn window_arrange(app: AppHandle, screen: Option<ArrangeScreen>) -> Result<String, String> {
+    let current = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    let config = runtime_config();
+    let monitor = current
+        .current_monitor()
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| "current monitor is not available".to_string())?;
+    let (monitor_position, monitor_size, scale_factor, coordinate_scale, screen_source) =
+        if let Some(screen) = screen {
+            // screen.avail* is reported in logical pixels by WebKit. Tauri's
+            // native window APIs use physical pixels, including on ChromeOS.
+            let coordinate_scale = screen.device_pixel_ratio.max(0.1);
+            (
+                PhysicalPosition::new(
+                    (screen.left * coordinate_scale).round() as i32,
+                    (screen.top * coordinate_scale).round() as i32,
+                ),
+                PhysicalSize::new(
+                    (screen.width * coordinate_scale).round().max(1.0) as u32,
+                    (screen.height * coordinate_scale).round().max(1.0) as u32,
+                ),
+                screen.device_pixel_ratio,
+                coordinate_scale,
+                "renderer-available-scaled",
+            )
+        } else {
+            (
+                *monitor.position(),
+                *monitor.size(),
+                monitor.scale_factor(),
+                1.0,
+                "native-monitor",
+            )
+        };
+    let marker_dir = cache_dir_path().join("instances");
+    let mut pids = Vec::new();
+    if let Ok(entries) = fs::read_dir(&marker_dir) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("pid") {
+                continue;
+            }
+            let Some(stem) = path.file_stem().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            let Ok(pid) = stem.parse::<u32>() else {
+                continue;
+            };
+            if instance_marker_is_live(pid, &path) {
+                pids.push(pid);
+            }
+        }
+    }
+    let current_pid = std::process::id();
+    if !pids.contains(&current_pid) {
+        pids.push(current_pid);
+    }
+    pids.sort_unstable();
+
+    let count = pids.len();
+    let count_u32 = count as u32;
+    // Prefer two rows and as many columns as the monitor can hold at the
+    // configured minimum width. This gives 4x2 for 8 windows and 5x2 for 10.
+    let preferred_columns = if count <= 2 {
+        count_u32.max(1)
+    } else {
+        count_u32.saturating_add(1) / 2
+    };
+    let minimum_width = config.config.window.min_width.max(1);
+    let width_capacity = (monitor_size.width / minimum_width).max(1);
+    let columns = preferred_columns.min(width_capacity).max(1);
+    let rows = ((count as u32).saturating_add(columns).saturating_sub(1)) / columns;
+    // Leave a small physical gap so compositor rounding cannot make adjacent
+    // windows touch or overlap at scaled display resolutions.
+    let tile_gap = 6u32;
+    let horizontal_gaps = tile_gap.saturating_mul(columns.saturating_add(1));
+    let vertical_gaps = tile_gap.saturating_mul(rows.saturating_add(1));
+    let available_width = monitor_size.width.saturating_sub(horizontal_gaps);
+    let available_height = monitor_size.height.saturating_sub(vertical_gaps);
+    let footprint_width = (available_width / columns).max(1);
+    let footprint_height = (available_height / rows.max(1)).max(1);
+    let cell_width = footprint_width;
+    let cell_height = footprint_height;
+    if cell_width < config.config.window.min_width || cell_height < config.config.window.min_height
+    {
+        append_diagnostic(
+            &app,
+            &format!(
+                "arrange tile minimum override cells={} footprint={}x{} calculated={}x{} minimum={}x{}",
+                columns * rows,
+                footprint_width,
+                footprint_height,
+                cell_width,
+                cell_height,
+                config.config.window.min_width,
+                config.config.window.min_height,
+            ),
+        );
+    }
+    let windows = pids
+        .iter()
+        .enumerate()
+        .map(|(index, pid)| ArrangeWindowBounds {
+            pid: *pid,
+            x: monitor_position.x
+                + tile_gap as i32
+                + (index as u32 % columns) as i32 * (footprint_width + tile_gap) as i32,
+            y: monitor_position.y
+                + tile_gap as i32
+                + (index as u32 / columns) as i32 * (footprint_height + tile_gap) as i32,
+            width: cell_width,
+            height: cell_height,
+        })
+        .collect::<Vec<_>>();
+    let request = ArrangeRequest {
+        created_at: now_millis(),
+        windows: windows.clone(),
+    };
+    let request_text = serde_json::to_string(&request).map_err(|error| error.to_string())?;
+    let request_path = arrange_request_path();
+    fs::create_dir_all(cache_dir_path()).map_err(|error| error.to_string())?;
+    let temporary_path =
+        request_path.with_file_name(format!("arrange-{}.json.tmp", std::process::id()));
+    fs::write(&temporary_path, request_text).map_err(|error| error.to_string())?;
+    // Windows does not replace an existing destination during rename, so remove
+    // the previous broadcast after the complete temporary file is written.
+    let _ = fs::remove_file(&request_path);
+    fs::rename(&temporary_path, &request_path).map_err(|error| error.to_string())?;
+    // Apply the clicked window immediately as well as broadcasting to the
+    // other processes, so a listener timing race cannot leave it unchanged.
+    if let Some(bounds) = windows.iter().find(|bounds| bounds.pid == current_pid) {
+        let clear_min_result = current.set_min_size(None::<tauri::LogicalSize<u32>>);
+        let size_result = current.set_size(PhysicalSize::new(bounds.width, bounds.height));
+        let position_result = current.set_position(PhysicalPosition::new(bounds.x, bounds.y));
+        let restore_min_result = current.set_min_size(Some(PhysicalSize::new(
+            config.config.window.min_width,
+            config.config.window.min_height,
+        )));
+        append_diagnostic(
+            &app,
+            &format!(
+                "arrange immediate pid={} bounds=({}, {}, {}, {}) clear_min={:?} size={:?} position={:?} restore_min={:?}",
+                current_pid,
+                bounds.x,
+                bounds.y,
+                bounds.width,
+                bounds.height,
+                clear_min_result,
+                size_result,
+                position_result,
+                restore_min_result
+            ),
+        );
+    }
+    append_diagnostic(
+        &app,
+        &format!(
+            "arrange requested windows={count} cells={} grid={}x{} gap={} scale={} coordinate_scale={} source={} pids={:?} monitor={:?}",
+            columns * rows,
+            columns,
+            rows,
+            tile_gap,
+            scale_factor,
+            coordinate_scale,
+            screen_source,
+            pids,
+            monitor_size
+        ),
+    );
+    Ok(format!("arranged {count} fpasoterm windows"))
+}
+
+#[tauri::command]
+// Broadcasts a close request and closes the current window immediately.
+fn window_close_all(app: AppHandle) -> Result<String, String> {
+    broadcast_close_all_request()?;
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.close();
+    }
+    Ok("closed all fpasoterm windows".to_string())
+}
+
+// Opens a separate native confirmation window so the prompt is visible even
+// when the terminal content is busy or visually obscured.
+#[tauri::command]
+fn window_confirm_close_all(app: AppHandle) -> Result<String, String> {
+    if let Some(window) = app.get_webview_window("close-all-confirm") {
+        let _ = window.set_focus();
+        return Ok("close confirmation already open".to_string());
+    }
+    let window = WebviewWindowBuilder::new(
+        &app,
+        "close-all-confirm",
+        WebviewUrl::App("confirm.html".into()),
+    )
+    .title("Confirm close all fpasoterm windows")
+    .inner_size(420.0, 190.0)
+    .min_inner_size(360.0, 160.0)
+    .resizable(false)
+    .focused(true)
+    .center()
+    .build()
+    .map_err(|error| error.to_string())?;
+    // Make the new native window receive keyboard input immediately.
+    let _ = window.set_focus();
+    Ok("close confirmation opened".to_string())
+}
+
+// Restores keyboard focus to the terminal after a confirmation window closes.
+#[tauri::command]
+fn window_focus_main(app: AppHandle) -> Result<(), String> {
+    let window = app
+        .get_webview_window("main")
+        .ok_or_else(|| "main window is not available".to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+// Closes the confirmation window and restores focus to the terminal atomically.
+#[tauri::command]
+fn window_cancel_close_all(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("close-all-confirm") {
+        let _ = window.close();
+    }
+    window_focus_main(app)
+}
+
+// Broadcasts the close request from the independent confirmation window.
+#[tauri::command]
+fn window_close_all_confirmed(app: AppHandle) -> Result<String, String> {
+    broadcast_close_all_request()?;
+    if let Some(window) = app.get_webview_window("close-all-confirm") {
+        let _ = window.close();
+    }
+    Ok("closed all fpasoterm windows".to_string())
+}
+
+// Writes one atomic close request consumed by every running fpasoterm process.
+fn broadcast_close_all_request() -> Result<(), String> {
+    let request_path = close_all_request_path();
+    fs::create_dir_all(cache_dir_path()).map_err(|error| error.to_string())?;
+    let request_text = serde_json::json!({ "createdAt": now_millis() }).to_string();
+    let temporary_path =
+        request_path.with_file_name(format!("close-all-{}.json.tmp", std::process::id()));
+    fs::write(&temporary_path, request_text).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(&request_path);
+    fs::rename(&temporary_path, &request_path).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+// Applies a visible suffix and a subtle color variation for same-title windows.
+fn apply_instance_identity(config: &mut RuntimeConfig, instance_index: usize) {
+    if instance_index == 0 {
+        return;
+    }
+
+    config.config.window.title = format!("{}-{}", config.config.window.title, instance_index + 1);
+    config.config.window.titlebar_color =
+        varied_titlebar_color(&config.config.window.titlebar_color, instance_index)
+            .unwrap_or_else(|| config.config.window.titlebar_color.clone());
+}
+
+// Re-publishes startup mutations so renderer-side config_get sees the same title
+// and titlebar color that the native window received during setup.
+fn publish_runtime_config(config: &RuntimeConfig) {
+    if let Ok(value) = serde_json::to_string(config) {
+        env::set_var("FPASOTERM_RUNTIME_CONFIG_JSON", value);
+    }
+}
+
+// Returns a slightly adjusted color for later same-title windows.
+fn varied_titlebar_color(color: &str, instance_index: usize) -> Option<String> {
+    let (red, green, blue, alpha) = parse_css_color(color)?;
+    let amount = (0.12 * ((instance_index + 1) / 2) as f32).min(0.42);
+    let lighten = instance_index % 2 == 1;
+    let adjust = |value: u8| -> u8 {
+        if lighten {
+            value + ((255 - value) as f32 * amount).round() as u8
+        } else {
+            ((value as f32) * (1.0 - amount)).round() as u8
+        }
+    };
+    Some(match alpha {
+        Some(alpha) => format!(
+            "rgba({}, {}, {}, {})",
+            adjust(red),
+            adjust(green),
+            adjust(blue),
+            alpha
+        ),
+        None => format!(
+            "#{:02x}{:02x}{:02x}",
+            adjust(red),
+            adjust(green),
+            adjust(blue)
+        ),
+    })
+}
+
+// Parses common titlebar color formats used by config.toml examples.
+fn parse_css_color(color: &str) -> Option<(u8, u8, u8, Option<String>)> {
+    let source = color.trim();
+    if let Some(hex) = source.strip_prefix('#') {
+        return parse_hex_color(hex);
+    }
+    parse_rgb_color(source)
+}
+
+// Parses #rgb and #rrggbb titlebar colors.
+fn parse_hex_color(hex: &str) -> Option<(u8, u8, u8, Option<String>)> {
+    let expanded = match hex.len() {
+        3 => hex
+            .chars()
+            .flat_map(|character| [character, character])
+            .collect::<String>(),
+        6 => hex.to_string(),
+        _ => return None,
+    };
+    let red = u8::from_str_radix(&expanded[0..2], 16).ok()?;
+    let green = u8::from_str_radix(&expanded[2..4], 16).ok()?;
+    let blue = u8::from_str_radix(&expanded[4..6], 16).ok()?;
+    Some((red, green, blue, None))
+}
+
+// Parses rgb(...) and rgba(...) titlebar colors.
+fn parse_rgb_color(source: &str) -> Option<(u8, u8, u8, Option<String>)> {
+    let inner = source
+        .strip_prefix("rgb(")
+        .and_then(|value| value.strip_suffix(')'))
+        .map(|value| (value, None))
+        .or_else(|| {
+            source
+                .strip_prefix("rgba(")
+                .and_then(|value| value.strip_suffix(')'))
+                .map(|value| (value, Some(())))
+        })?;
+    let parts = inner.0.split(',').map(str::trim).collect::<Vec<_>>();
+    if parts.len() < 3 {
+        return None;
+    }
+    let parse_component = |value: &str| -> Option<u8> {
+        let number = value.parse::<f32>().ok()?;
+        Some(number.round().clamp(0.0, 255.0) as u8)
+    };
+    Some((
+        parse_component(parts[0])?,
+        parse_component(parts[1])?,
+        parse_component(parts[2])?,
+        inner
+            .1
+            .and_then(|_| parts.get(3).map(|value| (*value).to_string())),
+    ))
 }
 
 // Persists window size whenever Tauri reports a resize event.
@@ -682,6 +1353,14 @@ fn home_dir() -> String {
         .unwrap_or_else(|_| ".".to_string())
 }
 
+// Resolves the per-user cache directory used for launcher logs and runtime markers.
+fn cache_dir_path() -> PathBuf {
+    env::var("XDG_CACHE_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(home_dir()).join(".cache"))
+        .join("fpasoterm")
+}
+
 // Reads a non-empty string from a specific TOML section and key.
 fn read_configured_string(config_path: &str, section: &str, key: &str) -> Option<String> {
     let value: toml::Value = toml::from_str(&fs::read_to_string(config_path).ok()?).ok()?;
@@ -889,6 +1568,19 @@ fn read_saved_window_size(state_path: &str) -> Option<(u32, u32)> {
 // Adds one diagnostic message to memory, optional stderr, and the renderer event stream.
 fn append_diagnostic(app: &AppHandle, message: &str) {
     let line = format!("{} {}", chrono_like_timestamp(), message);
+    let diagnostics_file = PathBuf::from(runtime_config().config_dir)
+        .join("logs")
+        .join("fpasoterm-debug.log");
+    if let Some(parent) = diagnostics_file.parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    if let Ok(mut file) = OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&diagnostics_file)
+    {
+        let _ = writeln!(file, "{line}");
+    }
     if let Some(state) = app.try_state::<AppState>() {
         if let Ok(mut diagnostics) = state.diagnostics.lock() {
             diagnostics.push_back(line);
@@ -2098,7 +2790,11 @@ fn diagnostics_text(state: &AppState) -> Result<String, String> {
 #[tauri::command]
 // Keeps the renderer's diagnostics path display compatible with the old UI.
 fn diagnostics_path() -> String {
-    "diagnostics are kept in memory by the Tauri runtime".to_string()
+    PathBuf::from(runtime_config().config_dir)
+        .join("logs")
+        .join("fpasoterm-debug.log")
+        .display()
+        .to_string()
 }
 
 #[tauri::command]

@@ -44,6 +44,7 @@ Options:
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
   -k, --debug-keys              Enable key/composition diagnostics.
+      --x11                     Use the X11 GTK backend for Linux window placement diagnostics.
       --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
@@ -175,6 +176,11 @@ function parseArgs(argv) {
 
     if (arg === '--debug-keys' || arg === '-k') {
       env.FPASOTERM_DEBUG_KEYS = '1';
+      continue;
+    }
+
+    if (arg === '--x11') {
+      env.FPASOTERM_X11 = '1';
       continue;
     }
 
@@ -759,6 +765,13 @@ function buildTauriBinary(options) {
   if (stampedBinary) {
     appendLauncherLog(`launcher build=skip stamped binary=${stampedBinary}`);
     return Promise.resolve(stampedBinary);
+  }
+
+  const currentBinary = findTauriBinary();
+  if (currentBinary) {
+    writeBuildStamp(currentBinary);
+    appendLauncherLog(`launcher build=skip current binary=${currentBinary}`);
+    return Promise.resolve(currentBinary);
   }
 
   appendLauncherLog('launcher build=cargo build');

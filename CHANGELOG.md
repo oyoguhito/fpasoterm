@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.4.0
+
+- Improved Tile sizing by converting renderer logical screen dimensions to native physical pixels with the display device pixel ratio.
+- Added an independent confirmation window for Close All, with keyboard focus, Tab navigation, Cancel, OK, and Escape handling.
+- Prevented stale Close All requests from affecting newly started windows and restored terminal focus after cancellation.
+- Added optional `--x11` support for Linux window placement diagnostics.
+
 ## 1.3.6
 
 - Improved Log menu keyboard labels and shortcuts for logging, copy, and paste operations.
