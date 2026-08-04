@@ -112,7 +112,7 @@ body {
   right: 0;
   z-index: 10020;
   display: grid;
-  min-width: 104px;
+  min-width: 168px;
   gap: 4px;
   padding: 6px;
   border: 1px solid rgba(255, 255, 255, 0.34);
@@ -266,7 +266,7 @@ body {
   width: min(760px, calc(100vw - 16px));
   height: min(320px, calc(100vh - var(--titlebar-height) - 16px));
   display: grid;
-  grid-template-rows: 28px 1fr 22px;
+  grid-template-rows: auto 1fr 22px;
   border: 1px solid #3b4652;
   border-radius: 6px;
   background: #171b21;
@@ -286,8 +286,19 @@ body {
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
-#copy-diagnostics {
+.diagnostics-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+#terminal-log-select {
+  max-width: min(260px, 28vw);
   height: 22px;
+  min-width: 120px;
   border: 1px solid #3b4652;
   border-radius: 4px;
   background: #222932;
@@ -295,12 +306,9 @@ body {
   font: inherit;
 }
 
-.diagnostics-actions {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
+#terminal-log-show-selected,
+#terminal-log-delete-selected,
+#terminal-log-delete-all,
 #close-diagnostics {
   height: 22px;
   border: 1px solid #3b4652;

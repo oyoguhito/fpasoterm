@@ -191,9 +191,9 @@ enabled = false
 
 ## Terminal Output Logs
 
-sync folder の diagnostics と terminal output logging は別機能です。titlebar の `Log Start` ボタンで raw terminal output を local log file に記録し、`Log Stop` で閉じ、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示します。`Log Show` は読みやすさのため一般的な ANSI/control sequence を除去しますが、保存される log file は raw PTY output のままです。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
+sync folder の diagnostics と terminal output logging は別機能です。titlebar の `Log Start` ボタンで terminal output を local log file に記録し、`Log Stop` で閉じ、`Log Show` で captured `terminal-*.log` の一覧から表示対象を選択できます。log panel では選択した停止済み log の削除ができ、`Delete All` は実行前に確認し、承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。保存される log file は読みやすさのため一般的な ANSI/control sequence、OSC sequence、CR/control character を除去または改行へ正規化します。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
 
-`Log Show` では、表示された log の一部を選択して `Copy` を押すと選択範囲だけをコピーします。選択が無い場合は、表示中の log 全体をコピーします。
+`Log Show` では、表示された log text を選択して `Ctrl+Shift+C` を押すと、terminal selection copy と同じ clipboard 経路で選択範囲をコピーします。
 
 tmux、screen、byobu、herdr を使っている場合、fpasoterm が受け取るのは multiplexer が描画した後の PTY output stream です。どの pane がどの byte を出したかを fpasoterm 側で確実に判定できないため、pane 単位の log は `tmux capture-pane` や multiplexer 側の pane logging 機能で取得してください。
 

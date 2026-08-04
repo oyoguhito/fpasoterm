@@ -25,9 +25,11 @@ const defaultConfig = Object.freeze({
     allowTransparency: true,
     cursorBlink: true,
     cursorStyle: 'block',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
+    fontFamily: '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 14,
     lineHeight: 1.12,
+    minimumContrastRatio: 4.5,
+    rescaleOverlappingGlyphs: true,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -109,10 +111,14 @@ rememberBounds = true
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "ui-monospace, SFMono-Regular, Menlo, Consolas, \\"Noto Sans Mono CJK JP\\", monospace"
+fontFamily = "\\"Noto Sans Mono CJK JP\\", \\"Noto Sans CJK JP\\", \\"BIZ UDGothic\\", \\"Hiragino Sans\\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # lineHeight leaves enough vertical room for underscores and descenders.
 lineHeight = 1.12
+# minimumContrastRatio raises foreground colors that are too close to the terminal background.
+minimumContrastRatio = 4.5
+# rescaleOverlappingGlyphs helps CJK and half-width kana glyphs fit terminal cells.
+rescaleOverlappingGlyphs = true
 # backgroundOpacity changes only the terminal background alpha, not text opacity.
 backgroundOpacity = 0.8
 scrollback = 1000
@@ -168,8 +174,9 @@ channel = "default"
 diagnostics = true
 maxBytes = 1048576
 
-# Terminal output logging records raw PTY output when started from the titlebar
-# or an OSC 777 command. The default directory is User/logs.
+# Terminal output logging records readable PTY output with control sequences
+# removed when started from the titlebar or an OSC 777 command.
+# The default directory is User/logs.
 [logging]
 enabled = true
 # Example: directory = "~/Google Drive/fpasoterm-sync/logs"

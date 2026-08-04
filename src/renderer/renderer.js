@@ -3,8 +3,11 @@ const diagnosticsPanel = document.getElementById('diagnostics-panel');
 const diagnosticsTitleElement = document.getElementById('diagnostics-title');
 const diagnosticsElement = document.getElementById('diagnostics');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
-const copyDiagnosticsButton = document.getElementById('copy-diagnostics');
 const closeDiagnosticsButton = document.getElementById('close-diagnostics');
+const terminalLogSelectElement = document.getElementById('terminal-log-select');
+const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
+const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
+const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
@@ -13,6 +16,8 @@ const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
+const terminalCopyButton = document.getElementById('terminal-copy');
+const terminalPasteButton = document.getElementById('terminal-paste');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
@@ -29,9 +34,11 @@ const fallbackConfig = {
     allowTransparency: true,
     cursorBlink: true,
     cursorStyle: 'block',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Consolas, "Noto Sans Mono CJK JP", monospace',
+    fontFamily: '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 14,
     lineHeight: 1.12,
+    minimumContrastRatio: 4.5,
+    rescaleOverlappingGlyphs: true,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -117,7 +124,10 @@ function installTauriApiAdapter() {
     startTerminalLog: (path) => invoke('terminal_log_start', { request: { path: path || null } }),
     stopTerminalLog: () => invoke('terminal_log_stop'),
     terminalLogStatus: () => invoke('terminal_log_status'),
-    showTerminalLog: () => invoke('terminal_log_show'),
+    listTerminalLogs: () => invoke('terminal_log_list'),
+    showTerminalLog: (path) => invoke('terminal_log_show', { request: { path: path || null } }),
+    clearTerminalLog: () => invoke('terminal_log_clear'),
+    deleteTerminalLog: (path) => invoke('terminal_log_delete', { request: { path: path || null } }),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
@@ -129,8 +139,7 @@ function installTauriApiAdapter() {
     },
     copyDiagnostics: async () => {
       const text = await invoke('diagnostics_copy');
-      await navigator.clipboard.writeText(text);
-      return text.length;
+      return writeClipboardText(text);
     },
     getDiagnosticsPath: () => invoke('diagnostics_path'),
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
@@ -336,7 +345,10 @@ function appendDiagnosticLine(message) {
   if (diagnosticLines.length > 80) {
     diagnosticLines.shift();
   }
-  diagnosticsPanelMode = 'diagnostics';
+  if (diagnosticsPanelMode !== 'terminal-log') {
+    diagnosticsPanelMode = 'diagnostics';
+    setTerminalLogPickerVisible(false);
+  }
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
@@ -367,6 +379,11 @@ function printableDiagnosticData(data) {
     .replace(/\r/g, '<CR>')
     .replace(/\n/g, '<LF>\n')
     .replace(/\t/g, '<TAB>');
+}
+
+// Composes decomposed kana marks without changing half-width kana characters.
+function normalizeJapaneseTerminalText(data) {
+  return String(data || '').normalize('NFC');
 }
 
 // Mirrors PTY output outside xterm.js so renderer delivery can be verified.
@@ -438,15 +455,98 @@ async function pasteClipboardToTerminal() {
   sendTerminalInput(normalizePasteText(text), 'paste');
 }
 
-// Writes text to the OS clipboard through the backend, with WebView fallback.
-async function writeClipboardText(text) {
-  try {
-    await window.fpasoterm.writeClipboard(text);
-  } catch (backendError) {
-    showDiagnostic(`backend clipboard write failed: ${backendError}`);
-    await navigator.clipboard.writeText(text);
+// Writes text through the WebView clipboard path used by the host desktop.
+async function writeBrowserClipboardText(text) {
+  if (!navigator.clipboard) {
+    throw new Error('navigator.clipboard is unavailable');
   }
-  return text.length;
+  if (typeof navigator.clipboard.write === 'function' && typeof window.ClipboardItem === 'function') {
+    const item = new window.ClipboardItem({
+      'text/plain': new Blob([text], { type: 'text/plain' }),
+    });
+    await navigator.clipboard.write([item]);
+    return;
+  }
+  await navigator.clipboard.writeText(text);
+}
+
+// Writes text to both host WebView and backend clipboard paths when possible.
+async function writeClipboardText(text) {
+  const value = String(text || '');
+  if (!value) {
+    return 0;
+  }
+
+  const errors = [];
+  let wrote = false;
+  try {
+    await writeBrowserClipboardText(value);
+    wrote = true;
+  } catch (browserError) {
+    errors.push(`browser clipboard: ${browserError}`);
+    showDiagnostic(`browser clipboard write failed: ${browserError}`);
+  }
+
+  try {
+    await window.fpasoterm.writeClipboard(value);
+    wrote = true;
+  } catch (backendError) {
+    errors.push(`backend clipboard: ${backendError}`);
+    showDiagnostic(`backend clipboard write failed: ${backendError}`);
+  }
+
+  if (!wrote) {
+    throw new Error(errors.join('; '));
+  }
+  return value.length;
+}
+
+// Returns the current selected terminal text, if any.
+function selectedTerminalText() {
+  if (!term || typeof term.hasSelection !== 'function' || !term.hasSelection()) {
+    return '';
+  }
+  return term.getSelection();
+}
+
+// Returns diagnostics/log text when the panel has a focused text selection.
+function selectedDiagnosticsClipboardText() {
+  if (diagnosticsPanel.hidden) {
+    return '';
+  }
+  const start = diagnosticsElement.selectionStart;
+  const end = diagnosticsElement.selectionEnd;
+  if (!Number.isInteger(start) || !Number.isInteger(end) || end <= start) {
+    return '';
+  }
+  return diagnosticsElement.value.slice(start, end);
+}
+
+// Selects the text source that should be copied by a user copy gesture.
+function selectedClipboardText() {
+  return selectedDiagnosticsClipboardText() || selectedTerminalText();
+}
+
+// Copies the current xterm.js selection to the OS clipboard.
+async function copyTerminalSelection() {
+  const text = selectedClipboardText();
+  if (!text) {
+    showDiagnostic('terminal copy skipped: no selection');
+    return 0;
+  }
+  const copiedLength = await writeClipboardText(text);
+  showDiagnostic(`selection copied bytes=${copiedLength}`);
+  return copiedLength;
+}
+
+// Asks the WebView to run a native copy event so event.clipboardData can be set.
+function requestTerminalCopyEvent() {
+  try {
+    return typeof document.execCommand === 'function' && document.execCommand('copy');
+  } catch (error) {
+    showDiagnostic(`terminal copy event request failed: ${error}`);
+    return false;
+  }
 }
 
 // Installs explicit paste handling for desktop webviews where xterm defaults can be skipped.
@@ -462,12 +562,32 @@ function installTerminalPasteHandlers() {
 
   terminalElement.addEventListener('contextmenu', (event) => {
     event.preventDefault();
+    if (term?.hasSelection?.()) {
+      copyTerminalSelection().catch((error) => {
+        showDiagnostic(`terminal context copy failed: ${error}`);
+      });
+      return;
+    }
     pasteClipboardToTerminal().catch((error) => {
       showDiagnostic(`terminal context paste failed: ${error}`);
     });
   });
 
   window.addEventListener('keydown', (event) => {
+    const isCopyShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') ||
+      (event.metaKey && event.key.toLowerCase() === 'c');
+    if (isCopyShortcut && selectedClipboardText()) {
+      event.preventDefault();
+      if (requestTerminalCopyEvent()) {
+        return;
+      }
+      copyTerminalSelection().catch((error) => {
+        showDiagnostic(`terminal copy failed: ${error}`);
+      });
+      return;
+    }
+
     const isPasteShortcut =
       (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') ||
       (event.metaKey && event.key.toLowerCase() === 'v');
@@ -477,6 +597,21 @@ function installTerminalPasteHandlers() {
     event.preventDefault();
     pasteClipboardToTerminal().catch((error) => {
       showDiagnostic(`terminal paste failed: ${error}`);
+    });
+  });
+
+  window.addEventListener('copy', (event) => {
+    const text = selectedClipboardText();
+    if (!text) {
+      return;
+    }
+    event.preventDefault();
+    event.clipboardData?.setData('text/plain', text);
+    event.clipboardData?.setData('text', text);
+    window.fpasoterm.writeClipboard(text).then(() => {
+      showDiagnostic(`selection copied via copy event bytes=${text.length}`);
+    }).catch((error) => {
+      showDiagnostic(`copy event backend write failed: ${error}`);
     });
   });
 }
@@ -632,7 +767,16 @@ function applyTerminalAppearance() {
   }
 
   const terminalConfig = appConfig.terminal || {};
-  for (const key of ['cursorBlink', 'cursorStyle', 'fontFamily', 'fontSize', 'lineHeight', 'scrollback']) {
+  for (const key of [
+    'cursorBlink',
+    'cursorStyle',
+    'fontFamily',
+    'fontSize',
+    'lineHeight',
+    'minimumContrastRatio',
+    'rescaleOverlappingGlyphs',
+    'scrollback',
+  ]) {
     if (terminalConfig[key] !== undefined) {
       term.options[key] = terminalConfig[key];
     }
@@ -994,11 +1138,29 @@ function setLogMenuOpen(open) {
   }
   logMenuItems.hidden = !open;
   logMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    const firstItem = logMenuItems.querySelector('button:not([hidden])');
+    firstItem?.focus();
+  }
 }
 
 // Closes the log menu after actions or outside clicks.
 function closeLogMenu() {
   setLogMenuOpen(false);
+}
+
+// Moves keyboard focus inside the compact log menu.
+function focusLogMenuItem(delta) {
+  if (!logMenuItems || logMenuItems.hidden) {
+    return;
+  }
+  const items = Array.from(logMenuItems.querySelectorAll('button:not([hidden])'));
+  if (items.length === 0) {
+    return;
+  }
+  const currentIndex = items.indexOf(document.activeElement);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
+  items[nextIndex].focus();
 }
 
 // Starts terminal output logging to the configured or requested file.
@@ -1017,10 +1179,48 @@ async function stopTerminalOutputLog() {
   return status;
 }
 
-// Displays the active or most recent terminal output log in the diagnostics panel.
-async function showTerminalOutputLog() {
-  const preview = await window.fpasoterm.showTerminalLog();
+// Shows or hides the log picker controls in the diagnostics toolbar.
+function setTerminalLogPickerVisible(visible) {
+  for (const element of [
+    terminalLogSelectElement,
+    terminalLogShowSelectedButton,
+    terminalLogDeleteSelectedButton,
+    terminalLogDeleteAllButton,
+  ]) {
+    if (element) {
+      element.hidden = !visible;
+    }
+  }
+}
+
+// Formats one log item for the selector dropdown.
+function terminalLogOptionLabel(item) {
+  const size = Number(item.bytes || 0);
+  const kib = Math.max(1, Math.ceil(size / 1024));
+  return `${item.active ? '[active] ' : ''}${item.name || item.path} (${kib} KiB)`;
+}
+
+// Reloads the selector dropdown and keeps the previous selection when possible.
+async function refreshTerminalLogList(selectedPath = '') {
+  const items = await window.fpasoterm.listTerminalLogs();
+  const previous = selectedPath || terminalLogSelectElement?.value || '';
+  terminalLogSelectElement.replaceChildren();
+  for (const item of items) {
+    const option = document.createElement('option');
+    option.value = item.path;
+    option.textContent = terminalLogOptionLabel(item);
+    terminalLogSelectElement.appendChild(option);
+  }
+  if (items.some((item) => item.path === previous)) {
+    terminalLogSelectElement.value = previous;
+  }
+  return items;
+}
+
+// Renders a terminal log preview into the diagnostics panel.
+function renderTerminalLogPreview(preview) {
   diagnosticsPanelMode = 'terminal-log';
+  setTerminalLogPickerVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Terminal Log';
   }
@@ -1044,45 +1244,65 @@ async function showTerminalOutputLog() {
   diagnosticsElement.value = lines.join('\n') || 'No terminal output log found.';
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = preview.path || '';
+}
+
+// Displays the active or most recent terminal output log in the diagnostics panel.
+async function showTerminalOutputLog(path = '') {
+  await refreshTerminalLogList(path);
+  const selectedPath = path || terminalLogSelectElement?.value || '';
+  const preview = await window.fpasoterm.showTerminalLog(selectedPath);
+  if (preview.path && terminalLogSelectElement) {
+    terminalLogSelectElement.value = preview.path;
+  }
+  renderTerminalLogPreview(preview);
   const message = `terminal log shown path=${preview.path || '(none)'} bytes=${preview.bytes || 0} truncated=${preview.truncated ? 'true' : 'false'}`;
   console.error(message);
   window.fpasoterm?.logDiagnostic?.(message).catch(() => {});
 }
 
-// Returns selected log text when the diagnostics textarea has a selection.
-function selectedDiagnosticsText() {
-  const value = diagnosticsElement.value || '';
-  const start = diagnosticsElement.selectionStart;
-  const end = diagnosticsElement.selectionEnd;
-  if (Number.isInteger(start) && Number.isInteger(end) && end > start) {
-    return value.slice(start, end);
+// Clears all terminal output logs after explicit confirmation.
+async function clearTerminalOutputLog() {
+  const confirmed = window.confirm(
+    'Clear all terminal output logs?\n\nThis will empty the active log file and delete all stopped terminal-*.log files in the configured log directory. This cannot be undone.',
+  );
+  if (!confirmed) {
+    showDiagnostic('terminal log clear canceled');
+    return null;
   }
-  return value;
+
+  const status = await window.fpasoterm.clearTerminalLog();
+  diagnosticsPanelMode = 'terminal-log';
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Terminal Log';
+  }
+  diagnosticsPanel.hidden = false;
+  diagnosticsElement.value = `${status.message}\npath: ${status.path || '(none)'}\nbytes: ${status.bytesWritten || 0}`;
+  diagnosticsPathElement.textContent = status.path || '';
+  await refreshTerminalLogList(status.path || '');
+  await refreshTerminalLogControl();
+  showDiagnostic(`terminal log cleared path=${status.path || '(none)'} bytes=${status.bytesWritten || 0}`);
+  return status;
 }
 
-// Copies diagnostics even when terminal copy shortcuts are captured by xterm.js.
-copyDiagnosticsButton.addEventListener('click', async () => {
-  let copiedLength = 0;
-  try {
-    if (diagnosticsPanelMode === 'terminal-log') {
-      const text = selectedDiagnosticsText();
-      copiedLength = await writeClipboardText(text);
-    } else {
-      copiedLength = await window.fpasoterm.copyDiagnostics();
-    }
-  } catch (error) {
-    showDiagnostic(`diagnostics copy failed: ${error}`);
-    copyDiagnosticsButton.textContent = 'Copy Failed';
-    setTimeout(() => {
-      copyDiagnosticsButton.textContent = 'Copy';
-    }, 1200);
-    return;
+// Deletes the currently selected stopped log after confirmation.
+async function deleteSelectedTerminalOutputLog() {
+  const path = terminalLogSelectElement?.value || '';
+  if (!path) {
+    showDiagnostic('terminal log delete skipped: no log selected');
+    return null;
   }
-  copyDiagnosticsButton.textContent = copiedLength > 0 ? 'Copied' : 'No Logs';
-  setTimeout(() => {
-    copyDiagnosticsButton.textContent = 'Copy';
-  }, 1200);
-});
+  const confirmed = window.confirm(`Delete the selected terminal output log?\n\n${path}\n\nThis cannot be undone.`);
+  if (!confirmed) {
+    showDiagnostic('terminal log delete canceled');
+    return null;
+  }
+  const status = await window.fpasoterm.deleteTerminalLog(path);
+  await refreshTerminalLogList();
+  diagnosticsElement.value = `${status.message}\npath: ${status.path || '(none)'}`;
+  diagnosticsPathElement.textContent = status.path || '';
+  showDiagnostic(`terminal log deleted path=${status.path || '(none)'}`);
+  return status;
+}
 
 // Hides the diagnostics/log panel when it blocks the terminal view.
 closeDiagnosticsButton.addEventListener('click', () => {
@@ -1109,9 +1329,64 @@ terminalLogShowButton.addEventListener('click', () => {
   }).finally(closeLogMenu);
 });
 
+terminalLogShowSelectedButton.addEventListener('click', () => {
+  showTerminalOutputLog(terminalLogSelectElement?.value || '').catch((error) => {
+    showDiagnostic(`terminal log selected show failed: ${error}`);
+  });
+});
+
+terminalLogDeleteSelectedButton.addEventListener('click', () => {
+  deleteSelectedTerminalOutputLog().catch((error) => {
+    showDiagnostic(`terminal log selected delete failed: ${error}`);
+  });
+});
+
+terminalLogDeleteAllButton.addEventListener('click', () => {
+  clearTerminalOutputLog().catch((error) => {
+    showDiagnostic(`terminal log delete all failed: ${error}`);
+  });
+});
+
+terminalCopyButton.addEventListener('click', () => {
+  copyTerminalSelection().catch((error) => {
+    showDiagnostic(`terminal menu copy failed: ${error}`);
+  }).finally(closeLogMenu);
+});
+
+terminalPasteButton.addEventListener('click', () => {
+  pasteClipboardToTerminal().catch((error) => {
+    showDiagnostic(`terminal menu paste failed: ${error}`);
+  }).finally(closeLogMenu);
+});
+
 logMenuToggleButton.addEventListener('click', (event) => {
   event.stopPropagation();
   setLogMenuOpen(logMenuItems?.hidden !== false);
+});
+
+logMenuToggleButton.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    setLogMenuOpen(true);
+  }
+});
+
+logMenuItems.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeLogMenu();
+    logMenuToggleButton.focus();
+    return;
+  }
+  if (event.key === 'ArrowDown') {
+    event.preventDefault();
+    focusLogMenuItem(1);
+    return;
+  }
+  if (event.key === 'ArrowUp') {
+    event.preventDefault();
+    focusLogMenuItem(-1);
+  }
 });
 
 document.addEventListener('pointerdown', (event) => {
@@ -1297,14 +1572,15 @@ async function initialize() {
   });
 
   Promise.resolve(window.fpasoterm.onTerminalData((data) => {
-    showDebugDiagnostic(`renderer terminal data bytes=${data.length} preview=${printableDiagnosticData(data).slice(0, 160)}`);
-    processRuntimeOsc(data);
-    mirrorTerminalData(data);
-    term.write(data, () => {
+    const normalizedData = normalizeJapaneseTerminalText(data);
+    showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
+    processRuntimeOsc(normalizedData);
+    mirrorTerminalData(normalizedData);
+    term.write(normalizedData, () => {
       removeXtermVisualOverlays();
       logXtermCanvasDiagnostics();
       logXtermTextDiagnostics();
-      showDebugDiagnostic(`renderer terminal write parsed bytes=${data.length}`);
+      showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
     });
   })).catch((error) => {
     showDiagnostic(`terminal data listener failed: ${error}`);

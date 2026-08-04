@@ -10,10 +10,10 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use std::process::Output;
 use std::process::{Command, Stdio};
-#[cfg(target_os = "windows")]
-use std::{ptr, slice};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "windows")]
+use std::{ptr, slice};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::GlobalFree;
@@ -150,6 +150,13 @@ struct TerminalLogStartRequest {
     path: Option<String>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Optional terminal log path request from the renderer.
+struct TerminalLogPathRequest {
+    path: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 // Current terminal output log state returned to the renderer.
@@ -172,12 +179,25 @@ struct TerminalLogPreview {
     message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A selectable terminal output log file entry for the renderer.
+struct TerminalLogItem {
+    path: String,
+    name: String,
+    bytes: u64,
+    active: bool,
+    modified_at: u128,
+}
+
 // Active terminal output log file and byte counter.
 struct TerminalLog {
     path: String,
     file: File,
     bytes_written: u64,
     max_bytes: u64,
+    decoder: TerminalOutputDecoder,
+    normalizer: TerminalTextNormalizer,
 }
 
 // Owns the native PTY session and child shell handles.
@@ -185,6 +205,19 @@ struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+}
+
+// Decodes PTY bytes before they are sent to xterm.js.
+struct TerminalOutputDecoder {
+    pending: Vec<u8>,
+    jis_x0201_kana: bool,
+}
+
+// Converts terminal control output to readable append-only text.
+struct TerminalTextNormalizer {
+    pending: String,
+    row: usize,
+    column: usize,
 }
 
 // Shared runtime state for the active PTY session and recent diagnostics.
@@ -290,6 +323,9 @@ fn main() {
             terminal_log_stop,
             terminal_log_status,
             terminal_log_show,
+            terminal_log_clear,
+            terminal_log_list,
+            terminal_log_delete,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
@@ -588,8 +624,10 @@ fn default_runtime_config() -> RuntimeConfig {
                 "allowTransparency": true,
                 "cursorBlink": true,
                 "cursorStyle": "block",
-                "fontFamily": "ui-monospace, SFMono-Regular, Menlo, Consolas, \"Noto Sans Mono CJK JP\", monospace",
+                "fontFamily": "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
                 "fontSize": 14,
+                "minimumContrastRatio": 4.5,
+                "rescaleOverlappingGlyphs": true,
                 "scrollback": 1000,
                 "shell": read_configured_shell(&config_path).unwrap_or_default(),
                 "theme": {
@@ -1039,6 +1077,311 @@ fn terminal_path_with_app_dir() -> Option<String> {
     None
 }
 
+impl TerminalOutputDecoder {
+    // Creates a decoder that preserves UTF-8 while handling legacy half-width kana encodings.
+    fn new() -> Self {
+        Self {
+            pending: Vec::new(),
+            jis_x0201_kana: false,
+        }
+    }
+
+    // Converts PTY bytes to Unicode text for xterm.js.
+    fn decode(&mut self, bytes: &[u8]) -> String {
+        let mut input = Vec::with_capacity(self.pending.len() + bytes.len());
+        input.append(&mut self.pending);
+        input.extend_from_slice(bytes);
+
+        let mut result = String::new();
+        let mut index = 0;
+        while index < input.len() {
+            let byte = input[index];
+
+            if byte == 0x1b {
+                if index + 2 >= input.len() {
+                    self.pending.extend_from_slice(&input[index..]);
+                    break;
+                }
+                if input[index + 1] == b'(' {
+                    match input[index + 2] {
+                        b'I' => {
+                            self.jis_x0201_kana = true;
+                            index += 3;
+                            continue;
+                        }
+                        b'B' | b'J' => {
+                            self.jis_x0201_kana = false;
+                            index += 3;
+                            continue;
+                        }
+                        _ => {}
+                    }
+                }
+                result.push('\x1b');
+                index += 1;
+                continue;
+            }
+
+            if byte == 0x9b {
+                result.push_str("\x1b[");
+                index += 1;
+                continue;
+            }
+
+            if self.jis_x0201_kana && (0x21..=0x5f).contains(&byte) {
+                result.push(jis_x0201_half_width_kana(byte - 0x21));
+                index += 1;
+                continue;
+            }
+
+            if byte < 0x80 {
+                result.push(byte as char);
+                index += 1;
+                continue;
+            }
+
+            let width = utf8_sequence_width(byte);
+            if width > 0 && index + width > input.len() {
+                self.pending.extend_from_slice(&input[index..]);
+                break;
+            }
+            if width > 0 {
+                match std::str::from_utf8(&input[index..index + width]) {
+                    Ok(text) => {
+                        result.push_str(text);
+                        index += width;
+                        continue;
+                    }
+                    Err(_) => {}
+                }
+            }
+
+            if (0xa1..=0xdf).contains(&byte) {
+                result.push(jis_x0201_half_width_kana(byte - 0xa1));
+            } else {
+                result.push('\u{fffd}');
+            }
+            index += 1;
+        }
+
+        result
+    }
+}
+
+impl TerminalTextNormalizer {
+    // Creates a normalizer that keeps cursor position across log chunks.
+    fn new() -> Self {
+        Self {
+            pending: String::new(),
+            row: 1,
+            column: 1,
+        }
+    }
+
+    // Converts terminal control sequences to readable line breaks and spacing.
+    fn normalize(&mut self, text: &str) -> String {
+        let input = format!("{}{}", self.pending, text);
+        self.pending.clear();
+        let chars: Vec<char> = input.chars().collect();
+        let mut result = String::new();
+        let mut index = 0;
+
+        while index < chars.len() {
+            let character = chars[index];
+            if character == '\x1b' {
+                match self.consume_escape_sequence(&chars, index, &mut result) {
+                    Some(next_index) => index = next_index,
+                    None => {
+                        self.pending = chars[index..].iter().collect();
+                        break;
+                    }
+                }
+                continue;
+            }
+
+            self.push_plain_character(&mut result, character);
+            index += 1;
+        }
+
+        result
+    }
+
+    // Handles a complete ESC sequence, returning the next character index.
+    fn consume_escape_sequence(
+        &mut self,
+        chars: &[char],
+        index: usize,
+        result: &mut String,
+    ) -> Option<usize> {
+        let introducer = *chars.get(index + 1)?;
+        match introducer {
+            '[' => {
+                let mut parameters = String::new();
+                let mut cursor = index + 2;
+                while cursor < chars.len() {
+                    let character = chars[cursor];
+                    if ('@'..='~').contains(&character) {
+                        self.apply_csi(result, &parameters, character);
+                        return Some(cursor + 1);
+                    }
+                    parameters.push(character);
+                    cursor += 1;
+                }
+                None
+            }
+            ']' => {
+                let mut cursor = index + 2;
+                let mut previous_was_escape = false;
+                while cursor < chars.len() {
+                    let character = chars[cursor];
+                    if character == '\x07' {
+                        return Some(cursor + 1);
+                    }
+                    if previous_was_escape && character == '\\' {
+                        return Some(cursor + 1);
+                    }
+                    previous_was_escape = character == '\x1b';
+                    cursor += 1;
+                }
+                None
+            }
+            '(' | ')' | '*' | '+' => {
+                if index + 2 < chars.len() {
+                    Some(index + 3)
+                } else {
+                    None
+                }
+            }
+            _ => Some((index + 2).min(chars.len())),
+        }
+    }
+
+    // Applies CSI layout commands to the plain-text log position.
+    fn apply_csi(&mut self, result: &mut String, parameters: &str, final_character: char) {
+        match final_character {
+            'C' => self.push_spaces(result, first_csi_numeric_parameter(parameters, 1)),
+            'G' => {
+                let column = first_csi_numeric_parameter(parameters, 1).max(1);
+                if column > self.column {
+                    self.push_spaces(result, column - self.column);
+                }
+                self.column = column;
+            }
+            'H' | 'f' => {
+                let (row, column) = first_two_csi_numeric_parameters(parameters, 1, 1);
+                self.move_cursor(result, row.max(1), column.max(1));
+            }
+            'B' | 'E' => self.push_newlines(result, first_csi_numeric_parameter(parameters, 1)),
+            _ => {}
+        }
+    }
+
+    // Moves the tracked cursor, preserving readable lines for downward movement.
+    fn move_cursor(&mut self, result: &mut String, row: usize, column: usize) {
+        if row > self.row {
+            self.push_newlines(result, row - self.row);
+        }
+        if row == self.row && column > self.column {
+            self.push_spaces(result, column - self.column);
+        }
+        self.row = row;
+        self.column = column;
+    }
+
+    // Writes a normal character or terminal newline into the output.
+    fn push_plain_character(&mut self, result: &mut String, character: char) {
+        match character {
+            '\r' | '\n' => self.push_newlines(result, 1),
+            '\t' => {
+                result.push('\t');
+                self.column += 1;
+            }
+            '\x08' => {
+                result.pop();
+                self.column = self.column.saturating_sub(1).max(1);
+            }
+            '\x00'..='\x1f' | '\x7f' => {}
+            '\u{3099}' | '\u{309a}' => {
+                if let Some(composed) = compose_japanese_voicing(result.pop(), character) {
+                    result.push(composed);
+                }
+            }
+            _ => {
+                result.push(character);
+                self.column += 1;
+            }
+        }
+    }
+
+    // Adds collapsed line breaks while updating the tracked cursor.
+    fn push_newlines(&mut self, result: &mut String, count: usize) {
+        let count = count.clamp(1, 24);
+        for _ in 0..count {
+            if !result.ends_with('\n') {
+                result.push('\n');
+            }
+            self.row += 1;
+            self.column = 1;
+        }
+    }
+
+    // Adds bounded spaces for cursor-forward movement.
+    fn push_spaces(&mut self, result: &mut String, count: usize) {
+        let count = count.clamp(1, 120);
+        result.push_str(&" ".repeat(count));
+        self.column += count;
+    }
+}
+
+// Maps JIS X 0201 half-width kana indexes to Unicode half-width kana code points.
+fn jis_x0201_half_width_kana(index: u8) -> char {
+    char::from_u32(0xff61 + u32::from(index)).unwrap_or('\u{fffd}')
+}
+
+// Composes decomposed Japanese kana voicing marks so xterm.js and logs show one glyph.
+fn compose_japanese_voicing(base: Option<char>, mark: char) -> Option<char> {
+    let base = base?;
+    match (base, mark) {
+        ('ウ', '\u{3099}') => Some('ヴ'),
+        ('カ', '\u{3099}') => Some('ガ'),
+        ('キ', '\u{3099}') => Some('ギ'),
+        ('ク', '\u{3099}') => Some('グ'),
+        ('ケ', '\u{3099}') => Some('ゲ'),
+        ('コ', '\u{3099}') => Some('ゴ'),
+        ('サ', '\u{3099}') => Some('ザ'),
+        ('シ', '\u{3099}') => Some('ジ'),
+        ('ス', '\u{3099}') => Some('ズ'),
+        ('セ', '\u{3099}') => Some('ゼ'),
+        ('ソ', '\u{3099}') => Some('ゾ'),
+        ('タ', '\u{3099}') => Some('ダ'),
+        ('チ', '\u{3099}') => Some('ヂ'),
+        ('ツ', '\u{3099}') => Some('ヅ'),
+        ('テ', '\u{3099}') => Some('デ'),
+        ('ト', '\u{3099}') => Some('ド'),
+        ('ハ', '\u{3099}') => Some('バ'),
+        ('ヒ', '\u{3099}') => Some('ビ'),
+        ('フ', '\u{3099}') => Some('ブ'),
+        ('ヘ', '\u{3099}') => Some('ベ'),
+        ('ホ', '\u{3099}') => Some('ボ'),
+        ('ハ', '\u{309a}') => Some('パ'),
+        ('ヒ', '\u{309a}') => Some('ピ'),
+        ('フ', '\u{309a}') => Some('プ'),
+        ('ヘ', '\u{309a}') => Some('ペ'),
+        ('ホ', '\u{309a}') => Some('ポ'),
+        _ => Some(base),
+    }
+}
+
+// Returns the expected byte width for a UTF-8 leading byte.
+fn utf8_sequence_width(byte: u8) -> usize {
+    match byte {
+        0xc2..=0xdf => 2,
+        0xe0..=0xef => 3,
+        0xf0..=0xf4 => 4,
+        _ => 0,
+    }
+}
+
 #[tauri::command]
 // Creates the PTY, starts the configured shell, and bridges output to the renderer.
 fn terminal_start(
@@ -1112,6 +1455,7 @@ fn terminal_start(
 
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
+        let mut decoder = TerminalOutputDecoder::new();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
@@ -1120,7 +1464,7 @@ fn terminal_start(
                         eprintln!("terminal_read bytes={read}");
                     }
                     append_terminal_log(&terminal_log, &buffer[..read]);
-                    let data = String::from_utf8_lossy(&buffer[..read]).to_string();
+                    let data = decoder.decode(&buffer[..read]);
                     let _ = app_for_reader.emit("terminal:data", data);
                 }
                 Err(error) => {
@@ -1265,7 +1609,7 @@ fn resolve_terminal_log_path(path: Option<String>) -> PathBuf {
     }
 }
 
-// Appends raw PTY output bytes to the active terminal log if logging is active.
+// Appends cleaned PTY output bytes to the active terminal log if logging is active.
 fn append_terminal_log(log_state: &Arc<Mutex<Option<TerminalLog>>>, bytes: &[u8]) {
     let Ok(mut guard) = log_state.lock() else {
         return;
@@ -1279,20 +1623,26 @@ fn append_terminal_log(log_state: &Arc<Mutex<Option<TerminalLog>>>, bytes: &[u8]
         return;
     }
 
+    let text = log.decoder.decode(bytes);
+    let cleaned = log.normalizer.normalize(&text).into_bytes();
+    if cleaned.is_empty() {
+        return;
+    }
+
     let remaining = (max_bytes - log.bytes_written) as usize;
-    let write_len = bytes.len().min(remaining);
+    let write_len = cleaned.len().min(remaining);
     if write_len == 0 {
         return;
     }
 
-    if log.file.write_all(&bytes[..write_len]).is_ok() {
+    if log.file.write_all(&cleaned[..write_len]).is_ok() {
         log.bytes_written += write_len as u64;
         let _ = log.file.flush();
     }
 }
 
 #[tauri::command]
-// Starts writing raw terminal output to a log file.
+// Starts writing cleaned terminal output to a log file.
 fn terminal_log_start(
     state: State<AppState>,
     request: Option<TerminalLogStartRequest>,
@@ -1329,6 +1679,8 @@ fn start_terminal_log_state(
         file,
         bytes_written: 0,
         max_bytes: logging_max_bytes(),
+        decoder: TerminalOutputDecoder::new(),
+        normalizer: TerminalTextNormalizer::new(),
     });
     if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
         *last_path = Some(path_text.clone());
@@ -1440,6 +1792,66 @@ fn latest_terminal_log_path() -> Result<Option<PathBuf>, String> {
     Ok(latest.map(|(_, path)| path))
 }
 
+// Returns all timestamped terminal logs newest first, including the active log.
+fn terminal_log_items(active_path: Option<String>) -> Result<Vec<TerminalLogItem>, String> {
+    let directory = terminal_log_directory();
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let active_pathbuf = active_path.as_ref().map(PathBuf::from);
+    let mut items = Vec::new();
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !name.starts_with("terminal-") || !name.ends_with(".log") {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let modified_at = metadata
+            .modified()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        let active = active_pathbuf
+            .as_ref()
+            .is_some_and(|active_path| *active_path == path);
+        items.push(TerminalLogItem {
+            path: path.display().to_string(),
+            name,
+            bytes: metadata.len(),
+            active,
+            modified_at,
+        });
+    }
+    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    Ok(items)
+}
+
+// Resolves a renderer-selected log path and only permits terminal-*.log files.
+fn selected_terminal_log_path(path_request: Option<String>) -> Result<Option<PathBuf>, String> {
+    let Some(path_text) = path_request
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let path = expand_sync_path(&path_text);
+    let name = path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or("");
+    if !name.starts_with("terminal-") || !name.ends_with(".log") {
+        return Err("selected path is not a terminal output log".to_string());
+    }
+    Ok(Some(path))
+}
+
 // Reads the tail of a log file without loading very large logs into memory.
 fn read_terminal_log_tail(path: &Path, max_bytes: u64) -> Result<(String, u64, bool), String> {
     let mut file = File::open(path).map_err(|error| error.to_string())?;
@@ -1459,94 +1871,52 @@ fn read_terminal_log_tail(path: &Path, max_bytes: u64) -> Result<(String, u64, b
 
 // Removes common terminal control sequences from raw PTY output for Log Show.
 fn clean_terminal_log_preview_text(text: &str) -> String {
-    normalize_terminal_preview_lines(&strip_terminal_escape_sequences(text))
+    let mut normalizer = TerminalTextNormalizer::new();
+    normalizer.normalize(text)
 }
 
-// Strips CSI, OSC, and simple ESC control sequences while preserving printable text.
-fn strip_terminal_escape_sequences(text: &str) -> String {
-    let mut result = String::new();
-    let mut chars = text.chars().peekable();
-
-    while let Some(character) = chars.next() {
-        if character != '\x1b' {
-            result.push(character);
-            continue;
-        }
-
-        match chars.peek().copied() {
-            Some('[') => {
-                chars.next();
-                for next in chars.by_ref() {
-                    if ('@'..='~').contains(&next) {
-                        break;
-                    }
-                }
+// Reads the first numeric CSI parameter, using a default when the sequence omits it.
+fn first_csi_numeric_parameter(parameters: &str, default: usize) -> usize {
+    parameters
+        .split(';')
+        .find_map(|parameter| {
+            let normalized = parameter.trim_start_matches('?').trim();
+            if normalized.is_empty() {
+                None
+            } else {
+                normalized.parse::<usize>().ok()
             }
-            Some(']') => {
-                chars.next();
-                let mut previous_was_escape = false;
-                for next in chars.by_ref() {
-                    if next == '\x07' {
-                        break;
-                    }
-                    if previous_was_escape && next == '\\' {
-                        break;
-                    }
-                    previous_was_escape = next == '\x1b';
-                }
-            }
-            Some('(') | Some(')') | Some('*') | Some('+') => {
-                chars.next();
-                let _ = chars.next();
-            }
-            Some(_) => {
-                let _ = chars.next();
-            }
-            None => {}
-        }
-    }
-
-    result
+        })
+        .unwrap_or(default)
 }
 
-// Applies terminal-like carriage return and backspace handling for text preview.
-fn normalize_terminal_preview_lines(text: &str) -> String {
-    let mut lines: Vec<String> = vec![String::new()];
-    for character in text.chars() {
-        match character {
-            '\r' => {
-                if !lines.last().map(|line| line.is_empty()).unwrap_or(true) {
-                    lines.push(String::new());
-                }
-            }
-            '\n' => {
-                if !lines.last().map(|line| line.is_empty()).unwrap_or(true) {
-                    lines.push(String::new());
-                }
-            }
-            '\x08' => {
-                if let Some(line) = lines.last_mut() {
-                    line.pop();
-                }
-            }
-            '\x00'..='\x1f' | '\x7f' => {}
-            _ => {
-                if let Some(line) = lines.last_mut() {
-                    line.push(character);
-                }
-            }
+// Reads the first two numeric CSI parameters, using defaults for omitted values.
+fn first_two_csi_numeric_parameters(
+    parameters: &str,
+    first_default: usize,
+    second_default: usize,
+) -> (usize, usize) {
+    let mut values = parameters.split(';').map(|parameter| {
+        let normalized = parameter.trim_start_matches('?').trim();
+        if normalized.is_empty() {
+            None
+        } else {
+            normalized.parse::<usize>().ok()
         }
-    }
-
-    while lines.last().map(|line| line.is_empty()).unwrap_or(false) {
-        lines.pop();
-    }
-    lines.join("\n")
+    });
+    (
+        values.next().flatten().unwrap_or(first_default),
+        values.next().flatten().unwrap_or(second_default),
+    )
 }
 
 #[tauri::command]
-// Returns the active, last stopped, or most recent terminal output log for quick inspection.
-fn terminal_log_show(state: State<AppState>) -> Result<TerminalLogPreview, String> {
+// Returns a selected, active, last stopped, or newest terminal output log for quick inspection.
+fn terminal_log_show(
+    state: State<AppState>,
+    request: Option<TerminalLogPathRequest>,
+) -> Result<TerminalLogPreview, String> {
+    let requested_path = selected_terminal_log_path(request.and_then(|value| value.path))?;
     let tracked_path = {
         let guard = state
             .terminal_log
@@ -1560,7 +1930,10 @@ fn terminal_log_show(state: State<AppState>) -> Result<TerminalLogPreview, Strin
         .ok()
         .and_then(|guard| guard.clone());
 
-    let path = match tracked_path.or(last_path) {
+    let path = match requested_path
+        .or_else(|| tracked_path.map(PathBuf::from))
+        .or_else(|| last_path.map(PathBuf::from))
+    {
         Some(value) => PathBuf::from(value),
         None => match latest_terminal_log_path()? {
             Some(path) => path,
@@ -1586,6 +1959,123 @@ fn terminal_log_show(state: State<AppState>) -> Result<TerminalLogPreview, Strin
             "showing the last 65536 bytes of the terminal output log".to_string()
         } else {
             "showing the terminal output log".to_string()
+        },
+    })
+}
+
+#[tauri::command]
+// Lists selectable terminal output logs for the Log Show dropdown.
+fn terminal_log_list(state: State<AppState>) -> Result<Vec<TerminalLogItem>, String> {
+    let active_path = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(|log| log.path.clone());
+    terminal_log_items(active_path)
+}
+
+#[tauri::command]
+// Deletes one selected stopped terminal output log.
+fn terminal_log_delete(
+    state: State<AppState>,
+    request: Option<TerminalLogPathRequest>,
+) -> Result<TerminalLogStatus, String> {
+    let path = selected_terminal_log_path(request.and_then(|value| value.path))?
+        .ok_or_else(|| "terminal output log path is required".to_string())?;
+    let path_text = path.display().to_string();
+    let active_path = state
+        .terminal_log
+        .lock()
+        .map_err(|error| error.to_string())?
+        .as_ref()
+        .map(|log| log.path.clone());
+    if active_path.as_deref() == Some(path_text.as_str()) {
+        return Err(
+            "active terminal output log cannot be deleted; use Delete All to empty it".to_string(),
+        );
+    }
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| error.to_string())?;
+    }
+    if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
+        if last_path.as_deref() == Some(path_text.as_str()) {
+            *last_path = None;
+        }
+    }
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active: false,
+        path: path_text,
+        bytes_written: 0,
+        message: "selected terminal output log deleted".to_string(),
+    })
+}
+
+#[tauri::command]
+// Clears the active log file and deletes all stopped terminal log files.
+fn terminal_log_clear(state: State<AppState>) -> Result<TerminalLogStatus, String> {
+    let mut active_path: Option<String> = None;
+    let mut active = false;
+    {
+        let mut guard = state
+            .terminal_log
+            .lock()
+            .map_err(|error| error.to_string())?;
+        if let Some(log) = guard.as_mut() {
+            log.file.set_len(0).map_err(|error| error.to_string())?;
+            log.file
+                .seek(SeekFrom::Start(0))
+                .map_err(|error| error.to_string())?;
+            log.bytes_written = 0;
+            log.decoder = TerminalOutputDecoder::new();
+            log.normalizer = TerminalTextNormalizer::new();
+            let _ = log.file.flush();
+            active_path = Some(log.path.clone());
+            active = true;
+        }
+    }
+
+    let active_pathbuf = active_path.as_ref().map(PathBuf::from);
+    let directory = terminal_log_directory();
+    let mut deleted = 0_u64;
+    if directory.exists() {
+        for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+            let entry = entry.map_err(|error| error.to_string())?;
+            let path = entry.path();
+            let is_terminal_log = path
+                .file_name()
+                .and_then(|name| name.to_str())
+                .map(|name| name.starts_with("terminal-") && name.ends_with(".log"))
+                .unwrap_or(false);
+            if !is_terminal_log
+                || active_pathbuf
+                    .as_ref()
+                    .is_some_and(|active| *active == path)
+            {
+                continue;
+            }
+            fs::remove_file(&path).map_err(|error| error.to_string())?;
+            deleted += 1;
+        }
+    }
+    if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
+        if !active {
+            *last_path = None;
+        } else {
+            *last_path = active_path.clone();
+        }
+    }
+    let path_text = active_path.unwrap_or_else(|| directory.display().to_string());
+    Ok(TerminalLogStatus {
+        enabled: logging_bool("enabled", true),
+        active,
+        path: path_text,
+        bytes_written: 0,
+        message: if active {
+            format!("active terminal output log cleared and {deleted} stopped log files deleted")
+        } else {
+            format!("{deleted} terminal output log files deleted")
         },
     })
 }
@@ -1896,6 +2386,20 @@ fn write_clipboard_with_commands(commands: &[(&str, &[&str])], text: &str) -> Re
 
                 #[cfg(all(unix, not(target_os = "macos")))]
                 {
+                    if *program == "wl-copy" {
+                        match child.wait_with_output() {
+                            Ok(output) if output.status.success() => return Ok(()),
+                            Ok(output) => errors.push(format!(
+                                "{} exited with {}: {}",
+                                program,
+                                output.status,
+                                String::from_utf8_lossy(&output.stderr)
+                            )),
+                            Err(error) => errors.push(format!("{program}: {error}")),
+                        }
+                        continue;
+                    }
+
                     // xclip/xsel commonly remain alive as the clipboard owner. Waiting for
                     // them blocks the Tauri command and freezes the UI, so success is spawn
                     // plus stdin delivery on Unix desktops.
@@ -1939,7 +2443,7 @@ fn clipboard_read() -> Result<String, String> {
     #[cfg(all(unix, not(target_os = "macos")))]
     {
         read_clipboard_with_commands(&[
-            ("wl-paste", &["--no-newline"]),
+            ("wl-paste", &["--no-newline", "--type", "text/plain"]),
             ("xclip", &["-selection", "clipboard", "-out"]),
             ("xsel", &["--clipboard", "--output"]),
         ])
@@ -1964,8 +2468,11 @@ fn clipboard_write(text: String) -> Result<(), String> {
     {
         write_clipboard_with_commands(
             &[
-                ("wl-copy", &[]),
-                ("xclip", &["-selection", "clipboard"]),
+                ("wl-copy", &["--type", "text/plain;charset=utf-8"]),
+                (
+                    "xclip",
+                    &["-selection", "clipboard", "-target", "UTF8_STRING"],
+                ),
                 ("xsel", &["--clipboard", "--input"]),
             ],
             &text,
@@ -2331,6 +2838,65 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
             .map_err(|error| error.to_string())?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn terminal_output_decoder_preserves_utf8() {
+        let mut decoder = TerminalOutputDecoder::new();
+        assert_eq!(decoder.decode("半角ｶﾀｶﾅ ±".as_bytes()), "半角ｶﾀｶﾅ ±");
+    }
+
+    #[test]
+    fn terminal_output_decoder_maps_shift_jis_half_width_kana() {
+        let mut decoder = TerminalOutputDecoder::new();
+        assert_eq!(decoder.decode(&[0xb6, 0xc0, 0xb6, 0xc5, b' ']), "ｶﾀｶﾅ ");
+    }
+
+    #[test]
+    fn terminal_output_decoder_maps_invalid_utf8_half_width_kana_bytes() {
+        let mut decoder = TerminalOutputDecoder::new();
+        assert_eq!(decoder.decode(&[0xc2, b' ', 0xb1]), "ﾂ ｱ");
+    }
+
+    #[test]
+    fn terminal_output_decoder_maps_iso2022_half_width_kana_across_chunks() {
+        let mut decoder = TerminalOutputDecoder::new();
+        assert_eq!(decoder.decode(&[0x1b, b'(']), "");
+        assert_eq!(decoder.decode(&[b'I', 0x36, 0x40, 0x36, 0x45]), "ｶﾀｶﾅ");
+        assert_eq!(decoder.decode(&[0x1b, b'(', b'B', b'A']), "A");
+    }
+
+    #[test]
+    fn terminal_text_normalizer_converts_cursor_rows_to_newlines() {
+        let mut normalizer = TerminalTextNormalizer::new();
+        let text = normalizer.normalize("first\x1b[2;1Hsecond\x1b[4;5Hthird");
+        assert_eq!(text, "first\nsecond\n    third");
+    }
+
+    #[test]
+    fn terminal_text_normalizer_keeps_cursor_forward_as_spaces() {
+        let mut normalizer = TerminalTextNormalizer::new();
+        assert_eq!(normalizer.normalize("a\x1b[4Cb"), "a    b");
+    }
+
+    #[test]
+    fn terminal_text_normalizer_composes_japanese_voicing_marks() {
+        let mut normalizer = TerminalTextNormalizer::new();
+        assert_eq!(
+            normalizer.normalize("フ\u{309a}ロホ\u{309a}ート"),
+            "プロポート"
+        );
+    }
+
+    #[test]
+    fn terminal_text_normalizer_preserves_half_width_kana() {
+        let mut normalizer = TerminalTextNormalizer::new();
+        assert_eq!(normalizer.normalize("ﾌﾟﾛｷｼｰ ﾍｯﾀﾞｰ"), "ﾌﾟﾛｷｼｰ ﾍｯﾀﾞｰ");
+    }
 }
 
 impl Drop for TerminalSession {

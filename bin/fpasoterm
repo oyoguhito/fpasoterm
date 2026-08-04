@@ -68,6 +68,13 @@ function appendLauncherLog(message) {
 
 // Converts CLI options into environment variables consumed by the main process.
 function parseArgs(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    return { help: true };
+  }
+  if (argv.includes('--version') || argv.includes('-v')) {
+    return { help: false, version: true };
+  }
+
   const env = {};
   const runtimeArgs = [];
   const enablePlugins = [];
@@ -84,14 +91,6 @@ function parseArgs(argv) {
 
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
-
-    if (arg === '--help' || arg === '-h') {
-      return { help: true };
-    }
-
-    if (arg === '--version' || arg === '-v') {
-      return { help: false, version: true };
-    }
 
     if (arg === '--foreground' || arg === '-F') {
       foreground = true;
@@ -647,7 +646,7 @@ async function setupSync(options) {
     const channel = await askQuestion(rl, 'Sync channel name', defaultChannel);
     const createFolder = isYes(await askQuestion(rl, 'Create the folder if it does not exist? (Y/n)', 'Y'), true);
     console.log(`Terminal output logs stay local by default under ${localDefaultLogDirectory}.`);
-    console.log('Answer y only when you want raw terminal output logs stored in the selected sync folder.');
+    console.log('Answer y only when you want readable terminal output logs stored in the selected sync folder.');
     const enableLogs = isYes(await askQuestion(rl, 'Store terminal output logs in the sync folder? (y/N)', 'N'), false);
     const logDirectory = enableLogs
       ? await askQuestion(rl, 'Terminal log directory', syncDefaultLogDirectory)
