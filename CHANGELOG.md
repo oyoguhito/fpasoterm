@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.4.0
+
+- Improved Tile sizing by converting renderer logical screen dimensions to native physical pixels with the display device pixel ratio.
+- Added an independent confirmation window for Close All, with keyboard focus, Tab navigation, Cancel, OK, and Escape handling.
+- Prevented stale Close All requests from affecting newly started windows and restored terminal focus after cancellation.
+- Added optional `--x11` support for Linux window placement diagnostics.
+
+## 1.3.6
+
+- Improved Log menu keyboard labels and shortcuts for logging, copy, and paste operations.
+- Added keyboard-accessible Log Show search with match counts, next/previous navigation, visible focus states, and panel-contained focus cycling.
+- Replaced native delete confirmations with an in-panel confirmation dialog so Delete Selected and Delete All keep focus inside the log panel.
+
 ## 1.3.5
 
 - Preserved half-width katakana in terminal display and readable terminal logs instead of normalizing it to full-width katakana.

@@ -4,7 +4,7 @@
 
 Cross-platform terminal app built with Tauri, xterm.js, and a Rust PTY bridge.
 
-fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not plan to manage split panes or multiple windows itself.
+fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
 
 日本語の概要は [日本語](#日本語) を参照してください。
 
@@ -16,7 +16,7 @@ Japanese IME composition and keyboard layout switching are handled by the OS web
 
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
-Debug logs are also written to `diagnostics/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
+Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 
@@ -354,10 +354,15 @@ terminal output logs through a local sync folder such as Google Drive for
 desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
 Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
-Terminal output logs can be written with `Log Start` / `Log Stop` and inspected
-with `Log Show`; `Log Show` displays the active log or the last log closed by
-`Log Stop`. Point `logging.directory` at the same synced folder when you want
-those logs shared.
+Terminal output logs can be written with the `Log (^L)` menu `Start (^S)` /
+`Stop (^S)` actions or `Ctrl+Shift+S`, and inspected with `Show (^P)` or `Ctrl+Shift+P`.
+`Show` displays the active log or the last log closed by `Stop`. Point
+`logging.directory` at the same synced folder when you want those logs shared.
+The log panel includes a search field and `Search` button for selecting and
+scrolling to the next matching string in the displayed log. `N` moves to the
+next match, `P` moves to the previous match, and `j` / `k` provide the same
+navigation when the log text area has focus. Arrow keys remain available for
+normal log scrolling.
 
 Current platform limitations are tracked in [Known Issues](docs/known-issues.en.md) / [既知課題](docs/known-issues.ja.md).
 
@@ -375,11 +380,11 @@ The desktop entry uses `Icon=io.github.oyoguhito.fpasoterm`; ChromeOS/Linux laun
 extra/linux/icons/hicolor/
 ```
 
-The installed entry uses `StartupWMClass=io.github.oyoguhito.fpasoterm`, and
-Linux builds enable the GTK application id. This lets ChromeOS match the running
-window back to the desktop entry, so the shelf shows the fpasoterm icon and
-hover name instead of a generic runtime icon. The installer also writes a
-legacy `fpasoterm` icon alias for environments that prefer short icon names.
+The installed entry uses `StartupWMClass=fpasoterm` and keeps the GTK
+application id disabled so multiple fpasoterm windows can be started from the
+CLI or launcher. ChromeOS/Linux launchers still resolve the shelf icon from
+`Icon=io.github.oyoguhito.fpasoterm` for the ChromeOS shelf. The installer also writes a legacy
+`fpasoterm` icon alias for environments that prefer short icon names.
 
 For unpacked checkout installs, `npm run install:desktop` writes the installed
 desktop entry with an absolute `Exec=` path to the local wrapper and no
@@ -388,10 +393,15 @@ and also falls back to common `node` paths. This lets the ChromeOS launcher
 start fpasoterm from the icon even when it does not inherit the user's shell
 `PATH`.
 
-Linux builds enable GTK application-id matching for correct ChromeOS shelf
-identity. If a window manager treats repeated launcher starts as activation of
-the existing window, start additional instances from the terminal with the
-`fpasoterm` command.
+The GTK application id is disabled so multiple fpasoterm processes can run.
+When multiple fpasoterm windows are open, use `Tile (^T)` in the titlebar window
+menu, or press `Ctrl+Shift+T`,
+to arrange them into a grid on the current monitor. Windows and X11 support
+native placement. Wayland compositors may reject application-controlled
+positions; the terminal remains usable and the diagnostic panel reports the
+placement error.
+Use `Close All (^X)` in the same menu, or press `Ctrl+Shift+X`, to close every
+running fpasoterm window.
 
 When packaging a macOS `.app` bundle, use the generated icon at:
 
@@ -463,7 +473,7 @@ GitHub Actions runs the same check set on pushes and pull requests.
 
 fpasoterm は Tauri、xterm.js、Rust PTY bridge を使った Terminal アプリです。ChromeOS Linux での日本語入力を重視しつつ、将来的に他 OS へ展開しやすい構成にしています。
 
-screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身で画面分割や複数 window の管理は行いません。
+screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身では画面分割を行いませんが、titlebar の `Tile` button で複数 window を並べられます。
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
@@ -680,7 +690,8 @@ api.terminal.options.cursorBlink = true;
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
-terminal output log は `Log Start` / `Log Stop` で取得し、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+terminal output log は `Log (^L)` menu の `Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で取得し、`Show (^P)` または `Ctrl+Shift+P` で active log または `Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
 npm registry から global install する場合:
 
@@ -707,7 +718,7 @@ fpasoterm
 
 ```sh
 FPASOTERM_DEBUG_KEYS=1 ./scripts/run
-cat diagnostics/fpasoterm-debug.log
+cat ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 アイコンを変更する場合は `extra/logo/fpasoterm.png` を差し替え、以下を実行します。

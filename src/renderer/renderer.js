@@ -5,12 +5,28 @@ const diagnosticsElement = document.getElementById('diagnostics');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const terminalLogSelectElement = document.getElementById('terminal-log-select');
+const terminalLogSearchElement = document.getElementById('terminal-log-search');
+const terminalLogSearchNextButton = document.getElementById('terminal-log-search-next');
+const terminalLogSearchStatusElement = document.getElementById('terminal-log-search-status');
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
+const terminalLogConfirmElement = document.getElementById('terminal-log-confirm');
+const terminalLogConfirmMessageElement = document.getElementById('terminal-log-confirm-message');
+const terminalLogConfirmOkButton = document.getElementById('terminal-log-confirm-ok');
+const terminalLogConfirmCancelButton = document.getElementById('terminal-log-confirm-cancel');
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
+const arrangeWindowButton = document.getElementById('arrange-window');
+const closeAllWindowsButton = document.getElementById('close-all-windows');
+const closeAllConfirmElement = document.getElementById('close-all-confirm');
+const closeAllConfirmMessageElement = document.getElementById('close-all-confirm-message');
+const closeAllConfirmOkButton = document.getElementById('close-all-confirm-ok');
+const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-cancel');
+const windowMenu = document.getElementById('window-menu');
+const windowMenuToggleButton = document.getElementById('window-menu-toggle');
+const windowMenuItems = document.getElementById('window-menu-items');
 const logMenu = document.getElementById('log-menu');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
@@ -23,6 +39,7 @@ const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
 let terminalMirrorText = '';
+let closeAllConfirmResolver = null;
 const fallbackConfig = {
   window: {
     backgroundColor: 'rgba(0, 0, 0, 0)',
@@ -107,6 +124,14 @@ let pendingOscData = '';
 let diagnosticsPanelMode = 'diagnostics';
 let syncDiagnosticsEnabled = false;
 let syncDiagnosticsTimer = null;
+let terminalLogSearchState = {
+  query: '',
+  text: '',
+  matches: [],
+  cursor: -1,
+};
+let terminalLogConfirmResolver = null;
+let terminalLogConfirmReturnFocus = null;
 
 // Provides the renderer API shape expected by the rest of this file when the
 // backend is injected by Tauri.
@@ -152,6 +177,9 @@ function installTauriApiAdapter() {
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
+    arrangeWindows: (screen) => invoke('window_arrange', { screen }),
+    closeAllWindows: () => invoke('window_close_all'),
+    confirmCloseAllWindows: () => invoke('window_confirm_close_all'),
     startWindowDrag: () => invoke('window_start_drag'),
     startWindowResizeDrag: (direction) => window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction),
     saveWindowBounds: () => invoke('window_save_bounds'),
@@ -574,6 +602,28 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const isArrangeShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') ||
+      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 't');
+    if (isArrangeShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      window.fpasoterm.arrangeWindows?.(getAvailableScreenBounds())
+        .then((message) => showDiagnostic(message))
+        .catch((error) => showDiagnostic(`window arrange failed: ${error}`));
+      return;
+    }
+
+    const isCloseAllShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'x') ||
+      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'x');
+    if (isCloseAllShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      requestCloseAllWindows();
+      return;
+    }
+
     const isCopyShortcut =
       (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') ||
       (event.metaKey && event.key.toLowerCase() === 'c');
@@ -1124,10 +1174,10 @@ async function refreshTerminalLogControl() {
   if (logMenu) {
     logMenu.hidden = status.enabled === false;
   }
-  terminalLogToggleButton.textContent = status.active ? 'Stop' : 'Start';
+  terminalLogToggleButton.textContent = status.active ? 'Stop (^S)' : 'Start (^S)';
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
   logMenuToggleButton.dataset.active = status.active ? 'true' : 'false';
-  logMenuToggleButton.textContent = status.active ? 'Logging' : 'Log';
+  logMenuToggleButton.textContent = status.active ? 'Logging (^L)' : 'Log (^L)';
   logMenuToggleButton.setAttribute('aria-label', status.active ? 'Log capture is running' : 'Open log menu');
 }
 
@@ -1163,6 +1213,243 @@ function focusLogMenuItem(delta) {
   items[nextIndex].focus();
 }
 
+// Returns focusable controls in the visible diagnostics/log panel.
+function diagnosticsPanelFocusItems() {
+  if (!diagnosticsPanel || diagnosticsPanel.hidden) {
+    return [];
+  }
+  if (terminalLogConfirmElement && !terminalLogConfirmElement.hidden) {
+    return [
+      terminalLogConfirmOkButton,
+      terminalLogConfirmCancelButton,
+    ].filter((element) => element && !element.hidden && !element.disabled);
+  }
+  return [
+    terminalLogSelectElement,
+    terminalLogSearchElement,
+    terminalLogSearchNextButton,
+    terminalLogShowSelectedButton,
+    terminalLogDeleteSelectedButton,
+    terminalLogDeleteAllButton,
+    closeDiagnosticsButton,
+    diagnosticsElement,
+  ].filter((element) => element && !element.hidden && !element.disabled);
+}
+
+// Moves focus inside the diagnostics/log panel without returning it to xterm.
+function focusDiagnosticsPanelItem(delta) {
+  const items = diagnosticsPanelFocusItems();
+  if (items.length === 0) {
+    return;
+  }
+  const currentIndex = items.indexOf(document.activeElement);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
+  items[nextIndex].focus({ preventScroll: true });
+}
+
+// Focuses the first useful log panel control after opening or refreshing logs.
+function focusTerminalLogPanel() {
+  if (!diagnosticsPanel || diagnosticsPanel.hidden) {
+    return;
+  }
+  const preferred = terminalLogSelectElement && !terminalLogSelectElement.hidden
+    ? terminalLogSelectElement
+    : closeDiagnosticsButton;
+  preferred?.focus({ preventScroll: true });
+}
+
+// Selects the next or previous occurrence of the search text in the visible log textarea.
+function scrollDiagnosticsSelectionIntoView(index) {
+  const textBeforeMatch = diagnosticsElement.value.slice(0, index);
+  const lineNumber = textBeforeMatch.split('\n').length - 1;
+  const computedStyle = window.getComputedStyle(diagnosticsElement);
+  const fontSize = Number.parseFloat(computedStyle.fontSize) || 12;
+  const lineHeight = Number.parseFloat(computedStyle.lineHeight) || fontSize * 1.2;
+  const targetTop = Math.max(0, lineNumber * lineHeight - diagnosticsElement.clientHeight / 2);
+  diagnosticsElement.scrollTop = targetTop;
+}
+
+function searchTerminalLogText(direction = 1) {
+  const query = String(terminalLogSearchElement?.value || '');
+  if (!query) {
+    terminalLogSearchState = { query: '', text: '', matches: [], cursor: -1 };
+    if (terminalLogSearchStatusElement) {
+      terminalLogSearchStatusElement.textContent = '';
+    }
+    terminalLogSearchElement?.focus({ preventScroll: true });
+    return false;
+  }
+
+  const text = diagnosticsElement.value || '';
+  const normalizedQuery = query.toLowerCase();
+  const normalizedText = text.toLowerCase();
+  const sameSearch =
+    terminalLogSearchState.query === normalizedQuery &&
+    terminalLogSearchState.text === normalizedText;
+
+  if (!sameSearch) {
+    const matches = [];
+    let start = 0;
+    while (start <= normalizedText.length) {
+      const index = normalizedText.indexOf(normalizedQuery, start);
+      if (index === -1) {
+        break;
+      }
+      matches.push(index);
+      start = index + Math.max(1, normalizedQuery.length);
+    }
+    terminalLogSearchState = {
+      query: normalizedQuery,
+      text: normalizedText,
+      matches,
+      cursor: -1,
+    };
+  }
+
+  if (terminalLogSearchState.matches.length === 0) {
+    terminalLogSearchState.cursor = -1;
+    if (terminalLogSearchStatusElement) {
+      terminalLogSearchStatusElement.textContent = '0/0';
+    }
+    showDiagnostic(`terminal log search not found: ${query}`);
+    terminalLogSearchElement?.focus({ preventScroll: true });
+    return false;
+  }
+
+  const delta = direction < 0 ? -1 : 1;
+  terminalLogSearchState.cursor =
+    (terminalLogSearchState.cursor + delta + terminalLogSearchState.matches.length) %
+    terminalLogSearchState.matches.length;
+  const index = terminalLogSearchState.matches[terminalLogSearchState.cursor];
+  diagnosticsElement.focus({ preventScroll: true });
+  diagnosticsElement.setSelectionRange(index, index + query.length);
+  scrollDiagnosticsSelectionIntoView(index);
+  if (terminalLogSearchStatusElement) {
+    terminalLogSearchStatusElement.textContent = `${terminalLogSearchState.cursor + 1}/${terminalLogSearchState.matches.length}`;
+  }
+  showDiagnostic(`terminal log search matched: ${query} ${terminalLogSearchState.cursor + 1}/${terminalLogSearchState.matches.length}`);
+  return true;
+}
+
+// Restores focus to a log-panel control after native confirmation dialogs close.
+function restoreLogPanelFocus(element, options = {}) {
+  if (!diagnosticsPanel || diagnosticsPanel.hidden) {
+    return;
+  }
+  const fallback = terminalLogSelectElement?.options?.length > 0 ? terminalLogSelectElement : closeDiagnosticsButton;
+  const target = element && !element.hidden && !element.disabled ? element : fallback;
+  const focusTarget = () => {
+    if (diagnosticsPanel.hidden) {
+      return;
+    }
+    diagnosticsPanel.focus({ preventScroll: true });
+    target?.focus({ preventScroll: true });
+  };
+
+  focusTarget();
+
+  if (!options.repeat) {
+    return;
+  }
+
+  afterNextPaint().then(() => {
+    focusTarget();
+  });
+  for (const delay of [0, 50, 120, 240]) {
+    setTimeout(focusTarget, delay);
+  }
+}
+
+// Closes the in-panel confirmation dialog and resolves the pending action.
+function resolveTerminalLogConfirm(confirmed) {
+  if (!terminalLogConfirmElement || terminalLogConfirmElement.hidden) {
+    return;
+  }
+  terminalLogConfirmElement.hidden = true;
+  const resolver = terminalLogConfirmResolver;
+  const returnFocus = terminalLogConfirmReturnFocus;
+  terminalLogConfirmResolver = null;
+  terminalLogConfirmReturnFocus = null;
+  restoreLogPanelFocus(returnFocus, { repeat: true });
+  resolver?.(confirmed);
+}
+
+// Shows an in-panel confirmation dialog so focus stays within the log panel.
+function confirmTerminalLogAction(message, returnFocus) {
+  if (!terminalLogConfirmElement || !terminalLogConfirmMessageElement || !terminalLogConfirmOkButton) {
+    showDiagnostic('terminal log confirmation UI is unavailable');
+    return Promise.resolve(false);
+  }
+
+  if (terminalLogConfirmResolver) {
+    resolveTerminalLogConfirm(false);
+  }
+
+  terminalLogConfirmMessageElement.textContent = message;
+  terminalLogConfirmReturnFocus = returnFocus;
+  terminalLogConfirmElement.hidden = false;
+  terminalLogConfirmOkButton.focus({ preventScroll: true });
+  return new Promise((resolve) => {
+    terminalLogConfirmResolver = resolve;
+  });
+}
+
+// Shows a separate confirmation dialog before broadcasting a close-all request.
+function confirmCloseAllWindows() {
+  if (!closeAllConfirmElement || !closeAllConfirmMessageElement || !closeAllConfirmOkButton) {
+    showDiagnostic('close all confirmation UI is unavailable');
+    return Promise.resolve(false);
+  }
+  closeAllConfirmMessageElement.textContent =
+    'Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window.';
+  closeAllConfirmElement.hidden = false;
+  closeAllConfirmOkButton.focus({ preventScroll: true });
+  return new Promise((resolve) => {
+    closeAllConfirmResolver = resolve;
+  });
+}
+
+// Resolves and hides the close-all confirmation dialog.
+function resolveCloseAllWindows(confirmed) {
+  if (!closeAllConfirmElement || closeAllConfirmElement.hidden) {
+    return;
+  }
+  closeAllConfirmElement.hidden = true;
+  const resolver = closeAllConfirmResolver;
+  closeAllConfirmResolver = null;
+  closeAllWindowsButton.focus({ preventScroll: true });
+  resolver?.(confirmed);
+}
+
+// Asks for confirmation before closing all application instances.
+function requestCloseAllWindows() {
+  window.fpasoterm.confirmCloseAllWindows?.().catch((error) => {
+    showDiagnostic(`close all confirmation failed: ${error}`);
+  });
+}
+
+// Starts or stops terminal output logging from both button clicks and shortcuts.
+function toggleTerminalOutputLog() {
+  const active = terminalLogToggleButton.dataset.active === 'true';
+  const action = active ? stopTerminalOutputLog() : startTerminalOutputLog();
+  action.catch((error) => {
+    terminalLogToggleButton.textContent = 'Error';
+    setTimeout(() => refreshTerminalLogControl().catch(() => {}), 1400);
+    showDiagnostic(`terminal log toggle failed: ${error}`);
+  }).finally(closeLogMenu);
+}
+
+// Opens the terminal log viewer from both button clicks and shortcuts.
+function showTerminalOutputLogFromMenu() {
+  showTerminalOutputLog().catch((error) => {
+    terminalLogShowButton.textContent = 'Error';
+    setTimeout(() => {
+      terminalLogShowButton.textContent = 'Show (^P)';
+    }, 1400);
+    showDiagnostic(`terminal log show failed: ${error}`);
+  }).finally(closeLogMenu);
+}
+
 // Starts terminal output logging to the configured or requested file.
 async function startTerminalOutputLog(path = '') {
   const status = await window.fpasoterm.startTerminalLog(path);
@@ -1183,6 +1470,9 @@ async function stopTerminalOutputLog() {
 function setTerminalLogPickerVisible(visible) {
   for (const element of [
     terminalLogSelectElement,
+    terminalLogSearchElement,
+    terminalLogSearchNextButton,
+    terminalLogSearchStatusElement,
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
@@ -1232,7 +1522,7 @@ function renderTerminalLogPreview(preview) {
     lines.push(`path: ${preview.path}`);
   }
   if (preview.bytes === 0) {
-    lines.push('No terminal output has been captured yet. Use Log Start, run commands, press Log Stop when finished, then press Log Show again.');
+    lines.push('No terminal output has been captured yet. Use Log Start/Stop or Ctrl+Shift+S, run commands, then use Log Show or Ctrl+Shift+P.');
   }
   if (preview.truncated) {
     lines.push('The log is truncated in this view; showing the latest part only.');
@@ -1244,6 +1534,11 @@ function renderTerminalLogPreview(preview) {
   diagnosticsElement.value = lines.join('\n') || 'No terminal output log found.';
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = preview.path || '';
+  terminalLogSearchState = { query: '', text: '', matches: [], cursor: -1 };
+  if (terminalLogSearchStatusElement) {
+    terminalLogSearchStatusElement.textContent = '';
+  }
+  focusTerminalLogPanel();
 }
 
 // Displays the active or most recent terminal output log in the diagnostics panel.
@@ -1262,11 +1557,13 @@ async function showTerminalOutputLog(path = '') {
 
 // Clears all terminal output logs after explicit confirmation.
 async function clearTerminalOutputLog() {
-  const confirmed = window.confirm(
+  const confirmed = await confirmTerminalLogAction(
     'Clear all terminal output logs?\n\nThis will empty the active log file and delete all stopped terminal-*.log files in the configured log directory. This cannot be undone.',
+    terminalLogDeleteAllButton,
   );
   if (!confirmed) {
     showDiagnostic('terminal log clear canceled');
+    restoreLogPanelFocus(terminalLogDeleteAllButton, { repeat: true });
     return null;
   }
 
@@ -1291,9 +1588,13 @@ async function deleteSelectedTerminalOutputLog() {
     showDiagnostic('terminal log delete skipped: no log selected');
     return null;
   }
-  const confirmed = window.confirm(`Delete the selected terminal output log?\n\n${path}\n\nThis cannot be undone.`);
+  const confirmed = await confirmTerminalLogAction(
+    `Delete the selected terminal output log?\n\n${path}\n\nThis cannot be undone.`,
+    terminalLogDeleteSelectedButton,
+  );
   if (!confirmed) {
     showDiagnostic('terminal log delete canceled');
+    restoreLogPanelFocus(terminalLogDeleteSelectedButton, { repeat: true });
     return null;
   }
   const status = await window.fpasoterm.deleteTerminalLog(path);
@@ -1301,38 +1602,49 @@ async function deleteSelectedTerminalOutputLog() {
   diagnosticsElement.value = `${status.message}\npath: ${status.path || '(none)'}`;
   diagnosticsPathElement.textContent = status.path || '';
   showDiagnostic(`terminal log deleted path=${status.path || '(none)'}`);
+  restoreLogPanelFocus(terminalLogSelectElement?.options?.length > 0 ? terminalLogSelectElement : closeDiagnosticsButton, {
+    repeat: true,
+  });
   return status;
 }
 
 // Hides the diagnostics/log panel when it blocks the terminal view.
 closeDiagnosticsButton.addEventListener('click', () => {
   diagnosticsPanel.hidden = true;
+  focusTerminalInput();
 });
 
 terminalLogToggleButton.addEventListener('click', () => {
-  const active = terminalLogToggleButton.dataset.active === 'true';
-  const action = active ? stopTerminalOutputLog() : startTerminalOutputLog();
-  action.catch((error) => {
-    terminalLogToggleButton.textContent = 'Error';
-    setTimeout(() => refreshTerminalLogControl().catch(() => {}), 1400);
-    showDiagnostic(`terminal log toggle failed: ${error}`);
-  }).finally(closeLogMenu);
+  toggleTerminalOutputLog();
 });
 
 terminalLogShowButton.addEventListener('click', () => {
-  showTerminalOutputLog().catch((error) => {
-    terminalLogShowButton.textContent = 'Error';
-    setTimeout(() => {
-      terminalLogShowButton.textContent = 'Show';
-    }, 1400);
-    showDiagnostic(`terminal log show failed: ${error}`);
-  }).finally(closeLogMenu);
+  showTerminalOutputLogFromMenu();
 });
 
 terminalLogShowSelectedButton.addEventListener('click', () => {
   showTerminalOutputLog(terminalLogSelectElement?.value || '').catch((error) => {
     showDiagnostic(`terminal log selected show failed: ${error}`);
   });
+});
+
+terminalLogSearchNextButton.addEventListener('click', () => {
+  searchTerminalLogText();
+});
+
+terminalLogSearchElement.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') {
+    return;
+  }
+  event.preventDefault();
+  searchTerminalLogText();
+});
+
+terminalLogSearchElement.addEventListener('input', () => {
+  terminalLogSearchState = { query: '', text: '', matches: [], cursor: -1 };
+  if (terminalLogSearchStatusElement) {
+    terminalLogSearchStatusElement.textContent = '';
+  }
 });
 
 terminalLogDeleteSelectedButton.addEventListener('click', () => {
@@ -1345,6 +1657,29 @@ terminalLogDeleteAllButton.addEventListener('click', () => {
   clearTerminalOutputLog().catch((error) => {
     showDiagnostic(`terminal log delete all failed: ${error}`);
   });
+});
+
+terminalLogConfirmOkButton.addEventListener('click', () => {
+  resolveTerminalLogConfirm(true);
+});
+
+terminalLogConfirmCancelButton.addEventListener('click', () => {
+  resolveTerminalLogConfirm(false);
+});
+
+closeAllConfirmOkButton.addEventListener('click', () => {
+  resolveCloseAllWindows(true);
+});
+
+closeAllConfirmCancelButton.addEventListener('click', () => {
+  resolveCloseAllWindows(false);
+});
+
+closeAllConfirmElement.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    resolveCloseAllWindows(false);
+  }
 });
 
 terminalCopyButton.addEventListener('click', () => {
@@ -1371,6 +1706,30 @@ logMenuToggleButton.addEventListener('keydown', (event) => {
   }
 });
 
+document.addEventListener('keydown', (event) => {
+  if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) {
+    return;
+  }
+
+  const key = event.key.toLowerCase();
+  if (key === 'l') {
+    event.preventDefault();
+    setLogMenuOpen(logMenuItems?.hidden !== false);
+    return;
+  }
+
+  if (key === 's') {
+    event.preventDefault();
+    toggleTerminalOutputLog();
+    return;
+  }
+
+  if (key === 'p') {
+    event.preventDefault();
+    showTerminalOutputLogFromMenu();
+  }
+}, true);
+
 logMenuItems.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
@@ -1389,9 +1748,91 @@ logMenuItems.addEventListener('keydown', (event) => {
   }
 });
 
+diagnosticsPanel.addEventListener('keydown', (event) => {
+  if (diagnosticsPanel.hidden) {
+    return;
+  }
+
+  if (terminalLogConfirmElement && !terminalLogConfirmElement.hidden) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      resolveTerminalLogConfirm(false);
+      return;
+    }
+
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      focusDiagnosticsPanelItem(event.shiftKey ? -1 : 1);
+    }
+    return;
+  }
+
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    diagnosticsPanel.hidden = true;
+    focusTerminalInput();
+    return;
+  }
+
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    focusDiagnosticsPanelItem(event.shiftKey ? -1 : 1);
+    return;
+  }
+
+  const isSearchInput = event.target === terminalLogSearchElement;
+  const isLogSelector = event.target === terminalLogSelectElement;
+  if (!isSearchInput && !isLogSelector && event.key.toLowerCase() === 'n') {
+    event.preventDefault();
+    searchTerminalLogText(1);
+    return;
+  }
+
+  if (!isSearchInput && !isLogSelector && event.key.toLowerCase() === 'p') {
+    event.preventDefault();
+    searchTerminalLogText(-1);
+    return;
+  }
+
+  if (event.target === diagnosticsElement) {
+    if (event.key.toLowerCase() === 'j') {
+      event.preventDefault();
+      searchTerminalLogText(1);
+      return;
+    }
+
+    if (event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      searchTerminalLogText(-1);
+    }
+    return;
+  }
+
+  if (
+    event.target === terminalLogSelectElement ||
+    event.target === terminalLogSearchElement
+  ) {
+    return;
+  }
+
+  if (['ArrowRight', 'ArrowDown'].includes(event.key)) {
+    event.preventDefault();
+    focusDiagnosticsPanelItem(1);
+    return;
+  }
+
+  if (['ArrowLeft', 'ArrowUp'].includes(event.key)) {
+    event.preventDefault();
+    focusDiagnosticsPanelItem(-1);
+  }
+});
+
 document.addEventListener('pointerdown', (event) => {
   if (logMenu && !logMenu.hidden && !logMenu.contains(event.target)) {
     closeLogMenu();
+  }
+  if (windowMenu && !windowMenuItems.hidden && !windowMenu.contains(event.target)) {
+    setWindowMenuOpen(false);
   }
 });
 
@@ -1413,6 +1854,49 @@ maximizeWindowButton.addEventListener('click', () => {
   window.fpasoterm.toggleMaximizeWindow?.().catch((error) => {
     showDiagnostic(`window maximize failed: ${error}`);
   });
+});
+
+// Requests a grid layout for all currently running fpasoterm windows.
+arrangeWindowButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  window.fpasoterm.arrangeWindows?.(getAvailableScreenBounds())
+    .then((message) => showDiagnostic(message))
+    .catch((error) => showDiagnostic(`window arrange failed: ${error}`));
+});
+
+// Broadcasts a close request to every running fpasoterm process.
+closeAllWindowsButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  requestCloseAllWindows();
+});
+
+// Reports the logical work area so ChromeOS shelf and display scaling are not
+// mistaken for usable native monitor pixels during window tiling.
+function getAvailableScreenBounds() {
+  const screen = window.screen;
+  return {
+    width: screen.availWidth,
+    height: screen.availHeight,
+    left: screen.availLeft || 0,
+    top: screen.availTop || 0,
+    devicePixelRatio: window.devicePixelRatio || 1,
+  };
+}
+
+// Opens or closes the compact window action menu.
+function setWindowMenuOpen(open) {
+  if (!windowMenuItems || !windowMenuToggleButton) {
+    return;
+  }
+  windowMenuItems.hidden = !open;
+  windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    arrangeWindowButton.focus();
+  }
+}
+
+windowMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuOpen(windowMenuItems.hidden);
 });
 
 // Starts native window dragging from the custom titlebar on Tauri.

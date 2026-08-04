@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Confirm</title>
+    <style>
+      :root { color-scheme: dark; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+      body { margin: 0; min-height: 100vh; display: grid; place-items: center; background: #171b21; color: #e8edf2; }
+      main { width: min(360px, calc(100vw - 32px)); }
+      h1 { margin: 0 0 12px; color: #f5d76e; font-size: 14px; }
+      p { margin: 0 0 20px; white-space: pre-wrap; font-size: 12px; line-height: 1.5; }
+      footer { display: flex; justify-content: flex-end; gap: 8px; }
+      button { min-width: 76px; height: 28px; border: 1px solid #3b4652; border-radius: 4px; background: #222932; color: #e8edf2; font: inherit; font-size: 12px; }
+      button:focus-visible { outline: 2px solid #f5d76e; outline-offset: 2px; }
+    </style>
+  </head>
+  <body>
+    <main role="dialog" aria-modal="true" aria-labelledby="title">
+      <h1 id="title">Close all fpasoterm windows?</h1>
+      <p>This will terminate every running fpasoterm window.</p>
+      <footer>
+        <button id="cancel" type="button">Cancel</button>
+        <button id="ok" type="button">OK</button>
+      </footer>
+    </main>
+    <script>
+      const invoke = window.__TAURI__.core.invoke;
+      const currentWindow = window.__TAURI__.window.getCurrentWindow();
+      const ok = document.getElementById('ok');
+      const cancel = document.getElementById('cancel');
+      const focusConfirmWindow = () => {
+        currentWindow.setFocus().catch(() => {});
+        cancel.focus({ preventScroll: true });
+      };
+      focusConfirmWindow();
+      window.addEventListener('load', focusConfirmWindow);
+      setTimeout(focusConfirmWindow, 80);
+      const focusMainAndClose = () => invoke('window_cancel_close_all').catch(() => currentWindow.close().catch(() => {}));
+      const closeConfirmWindow = () => currentWindow.close().catch(() => {});
+      ok.addEventListener('click', () => invoke('window_close_all_confirmed').catch(closeConfirmWindow));
+      cancel.addEventListener('click', focusMainAndClose);
+      window.addEventListener('keydown', (event) => {
+        if (event.key === 'Tab') {
+          event.preventDefault();
+          (document.activeElement === cancel ? ok : cancel).focus();
+          return;
+        }
+        if (event.key === 'Enter' && document.activeElement instanceof HTMLButtonElement) {
+          event.preventDefault();
+          document.activeElement.click();
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          focusMainAndClose();
+        }
+      });
+    </script>
+  </body>
+</html>

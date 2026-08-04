@@ -47,7 +47,7 @@ body {
 #window-title {
   grid-column: 2;
   min-width: 0;
-  max-width: max(120px, calc(100vw - 430px));
+  max-width: max(120px, calc(100vw - 250px));
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -84,6 +84,10 @@ body {
   display: none;
 }
 
+#window-menu-items[hidden] {
+  display: none;
+}
+
 #log-menu-toggle {
   width: auto;
   min-width: 74px;
@@ -98,6 +102,46 @@ body {
   height: 24px;
   app-region: no-drag;
   -webkit-app-region: no-drag;
+}
+
+#window-menu {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 24px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#window-menu-toggle {
+  width: 28px;
+  padding: 0;
+  font-size: 16px;
+}
+
+#window-menu-items {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 10020;
+  display: grid;
+  min-width: 128px;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(17, 21, 26, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#window-menu-items button {
+  width: 100%;
+  min-width: 0;
+  padding: 0 8px;
+  text-align: left;
+  white-space: nowrap;
 }
 
 #log-menu-toggle[data-active="true"] {
@@ -306,7 +350,26 @@ body {
   font: inherit;
 }
 
+#terminal-log-search {
+  width: min(170px, 20vw);
+  height: 22px;
+  min-width: 86px;
+  padding: 0 6px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: inherit;
+}
+
+#terminal-log-search-status {
+  min-width: 34px;
+  color: #f5d76e;
+  text-align: right;
+}
+
 #terminal-log-show-selected,
+#terminal-log-search-next,
 #terminal-log-delete-selected,
 #terminal-log-delete-all,
 #close-diagnostics {
@@ -316,6 +379,21 @@ body {
   background: #222932;
   color: #e8edf2;
   font: inherit;
+}
+
+#diagnostics-panel select:focus,
+#diagnostics-panel input:focus,
+#diagnostics-panel button:focus,
+#diagnostics-panel textarea:focus,
+#diagnostics-panel select:focus-visible,
+#diagnostics-panel input:focus-visible,
+#diagnostics-panel button:focus-visible,
+#diagnostics-panel textarea:focus-visible {
+  outline: 3px solid #f5d76e;
+  outline-offset: 2px;
+  border-color: #f5d76e;
+  background: #314156;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.92), 0 0 0 5px rgba(245, 215, 110, 0.62);
 }
 
 #diagnostics {
@@ -332,6 +410,77 @@ body {
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   resize: none;
   white-space: pre;
+}
+
+#diagnostics::selection {
+  background: #f5d76e;
+  color: #11151a;
+}
+
+#terminal-log-confirm[hidden] {
+  display: none;
+}
+
+#terminal-log-confirm,
+#close-all-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(10, 14, 18, 0.72);
+}
+
+#close-all-confirm[hidden] {
+  display: none;
+}
+
+.terminal-log-confirm-card {
+  width: min(520px, 100%);
+  padding: 12px;
+  border: 1px solid #f5d76e;
+  border-radius: 6px;
+  background: #171b21;
+  color: #e8edf2;
+  box-shadow: 0 10px 36px rgba(0, 0, 0, 0.48);
+}
+
+#terminal-log-confirm-title {
+  color: #f5d76e;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#close-all-confirm-title {
+  color: #f5d76e;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-log-confirm-message {
+  max-height: 140px;
+  overflow: auto;
+  margin: 8px 0 12px;
+  color: #e8edf2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.terminal-log-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+#terminal-log-confirm-ok,
+#terminal-log-confirm-cancel {
+  height: 24px;
+  min-width: 72px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 #diagnostics-path {

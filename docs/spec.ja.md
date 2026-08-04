@@ -2,7 +2,7 @@
 
 ## 目的
 
-fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割や複数 window の管理はアプリ側で行いません。
+fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割はアプリ側で行いません。複数 window は titlebar の操作で並べられます。
 
 ## 構成
 
@@ -17,7 +17,9 @@ fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクト�
 
 fpasoterm は `かな` / `英数` などの日本語キーボードキーを横取りしません。IME の切替と composition は platform webview と OS に任せます。
 
-terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。titlebar の Log menu には keyboard 操作用の `Copy` / `Paste` button も表示します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は `Ctrl+Shift+V`、Log menu の `Paste` button、右クリック paste で OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。
+terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。titlebar の `Log (^L)` menu は `Ctrl+Shift+L` で開き、`Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で logging を切り替え、`Show (^P)` または `Ctrl+Shift+P` で captured log の Show を実行できます。Log menu には keyboard 操作用の `Copy (^C)` / `Paste (^V)` button も表示します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は `Ctrl+Shift+V`、Log menu の `Paste (^V)` button、右クリック paste で OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。
+
+terminal log panel が開いている間、keyboard focus は panel 内に留まります。`Tab` と `Shift+Tab` で log selector、検索欄、操作 button、close button、log text area を循環できます。focus された control は高 contrast の outline で表示します。`Search` button は表示中の log から次の一致文字列を選択してその位置へ scroll し、現在の一致番号を表示します。`N` と `j` は次の一致、`P` と `k` は前の一致へ移動します。矢印キーは通常の text area scroll 用に残します。
 
 npm binary 名は `fpasoterm` です。Linux では `--disable-dmabuf` により、WebKitGTK の描画診断用に `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定できます。
 既定では launcher はコンソールから切り離して起動します。debug 時は `--foreground` で接続したままにできます。
@@ -33,6 +35,11 @@ npm install -g fpasoterm
 `npm run update:desktop` は同じ command、launcher entry、hicolor icon files を上書きします。`npm run uninstall:desktop` は source checkout や npm dependencies を削除せず、インストール済みファイルだけを削除します。Windows では current user の `Path` から fpasoterm 関連 directory だけを削除し、共有 npm directory は削除しません。
 
 プロジェクトアイコンは `extra/logo/fpasoterm.png` です。
+
+複数の fpasoterm を起動している場合、titlebar の window menu にある
+`Tile (^T)`、または `Ctrl+Shift+T` で格子状に配置できます。Windows と
+X11 では native placement を使用します。Wayland compositor が位置変更を
+拒否した場合は、diagnostics に要求位置と実際の位置を記録します。
 
 アプリケーションウィンドウはこの PNG を runtime icon として使います。Linux desktop entry は `Icon=fpasoterm` を参照するため、installer はこの画像を対象環境の icon theme へ配置します。サイズ別 hicolor PNG は `extra/linux/icons/hicolor/` に生成します。
 
@@ -70,7 +77,7 @@ renderer plugin は `window.fpasotermPluginApi` から terminal、fit addon、�
 診断ログは以下へ保存されます。
 
 ```text
-diagnostics/fpasoterm-debug.log
+~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shift+C` copy 経路を使います。
@@ -78,6 +85,6 @@ diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shif
 ## 非目標
 
 - fpasoterm は IBus engine を管理しません。
-- fpasoterm は画面分割や複数 window の管理を実装しません。
+- fpasoterm は画面分割を実装しません。screen、tmux、byobu、herdr などを使用してください。
 - fpasoterm は OS レベルの日本語入力切替を独自実装しません。
 - fpasoterm は shell の挙動を独自実装しません。shell との接続は portable-pty に任せます。

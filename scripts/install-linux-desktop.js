@@ -9,6 +9,7 @@ const binHome = process.env.XDG_BIN_HOME || path.join(os.homedir(), '.local', 'b
 const applicationsDir = path.join(dataHome, 'applications');
 const iconsDir = path.join(dataHome, 'icons', 'hicolor');
 const iconSizes = [16, 32, 48, 64, 128, 192, 256, 512];
+const buildStampPath = path.join(root, 'src-tauri', 'target', 'debug', '.fpasoterm-normal-build.json');
 
 // Builds a current local Tauri binary so launcher icon starts do not fall back
 // to `tauri dev`, which runs Cargo watch and looks like a failed GUI launch.
@@ -33,6 +34,31 @@ function buildLocalBinary() {
   if (result.status !== 0) {
     throw new Error(`cargo build failed with exit code ${result.status}`);
   }
+  writeBuildStamp(path.join(root, 'src-tauri', 'target', 'debug', process.platform === 'win32' ? 'fpasoterm.exe' : 'fpasoterm'));
+}
+
+// Tracks source files that require rebuilding the local Tauri binary.
+function latestRuntimeSourceMtime() {
+  return [
+    'src-tauri/src/main.rs',
+    'src-tauri/Cargo.toml',
+    'src-tauri/tauri.conf.json',
+  ]
+    .map((relativePath) => path.join(root, relativePath))
+    .filter((sourcePath) => fs.existsSync(sourcePath))
+    .reduce((latest, sourcePath) => Math.max(latest, fs.statSync(sourcePath).mtimeMs), 0);
+}
+
+// Writes the same normal-build stamp used by bin/fpasoterm to skip rebuilds.
+function writeBuildStamp(binary) {
+  if (!fs.existsSync(binary)) {
+    return;
+  }
+  fs.writeFileSync(buildStampPath, JSON.stringify({
+    binary,
+    binaryMtime: fs.statSync(binary).mtimeMs,
+    sourceMtime: latestRuntimeSourceMtime(),
+  }, null, 2));
 }
 
 // Copies one desktop or icon file, creating the target directory first.
@@ -82,12 +108,15 @@ function desktopExec(value) {
 function installDesktopEntry(commandPath) {
   const source = path.join(root, 'extra', 'linux', 'io.github.oyoguhito.fpasoterm.desktop');
   const target = path.join(applicationsDir, 'io.github.oyoguhito.fpasoterm.desktop');
+  const shortTarget = path.join(applicationsDir, 'fpasoterm.desktop');
   const desktop = fs.readFileSync(source, 'utf8')
     .replace(/^Exec=.*$/m, `Exec=${desktopExec(commandPath)}`)
     .replace(/^Icon=.*$/m, 'Icon=io.github.oyoguhito.fpasoterm');
   fs.mkdirSync(path.dirname(target), { recursive: true });
   fs.writeFileSync(target, desktop);
+  fs.writeFileSync(shortTarget, desktop);
   console.log(`${source} -> ${target}`);
+  console.log(`${source} -> ${shortTarget}`);
 }
 
 // Installs the local fpasoterm command wrapper into the user's bin directory.

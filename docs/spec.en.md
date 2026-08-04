@@ -2,7 +2,7 @@
 
 ## Purpose
 
-fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes or multiple-window management itself.
+fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes. Multiple application windows can be tiled from the titlebar.
 
 ## Architecture
 
@@ -17,7 +17,9 @@ fpasoterm is a desktop terminal application focused on Japanese input in ChromeO
 
 fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to the platform webview and the operating system.
 
-For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The titlebar Log menu also exposes `Copy` and `Paste` buttons for keyboard-driven operation. Right-click copies when a terminal selection exists; otherwise it pastes. For terminal paste, `Ctrl+Shift+V`, the Log menu `Paste` button, and right-click paste read the OS clipboard through the backend and send it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard.
+For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The titlebar `Log (^L)` menu opens with `Ctrl+Shift+L`, toggles logging with `Start (^S)` / `Stop (^S)` or `Ctrl+Shift+S`, and shows captured logs with `Show (^P)` or `Ctrl+Shift+P`. It also exposes `Copy (^C)` and `Paste (^V)` buttons for keyboard-driven operation. Right-click copies when a terminal selection exists; otherwise it pastes. For terminal paste, `Ctrl+Shift+V`, the Log menu `Paste (^V)` button, and right-click paste read the OS clipboard through the backend and send it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard.
+
+The terminal log panel keeps keyboard focus inside the panel while it is open. `Tab` and `Shift+Tab` cycle through the log selector, search field, action buttons, close button, and log text area. The focused control is shown with a high-contrast outline. The `Search` button selects and scrolls to the next matching string in the displayed log and shows the current match count. `N` and `j` move to the next match, while `P` and `k` move to the previous match. Arrow keys remain reserved for normal text area scrolling.
 
 The npm binary name is `fpasoterm`. On Linux, `--disable-dmabuf` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` for WebKitGTK rendering diagnostics.
 By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
@@ -33,6 +35,12 @@ For an unpacked checkout, `npm run install:desktop` installs a local `fpasoterm`
 `npm run update:desktop` overwrites the same command, launcher entry, and hicolor icon files. `npm run uninstall:desktop` removes those installed files without removing the source checkout or npm dependencies. On Windows, `npm run uninstall:desktop` removes only fpasoterm-specific directories from the current user's `Path`; shared npm directories are not removed.
 
 The project icon is `extra/logo/fpasoterm.png`.
+
+When multiple instances are running, the titlebar window menu exposes
+`Tile (^T)`, and `Ctrl+Shift+T` invokes the same grid arrangement. Windows and
+X11 support native placement. Wayland compositors may reject application-
+controlled positions; the diagnostic log records the requested and actual
+positions in that case.
 
 The application window uses that PNG as its runtime icon. Linux desktop entries still refer to `Icon=fpasoterm` so installers can place the image in the target icon theme. Size-specific hicolor PNGs are generated under `extra/linux/icons/hicolor/`.
 
@@ -70,7 +78,7 @@ Set `FPASOTERM_DEBUG_KEYS=1` to log key and composition events.
 Diagnostics are written to:
 
 ```text
-diagnostics/fpasoterm-debug.log
+~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as the terminal selection.
@@ -78,6 +86,6 @@ The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as
 ## Non-goals
 
 - fpasoterm does not manage IBus engines.
-- fpasoterm does not implement split panes or multiple-window management.
+- fpasoterm does not implement split panes; use screen, tmux, byobu, or herdr.
 - fpasoterm does not emulate OS-level Japanese input switching.
 - fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through portable-pty.
