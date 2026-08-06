@@ -2,7 +2,7 @@
 
 ## Purpose
 
-fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes or multiple-window management itself.
+fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes. Multiple application windows can be tiled from the titlebar.
 
 ## Architecture
 
@@ -35,6 +35,12 @@ For an unpacked checkout, `npm run install:desktop` installs a local `fpasoterm`
 `npm run update:desktop` overwrites the same command, launcher entry, and hicolor icon files. `npm run uninstall:desktop` removes those installed files without removing the source checkout or npm dependencies. On Windows, `npm run uninstall:desktop` removes only fpasoterm-specific directories from the current user's `Path`; shared npm directories are not removed.
 
 The project icon is `extra/logo/fpasoterm.png`.
+
+When multiple instances are running, the titlebar window menu exposes
+`Tile (^T)`, and `Ctrl+Shift+T` invokes the same grid arrangement. Windows and
+X11 support native placement. Wayland compositors may reject application-
+controlled positions; the diagnostic log records the requested and actual
+positions in that case.
 
 The application window uses that PNG as its runtime icon. Linux desktop entries still refer to `Icon=fpasoterm` so installers can place the image in the target icon theme. Size-specific hicolor PNGs are generated under `extra/linux/icons/hicolor/`.
 
@@ -72,7 +78,7 @@ Set `FPASOTERM_DEBUG_KEYS=1` to log key and composition events.
 Diagnostics are written to:
 
 ```text
-diagnostics/fpasoterm-debug.log
+~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as the terminal selection.
@@ -80,6 +86,6 @@ The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as
 ## Non-goals
 
 - fpasoterm does not manage IBus engines.
-- fpasoterm does not implement split panes or multiple-window management.
+- fpasoterm does not implement split panes; use screen, tmux, byobu, or herdr.
 - fpasoterm does not emulate OS-level Japanese input switching.
 - fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through portable-pty.

@@ -2,7 +2,7 @@
 
 ## 目的
 
-fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割や複数 window の管理はアプリ側で行いません。
+fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割はアプリ側で行いません。複数 window は titlebar の操作で並べられます。
 
 ## 構成
 
@@ -35,6 +35,11 @@ npm install -g fpasoterm
 `npm run update:desktop` は同じ command、launcher entry、hicolor icon files を上書きします。`npm run uninstall:desktop` は source checkout や npm dependencies を削除せず、インストール済みファイルだけを削除します。Windows では current user の `Path` から fpasoterm 関連 directory だけを削除し、共有 npm directory は削除しません。
 
 プロジェクトアイコンは `extra/logo/fpasoterm.png` です。
+
+複数の fpasoterm を起動している場合、titlebar の window menu にある
+`Tile (^T)`、または `Ctrl+Shift+T` で格子状に配置できます。Windows と
+X11 では native placement を使用します。Wayland compositor が位置変更を
+拒否した場合は、diagnostics に要求位置と実際の位置を記録します。
 
 アプリケーションウィンドウはこの PNG を runtime icon として使います。Linux desktop entry は `Icon=fpasoterm` を参照するため、installer はこの画像を対象環境の icon theme へ配置します。サイズ別 hicolor PNG は `extra/linux/icons/hicolor/` に生成します。
 
@@ -72,7 +77,7 @@ renderer plugin は `window.fpasotermPluginApi` から terminal、fit addon、�
 診断ログは以下へ保存されます。
 
 ```text
-diagnostics/fpasoterm-debug.log
+~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
 diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shift+C` copy 経路を使います。
@@ -80,6 +85,6 @@ diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shif
 ## 非目標
 
 - fpasoterm は IBus engine を管理しません。
-- fpasoterm は画面分割や複数 window の管理を実装しません。
+- fpasoterm は画面分割を実装しません。screen、tmux、byobu、herdr などを使用してください。
 - fpasoterm は OS レベルの日本語入力切替を独自実装しません。
 - fpasoterm は shell の挙動を独自実装しません。shell との接続は portable-pty に任せます。

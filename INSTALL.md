@@ -275,12 +275,12 @@ The wrapper records the Node.js executable used during installation and also
 falls back to common `node` paths. This avoids ChromeOS launcher failures when
 the launcher environment does not include the user's shell `PATH`.
 
-The installed desktop entry uses
-`StartupWMClass=io.github.oyoguhito.fpasoterm` and
-`Icon=io.github.oyoguhito.fpasoterm` so ChromeOS can match the running window to
-the launcher entry and show the fpasoterm shelf icon and hover name. The
-installer writes both `io.github.oyoguhito.fpasoterm.png` and `fpasoterm.png`
-icon names into the hicolor icon theme.
+The installed desktop entry uses `StartupWMClass=fpasoterm` and
+`Icon=io.github.oyoguhito.fpasoterm`. The GTK application id is disabled so
+multiple fpasoterm windows can be started from the CLI or launcher while the
+launcher still resolves the fpasoterm shelf icon and hover name. The installer
+writes both `io.github.oyoguhito.fpasoterm.png` and `fpasoterm.png` icon names
+into the hicolor icon theme.
 
 Regenerate launcher icon sizes after replacing `extra/logo/fpasoterm.png`:
 

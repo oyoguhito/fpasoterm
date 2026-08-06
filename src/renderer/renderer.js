@@ -18,6 +18,15 @@ const terminalLogConfirmCancelButton = document.getElementById('terminal-log-con
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
+const arrangeWindowButton = document.getElementById('arrange-window');
+const closeAllWindowsButton = document.getElementById('close-all-windows');
+const closeAllConfirmElement = document.getElementById('close-all-confirm');
+const closeAllConfirmMessageElement = document.getElementById('close-all-confirm-message');
+const closeAllConfirmOkButton = document.getElementById('close-all-confirm-ok');
+const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-cancel');
+const windowMenu = document.getElementById('window-menu');
+const windowMenuToggleButton = document.getElementById('window-menu-toggle');
+const windowMenuItems = document.getElementById('window-menu-items');
 const logMenu = document.getElementById('log-menu');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
@@ -30,6 +39,7 @@ const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
 let terminalMirrorText = '';
+let closeAllConfirmResolver = null;
 const fallbackConfig = {
   window: {
     backgroundColor: 'rgba(0, 0, 0, 0)',
@@ -167,6 +177,9 @@ function installTauriApiAdapter() {
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
+    arrangeWindows: (screen) => invoke('window_arrange', { screen }),
+    closeAllWindows: () => invoke('window_close_all'),
+    confirmCloseAllWindows: () => invoke('window_confirm_close_all'),
     startWindowDrag: () => invoke('window_start_drag'),
     startWindowResizeDrag: (direction) => window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction),
     saveWindowBounds: () => invoke('window_save_bounds'),
@@ -589,6 +602,28 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const isArrangeShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') ||
+      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 't');
+    if (isArrangeShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      window.fpasoterm.arrangeWindows?.(getAvailableScreenBounds())
+        .then((message) => showDiagnostic(message))
+        .catch((error) => showDiagnostic(`window arrange failed: ${error}`));
+      return;
+    }
+
+    const isCloseAllShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'x') ||
+      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'x');
+    if (isCloseAllShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      requestCloseAllWindows();
+      return;
+    }
+
     const isCopyShortcut =
       (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') ||
       (event.metaKey && event.key.toLowerCase() === 'c');
@@ -1359,6 +1394,40 @@ function confirmTerminalLogAction(message, returnFocus) {
   });
 }
 
+// Shows a separate confirmation dialog before broadcasting a close-all request.
+function confirmCloseAllWindows() {
+  if (!closeAllConfirmElement || !closeAllConfirmMessageElement || !closeAllConfirmOkButton) {
+    showDiagnostic('close all confirmation UI is unavailable');
+    return Promise.resolve(false);
+  }
+  closeAllConfirmMessageElement.textContent =
+    'Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window.';
+  closeAllConfirmElement.hidden = false;
+  closeAllConfirmOkButton.focus({ preventScroll: true });
+  return new Promise((resolve) => {
+    closeAllConfirmResolver = resolve;
+  });
+}
+
+// Resolves and hides the close-all confirmation dialog.
+function resolveCloseAllWindows(confirmed) {
+  if (!closeAllConfirmElement || closeAllConfirmElement.hidden) {
+    return;
+  }
+  closeAllConfirmElement.hidden = true;
+  const resolver = closeAllConfirmResolver;
+  closeAllConfirmResolver = null;
+  closeAllWindowsButton.focus({ preventScroll: true });
+  resolver?.(confirmed);
+}
+
+// Asks for confirmation before closing all application instances.
+function requestCloseAllWindows() {
+  window.fpasoterm.confirmCloseAllWindows?.().catch((error) => {
+    showDiagnostic(`close all confirmation failed: ${error}`);
+  });
+}
+
 // Starts or stops terminal output logging from both button clicks and shortcuts.
 function toggleTerminalOutputLog() {
   const active = terminalLogToggleButton.dataset.active === 'true';
@@ -1598,6 +1667,21 @@ terminalLogConfirmCancelButton.addEventListener('click', () => {
   resolveTerminalLogConfirm(false);
 });
 
+closeAllConfirmOkButton.addEventListener('click', () => {
+  resolveCloseAllWindows(true);
+});
+
+closeAllConfirmCancelButton.addEventListener('click', () => {
+  resolveCloseAllWindows(false);
+});
+
+closeAllConfirmElement.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    resolveCloseAllWindows(false);
+  }
+});
+
 terminalCopyButton.addEventListener('click', () => {
   copyTerminalSelection().catch((error) => {
     showDiagnostic(`terminal menu copy failed: ${error}`);
@@ -1747,6 +1831,9 @@ document.addEventListener('pointerdown', (event) => {
   if (logMenu && !logMenu.hidden && !logMenu.contains(event.target)) {
     closeLogMenu();
   }
+  if (windowMenu && !windowMenuItems.hidden && !windowMenu.contains(event.target)) {
+    setWindowMenuOpen(false);
+  }
 });
 
 
@@ -1767,6 +1854,49 @@ maximizeWindowButton.addEventListener('click', () => {
   window.fpasoterm.toggleMaximizeWindow?.().catch((error) => {
     showDiagnostic(`window maximize failed: ${error}`);
   });
+});
+
+// Requests a grid layout for all currently running fpasoterm windows.
+arrangeWindowButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  window.fpasoterm.arrangeWindows?.(getAvailableScreenBounds())
+    .then((message) => showDiagnostic(message))
+    .catch((error) => showDiagnostic(`window arrange failed: ${error}`));
+});
+
+// Broadcasts a close request to every running fpasoterm process.
+closeAllWindowsButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  requestCloseAllWindows();
+});
+
+// Reports the logical work area so ChromeOS shelf and display scaling are not
+// mistaken for usable native monitor pixels during window tiling.
+function getAvailableScreenBounds() {
+  const screen = window.screen;
+  return {
+    width: screen.availWidth,
+    height: screen.availHeight,
+    left: screen.availLeft || 0,
+    top: screen.availTop || 0,
+    devicePixelRatio: window.devicePixelRatio || 1,
+  };
+}
+
+// Opens or closes the compact window action menu.
+function setWindowMenuOpen(open) {
+  if (!windowMenuItems || !windowMenuToggleButton) {
+    return;
+  }
+  windowMenuItems.hidden = !open;
+  windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (open) {
+    arrangeWindowButton.focus();
+  }
+}
+
+windowMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuOpen(windowMenuItems.hidden);
 });
 
 // Starts native window dragging from the custom titlebar on Tauri.
