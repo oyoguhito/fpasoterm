@@ -18,6 +18,7 @@ const terminalLogConfirmCancelButton = document.getElementById('terminal-log-con
 const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
+const newWindowButton = document.getElementById('new-window');
 const arrangeWindowButton = document.getElementById('arrange-window');
 const closeAllWindowsButton = document.getElementById('close-all-windows');
 const closeAllConfirmElement = document.getElementById('close-all-confirm');
@@ -177,6 +178,7 @@ function installTauriApiAdapter() {
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
+    newWindow: () => invoke('window_new'),
     arrangeWindows: (screen) => invoke('window_arrange', { screen }),
     closeAllWindows: () => invoke('window_close_all'),
     confirmCloseAllWindows: () => invoke('window_confirm_close_all'),
@@ -602,6 +604,16 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const isNewWindowShortcut =
+      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'n') ||
+      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'n');
+    if (isNewWindowShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      window.fpasoterm.newWindow?.().catch((error) => showDiagnostic(`new window failed: ${error}`));
+      return;
+    }
+
     const isArrangeShortcut =
       (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') ||
       (event.metaKey && event.shiftKey && event.key.toLowerCase() === 't');
@@ -1856,6 +1868,12 @@ maximizeWindowButton.addEventListener('click', () => {
   });
 });
 
+// Starts another fpasoterm process for a separate terminal window.
+newWindowButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  window.fpasoterm.newWindow?.().catch((error) => showDiagnostic(`new window failed: ${error}`));
+});
+
 // Requests a grid layout for all currently running fpasoterm windows.
 arrangeWindowButton.addEventListener('click', () => {
   setWindowMenuOpen(false);
@@ -1891,7 +1909,7 @@ function setWindowMenuOpen(open) {
   windowMenuItems.hidden = !open;
   windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (open) {
-    arrangeWindowButton.focus();
+    newWindowButton.focus();
   }
 }
 
