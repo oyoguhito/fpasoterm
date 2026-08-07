@@ -1,6 +1,6 @@
 [package]
 name = "fpasoterm"
-version = "1.4.0"
+version = "1.4.1"
 description = "Cross-platform terminal with Japanese IME support."
 authors = ["oyoguhito"]
 edition = "2021"
@@ -17,4 +17,4 @@ tauri = { version = "2.9.2", features = ["image-png", "macos-private-api"] }
 toml = "0.9.8"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Memory", "Win32_System_Threading"] }

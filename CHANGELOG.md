@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.1
+
+- Added a Window menu `New (^N)` action and `Ctrl+Shift+N` / `Cmd+Shift+N` shortcut for opening another fpasoterm window.
+- Fixed Windows Tile target detection by checking live instance PIDs with the Windows process API instead of treating stale markers as active.
+- Made the Close All confirmation window explicit, decorated, non-transparent, visible, resizable, and larger so Windows users can cancel, confirm, or close it normally.
+
 ## 1.4.0
 
 - Improved Tile sizing by converting renderer logical screen dimensions to native physical pixels with the display device pixel ratio.

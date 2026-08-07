@@ -19,7 +19,7 @@ use tauri::{
     WebviewWindowBuilder, WindowEvent,
 };
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::GlobalFree;
+use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
@@ -28,6 +28,10 @@ use windows_sys::Win32::System::DataExchange::{
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Memory::{
     GlobalAlloc, GlobalLock, GlobalSize, GlobalUnlock, GMEM_MOVEABLE,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Threading::{
+    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
 };
 
 #[cfg(target_os = "windows")]
@@ -415,6 +419,7 @@ fn main() {
             window_start_drag,
             window_arrange,
             window_close_all,
+            window_new,
             window_confirm_close_all,
             window_close_all_confirmed,
             window_focus_main,
@@ -610,14 +615,37 @@ fn instance_marker_is_live(pid: u32, path: &Path) -> bool {
         return Path::new("/proc").join(pid.to_string()).exists();
     }
 
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "windows")]
     {
+        let _ = path;
+        process_is_live(pid)
+    }
+
+    #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
+    {
+        let _ = pid;
         fs::metadata(path)
             .and_then(|metadata| metadata.modified())
             .ok()
             .and_then(|modified| modified.elapsed().ok())
             .map(|age| age < Duration::from_secs(24 * 60 * 60))
             .unwrap_or(false)
+    }
+}
+
+#[cfg(target_os = "windows")]
+// Checks whether a Windows process id still belongs to a running process.
+fn process_is_live(pid: u32) -> bool {
+    const STILL_ACTIVE: u32 = 259;
+    unsafe {
+        let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if handle == ptr::null_mut() {
+            return false;
+        }
+        let mut exit_code = 0u32;
+        let ok = GetExitCodeProcess(handle, &mut exit_code);
+        let _ = CloseHandle(handle);
+        ok != 0 && exit_code == STILL_ACTIVE
     }
 }
 
@@ -939,11 +967,31 @@ fn window_close_all(app: AppHandle) -> Result<String, String> {
     Ok("closed all fpasoterm windows".to_string())
 }
 
+#[tauri::command]
+// Starts a separate fpasoterm process so users can open another terminal window.
+fn window_new() -> Result<String, String> {
+    spawn_new_instance()?;
+    Ok("opened a new fpasoterm window".to_string())
+}
+
+// Runs the current executable again without inheriting per-instance runtime
+// overrides. The child loads the base config and claims its own title suffix.
+fn spawn_new_instance() -> Result<(), String> {
+    let executable = env::current_exe().map_err(|error| error.to_string())?;
+    Command::new(executable)
+        .env_remove("FPASOTERM_RUNTIME_CONFIG_JSON")
+        .spawn()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
+}
+
 // Opens a separate native confirmation window so the prompt is visible even
 // when the terminal content is busy or visually obscured.
 #[tauri::command]
 fn window_confirm_close_all(app: AppHandle) -> Result<String, String> {
     if let Some(window) = app.get_webview_window("close-all-confirm") {
+        let _ = window.show();
+        let _ = window.unminimize();
         let _ = window.set_focus();
         return Ok("close confirmation already open".to_string());
     }
@@ -953,9 +1001,13 @@ fn window_confirm_close_all(app: AppHandle) -> Result<String, String> {
         WebviewUrl::App("confirm.html".into()),
     )
     .title("Confirm close all fpasoterm windows")
-    .inner_size(420.0, 190.0)
-    .min_inner_size(360.0, 160.0)
-    .resizable(false)
+    .inner_size(600.0, 280.0)
+    .min_inner_size(520.0, 220.0)
+    .resizable(true)
+    .decorations(true)
+    .transparent(false)
+    .visible(true)
+    .always_on_top(true)
     .focused(true)
     .center()
     .build()
