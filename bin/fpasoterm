@@ -69,6 +69,8 @@ function appendLauncherLog(message) {
 
 // Converts CLI options into environment variables consumed by the main process.
 function parseArgs(argv) {
+  validateArgs(argv);
+
   if (argv.includes('--help') || argv.includes('-h')) {
     return { help: true };
   }
@@ -225,7 +227,9 @@ function parseArgs(argv) {
       continue;
     }
 
-    runtimeArgs.push(arg);
+    throw new Error(arg.startsWith('-')
+      ? `unknown option: ${arg}`
+      : `unexpected argument: ${arg}`);
   }
 
   return {
@@ -248,6 +252,36 @@ function parseArgs(argv) {
     disablePlugins,
     runtimeArgs,
   };
+}
+
+// Rejects unknown options before help/version handling can bypass validation.
+function validateArgs(argv) {
+  const flags = new Set([
+    '--help', '-h', '--version', '-v', '--dev', '-d', '--foreground', '-F',
+    '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
+    '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r',
+    '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
+  ]);
+  const valueOptions = new Set([
+    '--config', '-c', '--shell', '-s', '--command', '-e', '--title', '-t',
+    '--titlebar-color', '-b', '--enable-plugin', '--disable-plugin', '--width', '-W',
+    '--height', '-H', '--size', '-z',
+  ]);
+
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (flags.has(arg)) {
+      continue;
+    }
+    if (valueOptions.has(arg)) {
+      requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+    throw new Error(arg.startsWith('-')
+      ? `unknown option: ${arg}`
+      : `unexpected argument: ${arg}`);
+  }
 }
 
 // Prints the package version without starting the desktop process.
@@ -969,7 +1003,7 @@ try {
   }
 } catch (error) {
   console.error(`fpasoterm: ${error.message}`);
-  console.error('Try `fpasoterm --help` for usage.');
+  console.error(helpText.trimEnd());
   // Let stdout/stderr flush before Node exits, including when called from a pipe.
   process.exitCode = 2;
 }

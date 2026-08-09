@@ -98,6 +98,7 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
+# When omitted, the default is 13 on Intel macOS and 14 on other platforms.
 lineHeight = 1.12
 minimumContrastRatio = 4.5
 rescaleOverlappingGlyphs = true

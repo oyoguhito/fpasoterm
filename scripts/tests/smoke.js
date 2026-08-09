@@ -6,12 +6,20 @@ const path = require('node:path');
 const toml = require('smol-toml');
 const {
   deleteWindowState,
+  defaultConfigExample,
   discoverPluginFiles,
   loadConfig,
+  platformDefaultConfig,
   resolvePluginSelector,
   windowStatePath,
   writeWindowState,
 } = require('../../src/config');
+
+assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 13);
+assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
+assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
+assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 13/);
+assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
 
 const root = path.resolve(__dirname, '..', '..');
 const removedSnakeHttpUiPattern = new RegExp(['web', 'console'].join('_'));
@@ -34,7 +42,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.1');
+assert.equal(packageJson.version, '1.4.2');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -205,6 +213,11 @@ assert.equal(versionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
 assert.equal(shortVersionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+
+const unknownOptionResult = runCli('--foo');
+assert.equal(unknownOptionResult.status, 2);
+assert.match(unknownOptionResult.stderr, /fpasoterm: unknown option: --foo/);
+assert.match(unknownOptionResult.stderr, /Usage: fpasoterm \[options\]/);
 
 const enableResult = runCli('--enable-plugin', 'hello.ts, theme.js');
 assert.equal(enableResult.status, 0, enableResult.stderr);
@@ -463,6 +476,9 @@ assert.match(rustMain, /fn window_new/);
 assert.match(rustMain, /spawn_new_instance/);
 assert.match(rustMain, /fn window_confirm_close_all/);
 assert.match(rustMain, /fn window_close_all_confirmed/);
+assert.match(rustMain, /fn windows_confirm_close_all/);
+assert.match(rustMain, /MessageBoxW/);
+assert.match(rustMain, /MB_OKCANCEL/);
 assert.match(rustMain, /WebviewWindowBuilder/);
 assert.match(rustMain, /OpenProcess/);
 assert.match(rustMain, /GetExitCodeProcess/);
@@ -594,6 +610,8 @@ assert.match(rustMain, /append_terminal_log/);
 assert.match(rustMain, /stopped log files deleted/);
 assert.match(rustMain, /terminal output log files deleted/);
 assert.match(rustMain, /selected terminal output log deleted/);
+assert.match(rustMain, /delete_or_clear_terminal_log_file/);
+assert.match(rustMain, /locked log files emptied/);
 assert.match(rustMain, /terminal-\{\}\.log/);
 assert.match(rustMain, /expand_path_variables/);
 assert.match(rustMain, /env::var\(&name\)/);
@@ -1132,6 +1150,7 @@ assert.match(renderer, /selectedDiagnosticsClipboardText/);
 assert.match(renderer, /selectedClipboardText/);
 assert.match(renderer, /requestTerminalCopyEvent/);
 assert.match(renderer, /focusLogMenuItem/);
+assert.match(renderer, /focusWindowMenuItem/);
 assert.match(renderer, /diagnosticsPanelFocusItems/);
 assert.match(renderer, /focusDiagnosticsPanelItem/);
 assert.match(renderer, /focusTerminalLogPanel/);
@@ -1162,6 +1181,7 @@ assert.match(renderer, /event\.key === 'ArrowDown'/);
 assert.match(renderer, /event\.key === 'ArrowUp'/);
 assert.match(renderer, /event\.key === 'Escape'/);
 assert.match(renderer, /event\.key === 'Tab'/);
+assert.match(renderer, /event\.shiftKey \? -1 : 1/);
 assert.match(renderer, /event\.key !== 'Enter'/);
 assert.match(renderer, /key\.toLowerCase\(\) === 'j'/);
 assert.match(renderer, /key\.toLowerCase\(\) === 'k'/);

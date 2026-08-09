@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.2
+
+- Rejected unknown or invalid CLI arguments with an error, full help text, and exit code 2 instead of opening the application.
+- Made Windows Log Delete All continue when a sync client or another process locks a log file, falling back to emptying files that cannot be removed.
+- Added Tab, Shift+Tab, arrow, and Escape navigation with visible focus states to the titlebar menus.
+- Replaced the unreliable Windows Close All WebView with a native confirmation dialog supporting keyboard controls and the standard close button.
+- Reduced the default terminal font size on Intel macOS to 13px while preserving explicit user settings and other platform defaults.
+
 ## 1.4.1
 
 - Added a Window menu `New (^N)` action and `Ctrl+Shift+N` / `Cmd+Shift+N` shortcut for opening another fpasoterm window.

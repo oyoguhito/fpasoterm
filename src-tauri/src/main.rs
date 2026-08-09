@@ -14,10 +14,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
-use tauri::{
-    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewUrl,
-    WebviewWindowBuilder, WindowEvent,
-};
+use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
+#[cfg(not(target_os = "windows"))]
+use tauri::{WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree};
 #[cfg(target_os = "windows")]
@@ -32,6 +31,10 @@ use windows_sys::Win32::System::Memory::{
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    MessageBoxW, IDOK, MB_ICONWARNING, MB_OKCANCEL, MB_SETFOREGROUND, MB_TASKMODAL, MB_TOPMOST,
 };
 
 #[cfg(target_os = "windows")]
@@ -243,6 +246,12 @@ struct TerminalLog {
     normalizer: TerminalTextNormalizer,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum TerminalLogCleanup {
+    Deleted,
+    Cleared,
+}
+
 // Owns the native PTY session and child shell handles.
 struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
@@ -294,6 +303,11 @@ const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help   
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
+    if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
+        print_cli_error(&format!("fpasoterm: {error}\n{HELP_TEXT}"));
+        std::process::exit(2);
+    }
+
     apply_direct_cli_env_overrides();
 
     // GTK must select its backend before Tauri initializes. X11 is useful on
@@ -430,6 +444,123 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run fpasoterm");
+}
+
+// Validates direct binary arguments before Tauri creates an application window.
+fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
+    const FLAGS: &[&str] = &[
+        "--help",
+        "-h",
+        "--version",
+        "-v",
+        "--dev",
+        "-d",
+        "--foreground",
+        "-F",
+        "--console-diagnostics",
+        "-C",
+        "--show-config",
+        "--setup-sync",
+        "--self-update",
+        "--self-update-checkout",
+        "--update-desktop",
+        "--reset-window-state",
+        "-r",
+        "--debug-keys",
+        "-k",
+        "--x11",
+        "--debug-opaque-terminal",
+        "--disable-dmabuf",
+    ];
+    const VALUE_OPTIONS: &[&str] = &[
+        "--config",
+        "-c",
+        "--shell",
+        "-s",
+        "--command",
+        "-e",
+        "--title",
+        "-t",
+        "--titlebar-color",
+        "-b",
+        "--enable-plugin",
+        "--disable-plugin",
+        "--width",
+        "-W",
+        "--height",
+        "-H",
+        "--size",
+        "-z",
+    ];
+
+    let mut index = 0;
+    while index < args.len() {
+        let argument = &args[index];
+        if FLAGS.contains(&argument.as_str())
+            || cfg!(target_os = "macos") && argument.starts_with("-psn_")
+        {
+            index += 1;
+            continue;
+        }
+
+        let equals_option = VALUE_OPTIONS.iter().find_map(|option| {
+            argument
+                .strip_prefix(&format!("{option}="))
+                .map(|value| (*option, value))
+        });
+        if let Some((option, value)) = equals_option {
+            validate_direct_cli_value(option, value)?;
+            index += 1;
+            continue;
+        }
+
+        if VALUE_OPTIONS.contains(&argument.as_str()) {
+            let value = args
+                .get(index + 1)
+                .filter(|value| !value.starts_with("--"))
+                .ok_or_else(|| format!("{argument} requires a value"))?;
+            validate_direct_cli_value(argument, value)?;
+            index += 2;
+            continue;
+        }
+
+        return Err(if argument.starts_with('-') {
+            format!("unknown option: {argument}")
+        } else {
+            format!("unexpected argument: {argument}")
+        });
+    }
+    Ok(())
+}
+
+// Checks values whose invalid form previously fell through to a normal launch.
+fn validate_direct_cli_value(option: &str, value: &str) -> Result<(), String> {
+    let value = sanitize_cli_value(value);
+    if value.is_empty() {
+        return Err(format!("{option} requires a value"));
+    }
+    if matches!(option, "--width" | "-W" | "--height" | "-H")
+        && value
+            .parse::<u32>()
+            .ok()
+            .filter(|number| *number > 0)
+            .is_none()
+    {
+        return Err(format!("{option} must be a positive integer"));
+    }
+    if matches!(option, "--size" | "-z") {
+        let valid = value
+            .split_once('x')
+            .or_else(|| value.split_once('X'))
+            .and_then(|(width, height)| {
+                Some((width.parse::<u32>().ok()?, height.parse::<u32>().ok()?))
+            })
+            .is_some_and(|(width, height)| width > 0 && height > 0);
+        if !valid {
+            return Err(format!("{option} must be formatted as <width>x<height>"));
+        }
+    }
+    Ok(())
 }
 
 // Normalizes direct binary arguments into the same environment overrides used by the Node launcher.
@@ -989,32 +1120,72 @@ fn spawn_new_instance() -> Result<(), String> {
 // when the terminal content is busy or visually obscured.
 #[tauri::command]
 fn window_confirm_close_all(app: AppHandle) -> Result<String, String> {
-    if let Some(window) = app.get_webview_window("close-all-confirm") {
-        let _ = window.show();
-        let _ = window.unminimize();
-        let _ = window.set_focus();
-        return Ok("close confirmation already open".to_string());
+    #[cfg(target_os = "windows")]
+    {
+        // A native dialog remains operable even if a secondary WebView fails to
+        // load, and Windows supplies keyboard navigation plus a working close button.
+        if let Some(window) = app.get_webview_window("close-all-confirm") {
+            let _ = window.close();
+        }
+        if windows_confirm_close_all() {
+            broadcast_close_all_request()?;
+            return Ok("closed all fpasoterm windows".to_string());
+        }
+        let _ = window_focus_main(app);
+        return Ok("close all canceled".to_string());
     }
-    let window = WebviewWindowBuilder::new(
-        &app,
-        "close-all-confirm",
-        WebviewUrl::App("confirm.html".into()),
-    )
-    .title("Confirm close all fpasoterm windows")
-    .inner_size(600.0, 280.0)
-    .min_inner_size(520.0, 220.0)
-    .resizable(true)
-    .decorations(true)
-    .transparent(false)
-    .visible(true)
-    .always_on_top(true)
-    .focused(true)
-    .center()
-    .build()
-    .map_err(|error| error.to_string())?;
-    // Make the new native window receive keyboard input immediately.
-    let _ = window.set_focus();
-    Ok("close confirmation opened".to_string())
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        if let Some(window) = app.get_webview_window("close-all-confirm") {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+            return Ok("close confirmation already open".to_string());
+        }
+        let window = WebviewWindowBuilder::new(
+            &app,
+            "close-all-confirm",
+            WebviewUrl::App("confirm.html".into()),
+        )
+        .title("Confirm close all fpasoterm windows")
+        .inner_size(600.0, 280.0)
+        .min_inner_size(520.0, 220.0)
+        .resizable(true)
+        .decorations(true)
+        .transparent(false)
+        .visible(true)
+        .always_on_top(true)
+        .focused(true)
+        .center()
+        .build()
+        .map_err(|error| error.to_string())?;
+        // Make the new native window receive keyboard input immediately.
+        let _ = window.set_focus();
+        Ok("close confirmation opened".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+// Uses the Windows standard modal dialog instead of a failure-prone secondary WebView.
+fn windows_confirm_close_all() -> bool {
+    let message: Vec<u16> =
+        "Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window."
+            .encode_utf16()
+            .chain(std::iter::once(0))
+            .collect();
+    let title: Vec<u16> = "Confirm close all fpasoterm windows"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OKCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL | MB_TOPMOST,
+        ) == IDOK
+    }
 }
 
 // Restores keyboard focus to the terminal after a confirmation window closes.
@@ -1241,6 +1412,20 @@ fn direct_runtime_config() -> RuntimeConfig {
     config
 }
 
+// Matches the Intel macOS renderer default to the host's more compact terminal metrics.
+fn default_terminal_font_size() -> u32 {
+    terminal_font_size_for(env::consts::OS, env::consts::ARCH)
+}
+
+// Keeps the platform rule testable from non-macOS CI hosts.
+fn terminal_font_size_for(platform: &str, architecture: &str) -> u32 {
+    if platform == "macos" && architecture == "x86_64" {
+        13
+    } else {
+        14
+    }
+}
+
 // Loads a TOML config file on demand and merges it over the current runtime config.
 fn runtime_config_from_path(config_path: &str) -> Result<RuntimeConfig, String> {
     merge_runtime_config_from_path(runtime_config(), config_path)
@@ -1348,7 +1533,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 "cursorBlink": true,
                 "cursorStyle": "block",
                 "fontFamily": "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
-                "fontSize": 14,
+                "fontSize": default_terminal_font_size(),
                 "minimumContrastRatio": 4.5,
                 "rescaleOverlappingGlyphs": true,
                 "scrollback": 1000,
@@ -2783,6 +2968,9 @@ fn terminal_log_clear(state: State<AppState>) -> Result<TerminalLogStatus, Strin
     let active_pathbuf = active_path.as_ref().map(PathBuf::from);
     let directory = terminal_log_directory();
     let mut deleted = 0_u64;
+    let mut cleared = 0_u64;
+    let mut failed = 0_u64;
+    let mut first_error = None;
     if directory.exists() {
         for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
             let entry = entry.map_err(|error| error.to_string())?;
@@ -2799,8 +2987,14 @@ fn terminal_log_clear(state: State<AppState>) -> Result<TerminalLogStatus, Strin
             {
                 continue;
             }
-            fs::remove_file(&path).map_err(|error| error.to_string())?;
-            deleted += 1;
+            match delete_or_clear_terminal_log_file(&path) {
+                Ok(TerminalLogCleanup::Deleted) => deleted += 1,
+                Ok(TerminalLogCleanup::Cleared) => cleared += 1,
+                Err(error) => {
+                    failed += 1;
+                    first_error.get_or_insert(error);
+                }
+            }
         }
     }
     if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
@@ -2811,17 +3005,49 @@ fn terminal_log_clear(state: State<AppState>) -> Result<TerminalLogStatus, Strin
         }
     }
     let path_text = active_path.unwrap_or_else(|| directory.display().to_string());
+    let cleanup_summary = if cleared > 0 || failed > 0 {
+        format!(
+            "; {cleared} locked log files emptied; {failed} files could not be cleared{}",
+            first_error
+                .as_ref()
+                .map(|error| format!(" ({error})"))
+                .unwrap_or_default()
+        )
+    } else {
+        String::new()
+    };
     Ok(TerminalLogStatus {
         enabled: logging_bool("enabled", true),
         active,
         path: path_text,
         bytes_written: 0,
         message: if active {
-            format!("active terminal output log cleared and {deleted} stopped log files deleted")
+            format!(
+                "active terminal output log cleared and {deleted} stopped log files deleted{cleanup_summary}"
+            )
         } else {
-            format!("{deleted} terminal output log files deleted")
+            format!("{deleted} terminal output log files deleted{cleanup_summary}")
         },
     })
+}
+
+// Deletes a stopped log, falling back to truncation when Windows or a sync client locks its name.
+fn delete_or_clear_terminal_log_file(path: &Path) -> Result<TerminalLogCleanup, String> {
+    match fs::remove_file(path) {
+        Ok(()) => return Ok(TerminalLogCleanup::Deleted),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(TerminalLogCleanup::Deleted);
+        }
+        Err(_) => {}
+    }
+
+    OpenOptions::new()
+        .write(true)
+        .truncate(true)
+        .open(path)
+        .and_then(|mut file| file.flush())
+        .map(|()| TerminalLogCleanup::Cleared)
+        .map_err(|error| format!("{}: {error}", path.display()))
 }
 
 #[tauri::command]
@@ -3591,6 +3817,57 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn direct_cli_validation_rejects_unknown_options() {
+        let args = vec!["--foo".to_string()];
+        assert_eq!(
+            validate_direct_cli_args(&args),
+            Err("unknown option: --foo".to_string())
+        );
+    }
+
+    #[test]
+    fn direct_cli_validation_accepts_supported_options() {
+        let args = vec![
+            "--title".to_string(),
+            "TEST".to_string(),
+            "--size=800x600".to_string(),
+            "--debug-keys".to_string(),
+        ];
+        assert_eq!(validate_direct_cli_args(&args), Ok(()));
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_invalid_dimensions() {
+        let args = vec!["--width".to_string(), "0".to_string()];
+        assert_eq!(
+            validate_direct_cli_args(&args),
+            Err("--width must be a positive integer".to_string())
+        );
+    }
+
+    #[test]
+    fn terminal_log_cleanup_deletes_stopped_files() {
+        let path = env::temp_dir().join(format!(
+            "fpasoterm-terminal-log-cleanup-{}-{}.log",
+            std::process::id(),
+            now_millis()
+        ));
+        fs::write(&path, b"terminal output").expect("create terminal log fixture");
+        assert_eq!(
+            delete_or_clear_terminal_log_file(&path),
+            Ok(TerminalLogCleanup::Deleted)
+        );
+        assert!(!path.exists());
+    }
+
+    #[test]
+    fn intel_macos_uses_compact_default_font_size() {
+        assert_eq!(terminal_font_size_for("macos", "x86_64"), 13);
+        assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
+        assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
+    }
 
     #[test]
     fn terminal_output_decoder_preserves_utf8() {
