@@ -80,6 +80,14 @@ body {
   -webkit-app-region: no-drag;
 }
 
+#window-controls button:focus,
+#window-controls button:focus-visible {
+  outline: 2px solid #f5d76e;
+  outline-offset: 1px;
+  border-color: #f5d76e;
+  background: rgba(0, 0, 0, 0.42);
+}
+
 #log-menu-items[hidden] {
   display: none;
 }

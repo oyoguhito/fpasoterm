@@ -81,9 +81,19 @@ const defaultConfig = Object.freeze({
   },
 });
 
+// Uses a slightly smaller default on Intel macOS, whose WebKit font metrics
+// otherwise make the terminal noticeably larger than other supported hosts.
+function platformDefaultConfig(platform = process.platform, architecture = process.arch) {
+  if (platform === 'darwin' && architecture === 'x64') {
+    return mergeConfig(defaultConfig, { terminal: { fontSize: 13 } });
+  }
+  return defaultConfig;
+}
+
 // Writes the default TOML with comments so users can copy it to config.toml
 // and understand what each section controls.
-function defaultConfigExample() {
+function defaultConfigExample(platform = process.platform, architecture = process.arch) {
+  const defaultFontSize = platformDefaultConfig(platform, architecture).terminal.fontSize;
   return `# fpasoterm user configuration.
 # Copy this file to config.toml and edit the values you want to change.
 
@@ -112,7 +122,7 @@ allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
 fontFamily = "\\"Noto Sans Mono CJK JP\\", \\"Noto Sans CJK JP\\", \\"BIZ UDGothic\\", \\"Hiragino Sans\\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-fontSize = 14
+fontSize = ${defaultFontSize}
 # lineHeight leaves enough vertical room for underscores and descenders.
 lineHeight = 1.12
 # minimumContrastRatio raises foreground colors that are too close to the terminal background.
@@ -428,7 +438,7 @@ function loadConfig() {
   writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
-  const config = removeUnsupportedConfigSections(mergeConfig(defaultConfig, userConfig));
+  const config = removeUnsupportedConfigSections(mergeConfig(platformDefaultConfig(), userConfig));
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {
@@ -460,5 +470,6 @@ module.exports = {
   readWindowState,
   writeWindowState,
   loadConfig,
+  platformDefaultConfig,
   windowStatePath,
 };

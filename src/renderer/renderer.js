@@ -1225,6 +1225,20 @@ function focusLogMenuItem(delta) {
   items[nextIndex].focus();
 }
 
+// Moves keyboard focus inside the compact window menu.
+function focusWindowMenuItem(delta) {
+  if (!windowMenuItems || windowMenuItems.hidden) {
+    return;
+  }
+  const items = Array.from(windowMenuItems.querySelectorAll('button:not([hidden]):not(:disabled)'));
+  if (items.length === 0) {
+    return;
+  }
+  const currentIndex = items.indexOf(document.activeElement);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
+  items[nextIndex].focus({ preventScroll: true });
+}
+
 // Returns focusable controls in the visible diagnostics/log panel.
 function diagnosticsPanelFocusItems() {
   if (!diagnosticsPanel || diagnosticsPanel.hidden) {
@@ -1590,6 +1604,7 @@ async function clearTerminalOutputLog() {
   await refreshTerminalLogList(status.path || '');
   await refreshTerminalLogControl();
   showDiagnostic(`terminal log cleared path=${status.path || '(none)'} bytes=${status.bytesWritten || 0}`);
+  restoreLogPanelFocus(terminalLogDeleteAllButton, { repeat: true });
   return status;
 }
 
@@ -1668,6 +1683,7 @@ terminalLogDeleteSelectedButton.addEventListener('click', () => {
 terminalLogDeleteAllButton.addEventListener('click', () => {
   clearTerminalOutputLog().catch((error) => {
     showDiagnostic(`terminal log delete all failed: ${error}`);
+    restoreLogPanelFocus(terminalLogDeleteAllButton, { repeat: true });
   });
 });
 
@@ -1752,6 +1768,11 @@ logMenuItems.addEventListener('keydown', (event) => {
   if (event.key === 'ArrowDown') {
     event.preventDefault();
     focusLogMenuItem(1);
+    return;
+  }
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    focusLogMenuItem(event.shiftKey ? -1 : 1);
     return;
   }
   if (event.key === 'ArrowUp') {
@@ -1915,6 +1936,27 @@ function setWindowMenuOpen(open) {
 
 windowMenuToggleButton.addEventListener('click', () => {
   setWindowMenuOpen(windowMenuItems.hidden);
+});
+
+windowMenuToggleButton.addEventListener('keydown', (event) => {
+  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    setWindowMenuOpen(true);
+  }
+});
+
+windowMenuItems.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    setWindowMenuOpen(false);
+    windowMenuToggleButton.focus({ preventScroll: true });
+    return;
+  }
+  if (event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+    event.preventDefault();
+    const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
+    focusWindowMenuItem(backwards ? -1 : 1);
+  }
 });
 
 // Starts native window dragging from the custom titlebar on Tauri.
