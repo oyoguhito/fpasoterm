@@ -155,11 +155,12 @@ fpasoterm -l
 
 Each line contains the process/session ID, displayed title, and startup time.
 
-Close a running window by PID or exact displayed title:
+Close running windows by PID, exact displayed title, or the reserved `all` target:
 
 ```sh
 fpasoterm --close 12345
 fpasoterm -q review-shell
+fpasoterm --close all
 ```
 
 Useful one-shot overrides:
@@ -171,6 +172,7 @@ fpasoterm --width 1200 --height 760
 fpasoterm --shell pwsh.exe
 fpasoterm --command "tmux attach -t work"
 fpasoterm --title work --titlebar-color '#2e7d32'
+fpasoterm --reset-config
 fpasoterm --reset-window-state
 ```
 
@@ -182,6 +184,10 @@ command shell. A full path can always be used with `--shell`.
 Windows child shells also receive the fpasoterm executable directory at the
 front of `Path`, so commands such as `fpasoterm --help` work inside a
 fpasoterm terminal after installation.
+
+macOS child shells receive the application executable directory at the front
+of `PATH` as well. Running `fpasoterm` there opens a detached window and returns
+the current prompt without waiting for that window to close.
 
 By default, fpasoterm keeps its configured title even if the shell emits its own
 title sequence. Use `OSC 777;title=...` for an intentional runtime rename.
@@ -362,6 +368,12 @@ To return to the configured or default size manually, set `window.rememberBounds
 ```sh
 fpasoterm --reset-window-state
 ```
+
+To restore every setting and window size to its platform default, run
+`fpasoterm --reset-config` or `fpasoterm -R`. The existing file is renamed to
+`config.toml.backup-<timestamp>` before a complete new `config.toml` is written.
+The saved `window-state.json` is also removed so the default width of 1000 and
+height of 680 take effect on the next launch.
 
 The full default configuration and plugin setup are documented in [Configuration](docs/config.en.md). Sample configs are available in [examples/config](examples/config), and sample TypeScript plugins are available in [examples/plugins](examples/plugins).
 
@@ -630,11 +642,12 @@ fpasoterm -l
 
 各行にprocess/session ID、表示title、起動時刻を表示します。
 
-process IDまたは表示titleの完全一致で起動中のwindowを閉じます:
+process ID、表示titleの完全一致、または予約targetの`all`で起動中のwindowを閉じます:
 
 ```sh
 fpasoterm --close 12345
 fpasoterm -q review-shell
+fpasoterm --close all
 ```
 
 Windows の packaged `fpasoterm.exe` を直接起動した場合、`--show-config` は

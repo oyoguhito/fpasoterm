@@ -40,6 +40,9 @@ use windows_sys::Win32::UI::WindowsAndMessaging::{
 #[cfg(target_os = "windows")]
 const WINDOWS_CF_UNICODETEXT: u32 = 13;
 
+const INSTANCE_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(500);
+const INSTANCE_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(3);
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 // Complete runtime configuration shared with the renderer.
@@ -299,7 +302,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the fpasoterm version.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the fpasoterm version.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Adds the instance-list command to the shared direct-binary help text.
 fn cli_help_text() -> String {
@@ -311,7 +314,12 @@ fn cli_help_text() -> String {
         )
         .replacen(
             "  -d, --dev",
-            "  -q, --close <pid|title>       Close one running window by PID or exact title.\n  -d, --dev",
+            "  -q, --close <pid|title|all>   Close windows by PID, exact title, or all.\n  -d, --dev",
+            1,
+        )
+        .replacen(
+            "  -R, --reset-config            Back up config.toml and restore all defaults, then exit.",
+            "  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.",
             1,
         )
 }
@@ -361,6 +369,14 @@ fn main() {
     }
     if cli_has_flag(&["--reset-window-state", "-r"]) {
         reset_window_state_cli();
+        return;
+    }
+    if cli_has_flag(&["--reset-config", "-R"]) {
+        reset_config_cli();
+        return;
+    }
+
+    if detach_nested_macos_launch() {
         return;
     }
 
@@ -497,6 +513,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--update-desktop",
         "--reset-window-state",
         "-r",
+        "--reset-config",
+        "-R",
         "--debug-keys",
         "-k",
         "--x11",
@@ -710,8 +728,8 @@ fn latest_arrange_request_timestamp() -> Option<u128> {
         .map(u128::from)
 }
 
-// Registers this process and returns the count of live windows with the same
-// configured title. Stale Linux markers are removed by checking /proc/<pid>.
+// Registers this process and returns the zero-based suffix index allocated
+// after the largest live suffix for the same configured base title.
 fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     let dir = cache_dir_path().join("instances");
     if let Err(error) = fs::create_dir_all(&dir) {
@@ -723,7 +741,7 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     }
 
     let current_pid = std::process::id();
-    let mut matching_title_count = 0usize;
+    let mut highest_instance_number = 0usize;
     if let Ok(entries) = fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
@@ -738,8 +756,11 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
                 continue;
             };
             if pid == current_pid || instance_marker_is_live(pid, &path) {
-                if read_instance_marker_base_title(&path).as_deref() == Some(title) {
-                    matching_title_count += 1;
+                if let Some((base_title, display_title)) = read_instance_marker_titles(&path) {
+                    if base_title == title {
+                        highest_instance_number = highest_instance_number
+                            .max(instance_number_from_display_title(title, &display_title));
+                    }
                 }
             } else {
                 let _ = fs::remove_file(&path);
@@ -748,10 +769,12 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     }
 
     let marker_path = dir.join(format!("{current_pid}.pid"));
-    let display_title = if matching_title_count == 0 {
+    let instance_number = highest_instance_number.saturating_add(1).max(1);
+    let instance_index = instance_number - 1;
+    let display_title = if instance_number == 1 {
         title.to_string()
     } else {
-        format!("{title}-{}", matching_title_count + 1)
+        format!("{title}-{instance_number}")
     };
     let marker = serde_json::json!({
         "pid": current_pid,
@@ -761,24 +784,44 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     });
     if let Err(error) = fs::write(&marker_path, marker.to_string()) {
         append_diagnostic(app, &format!("failed to write instance marker: {error}"));
-        return matching_title_count;
+        return instance_index;
     }
     app.manage(InstanceMarker { path: marker_path });
     append_diagnostic(
         app,
-        &format!("startup same-title instance index={matching_title_count} title={title}"),
+        &format!(
+            "startup same-title instance index={instance_index} number={instance_number} title={title}"
+        ),
     );
-    matching_title_count
+    instance_index
 }
 
-// Reads the unsuffixed configured title used to count same-title instances.
-fn read_instance_marker_base_title(path: &Path) -> Option<String> {
+// Reads the configured base title and allocated display title from a marker.
+fn read_instance_marker_titles(path: &Path) -> Option<(String, String)> {
     let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    value
+    let base_title = value
         .get("baseTitle")
         .or_else(|| value.get("title"))?
         .as_str()
-        .map(str::to_string)
+        .map(str::to_string)?;
+    let display_title = value
+        .get("title")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or(&base_title)
+        .to_string();
+    Some((base_title, display_title))
+}
+
+// Converts a display title into its one-based instance number.
+fn instance_number_from_display_title(base_title: &str, display_title: &str) -> usize {
+    if display_title == base_title {
+        return 1;
+    }
+    display_title
+        .strip_prefix(&format!("{base_title}-"))
+        .and_then(|suffix| suffix.parse::<usize>().ok())
+        .filter(|number| *number >= 2)
+        .unwrap_or(1)
 }
 
 // Prints one stable, script-friendly line for each live application window.
@@ -833,9 +876,8 @@ fn print_running_instances() {
     }
 }
 
-// Resolves a PID or exact displayed title and broadcasts a graceful close request.
+// Resolves a PID, exact displayed title, or the reserved all target.
 fn broadcast_targeted_close_request(target: &str) -> Result<String, String> {
-    let numeric_pid = target.parse::<u32>().ok();
     let directory = cache_dir_path().join("instances");
     let mut matches = Vec::new();
     if let Ok(entries) = fs::read_dir(&directory) {
@@ -865,7 +907,7 @@ fn broadcast_targeted_close_request(target: &str) -> Result<String, String> {
                 .and_then(serde_json::Value::as_str)
                 .unwrap_or("fpasoterm")
                 .to_string();
-            if numeric_pid.map_or(title == target, |target_pid| target_pid == pid) {
+            if close_target_matches(target, pid, &title) {
                 matches.push((pid, title));
             }
         }
@@ -897,8 +939,19 @@ fn broadcast_targeted_close_request(target: &str) -> Result<String, String> {
         .collect())
 }
 
+// Matches the reserved all target, a numeric PID, or an exact display title.
+fn close_target_matches(target: &str, pid: u32, title: &str) -> bool {
+    target.eq_ignore_ascii_case("all")
+        || target
+            .parse::<u32>()
+            .map_or(title == target, |target_pid| target_pid == pid)
+}
+
 // Returns true when a previous marker should still be considered active.
 fn instance_marker_is_live(pid: u32, path: &Path) -> bool {
+    if !instance_marker_is_fresh(path) {
+        return false;
+    }
     #[cfg(target_os = "linux")]
     {
         let _ = path;
@@ -914,13 +967,17 @@ fn instance_marker_is_live(pid: u32, path: &Path) -> bool {
     #[cfg(all(not(target_os = "linux"), not(target_os = "windows")))]
     {
         let _ = pid;
-        fs::metadata(path)
-            .and_then(|metadata| metadata.modified())
-            .ok()
-            .and_then(|modified| modified.elapsed().ok())
-            .map(|age| age < Duration::from_secs(24 * 60 * 60))
-            .unwrap_or(false)
+        true
     }
+}
+
+// Rejects markers that are no longer refreshed by a running instance.
+fn instance_marker_is_fresh(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age <= INSTANCE_HEARTBEAT_TIMEOUT)
 }
 
 #[cfg(target_os = "windows")]
@@ -958,6 +1015,7 @@ fn close_request_path() -> PathBuf {
 fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, min_height: u32) {
     std::thread::spawn(move || {
         let mut last_request = now_millis();
+        let mut last_heartbeat = SystemTime::now();
         // Ignore a close request left by an earlier application session. Only
         // requests created after this process started may close this window.
         let last_close_request =
@@ -967,6 +1025,17 @@ fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, 
         loop {
             if !marker_path.exists() {
                 break;
+            }
+            if last_heartbeat
+                .elapsed()
+                .is_ok_and(|elapsed| elapsed >= INSTANCE_HEARTBEAT_INTERVAL)
+            {
+                if let Ok(marker) = fs::read(&marker_path) {
+                    if let Ok(mut file) = OpenOptions::new().write(true).open(&marker_path) {
+                        let _ = file.write_all(&marker);
+                    }
+                }
+                last_heartbeat = SystemTime::now();
             }
             if let Ok(text) = fs::read_to_string(arrange_request_path()) {
                 if let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -1173,18 +1242,7 @@ fn window_arrange(app: AppHandle, screen: Option<ArrangeScreen>) -> Result<Strin
     pids.sort_unstable();
 
     let count = pids.len();
-    let count_u32 = count as u32;
-    // Prefer two rows and as many columns as the monitor can hold at the
-    // configured minimum width. This gives 4x2 for 8 windows and 5x2 for 10.
-    let preferred_columns = if count <= 2 {
-        count_u32.max(1)
-    } else {
-        count_u32.saturating_add(1) / 2
-    };
-    let minimum_width = config.config.window.min_width.max(1);
-    let width_capacity = (monitor_size.width / minimum_width).max(1);
-    let columns = preferred_columns.min(width_capacity).max(1);
-    let rows = ((count as u32).saturating_add(columns).saturating_sub(1)) / columns;
+    let (columns, rows) = tile_grid(count);
     // Leave a small physical gap so compositor rounding cannot make adjacent
     // windows touch or overlap at scaled display resolutions.
     let tile_gap = 6u32;
@@ -1285,6 +1343,22 @@ fn window_arrange(app: AppHandle, screen: Option<ArrangeScreen>) -> Result<Strin
     Ok(format!("arranged {count} fpasoterm windows"))
 }
 
+// Chooses a stable grid: even counts use two balanced rows, while perfect
+// squares use square grids so nine windows occupy nine rather than twelve cells.
+fn tile_grid(count: usize) -> (u32, u32) {
+    let count = (count as u32).max(1);
+    let square = (count as f64).sqrt() as u32;
+    if square.saturating_mul(square) == count {
+        return (square.max(1), square.max(1));
+    }
+    if count == 2 {
+        return (2, 1);
+    }
+    let rows = 2;
+    let columns = count.saturating_add(rows - 1) / rows;
+    (columns.max(1), rows)
+}
+
 #[tauri::command]
 // Broadcasts a close request and closes the current window immediately.
 fn window_close_all(app: AppHandle) -> Result<String, String> {
@@ -1311,6 +1385,35 @@ fn spawn_new_instance() -> Result<(), String> {
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+// Detaches GUI launches entered from a macOS fpasoterm shell so the invoking
+// prompt does not wait for the newly opened application window to close.
+#[cfg(target_os = "macos")]
+fn detach_nested_macos_launch() -> bool {
+    if env::var("TERM_PROGRAM").as_deref() != Ok("fpasoterm")
+        || env::var("FPASOTERM_DETACHED_LAUNCH").as_deref() == Ok("1")
+        || cli_has_flag(&["--foreground", "-F"])
+    {
+        return false;
+    }
+    let Ok(executable) = env::current_exe() else {
+        return false;
+    };
+    let mut command = Command::new(executable);
+    command
+        .args(env::args_os().skip(1))
+        .env_remove("TERM_PROGRAM")
+        .env("FPASOTERM_DETACHED_LAUNCH", "1")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    command.spawn().is_ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn detach_nested_macos_launch() -> bool {
+    false
 }
 
 // Opens a separate native confirmation window so the prompt is visible even
@@ -1941,6 +2044,67 @@ fn reset_window_state_cli() {
     }
 }
 
+// Renames the selected config, restores defaults, and clears remembered bounds.
+fn reset_config_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    let state_path = runtime.window_state_path;
+    let path_ref = std::path::Path::new(&path);
+    let timestamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup_path = format!("{path}.backup-{timestamp}");
+
+    let result = (|| -> Result<bool, String> {
+        if let Some(parent) = path_ref.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+        }
+        let backed_up = path_ref.exists();
+        if backed_up {
+            fs::rename(path_ref, &backup_path)
+                .map_err(|error| format!("failed to rename {path}: {error}"))?;
+        }
+        fs::write(path_ref, embedded_default_config_toml())
+            .map_err(|error| format!("failed to write {path}: {error}"))?;
+        match fs::remove_file(&state_path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(format!("failed to delete {state_path}: {error}")),
+        }
+        Ok(backed_up)
+    })();
+
+    match result {
+        Ok(backed_up) => {
+            print_cli_text(&format!("reset config {path}\n"));
+            if backed_up {
+                print_cli_text(&format!("renamed previous config {backup_path}\n"));
+            }
+            print_cli_text(&format!("deleted saved window state {state_path}\n"));
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Returns the packaged default TOML with the platform-specific font size.
+fn embedded_default_config_toml() -> String {
+    default_config_toml_for_font_size(default_terminal_font_size())
+}
+
+// Produces deterministic default TOML for runtime use and unit tests.
+fn default_config_toml_for_font_size(font_size: u32) -> String {
+    include_str!("../default-config.toml").replacen(
+        "fontSize = 14",
+        &format!("fontSize = {font_size}"),
+        1,
+    )
+}
+
 // Writes CLI errors through the same console-aware path used for normal output.
 fn print_cli_error(text: &str) {
     print_cli_text(text);
@@ -2186,7 +2350,7 @@ fn windows_path_executable(name: &str) -> Option<String> {
     None
 }
 
-#[cfg(windows)]
+#[cfg(any(windows, target_os = "macos"))]
 // Prepends the installed executable directory so child shells can run `fpasoterm`.
 fn terminal_path_with_app_dir() -> Option<String> {
     let app_dir = env::current_exe().ok()?.parent()?.to_path_buf();
@@ -2198,7 +2362,7 @@ fn terminal_path_with_app_dir() -> Option<String> {
         .map(|value| value.to_string_lossy().to_string())
 }
 
-#[cfg(not(windows))]
+#[cfg(all(not(windows), not(target_os = "macos")))]
 fn terminal_path_with_app_dir() -> Option<String> {
     None
 }
@@ -2547,7 +2711,11 @@ fn terminal_start(
     command.env("TERM", "xterm-256color");
     command.env("TERM_PROGRAM", "fpasoterm");
     if let Some(path_value) = terminal_path_with_app_dir() {
-        command.env("Path", path_value);
+        if cfg!(windows) {
+            command.env("Path", path_value);
+        } else {
+            command.env("PATH", path_value);
+        }
     }
 
     let mut child = pair
@@ -4034,6 +4202,7 @@ mod tests {
             "--list".to_string(),
             "--close".to_string(),
             "12345".to_string(),
+            "--reset-config".to_string(),
         ];
         assert_eq!(validate_direct_cli_args(&args), Ok(()));
     }
@@ -4045,6 +4214,36 @@ mod tests {
             validate_direct_cli_args(&args),
             Err("--width must be a positive integer".to_string())
         );
+    }
+
+    #[test]
+    fn tile_grid_uses_expected_window_partitions() {
+        assert_eq!(tile_grid(1), (1, 1));
+        assert_eq!(tile_grid(2), (2, 1));
+        assert_eq!(tile_grid(4), (2, 2));
+        assert_eq!(tile_grid(5), (3, 2));
+        assert_eq!(tile_grid(8), (4, 2));
+        assert_eq!(tile_grid(9), (3, 3));
+        assert_eq!(tile_grid(10), (5, 2));
+    }
+
+    #[test]
+    fn instance_number_follows_the_display_suffix() {
+        assert_eq!(instance_number_from_display_title("work", "work"), 1);
+        assert_eq!(instance_number_from_display_title("work", "work-2"), 2);
+        assert_eq!(instance_number_from_display_title("work", "work-9"), 9);
+        assert_eq!(instance_number_from_display_title("work-2", "work-2-3"), 3);
+        assert_eq!(instance_number_from_display_title("work", "other-7"), 1);
+    }
+
+    #[test]
+    fn close_target_supports_pid_title_and_all() {
+        assert!(close_target_matches("123", 123, "work"));
+        assert!(close_target_matches("work", 123, "work"));
+        assert!(close_target_matches("all", 123, "work"));
+        assert!(close_target_matches("ALL", 456, "review"));
+        assert!(!close_target_matches("124", 123, "work"));
+        assert!(!close_target_matches("other", 123, "work"));
     }
 
     #[test]
@@ -4067,6 +4266,16 @@ mod tests {
         assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
         assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
+    }
+
+    #[test]
+    fn embedded_default_config_is_complete_toml() {
+        let text = default_config_toml_for_font_size(12);
+        let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
+        assert_eq!(config["window"]["width"].as_integer(), Some(1000));
+        assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
+        assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
+        assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
     }
 
     #[test]

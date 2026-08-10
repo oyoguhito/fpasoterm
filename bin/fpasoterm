@@ -15,6 +15,8 @@ const {
   loadConfig,
   readUserConfig,
   resolvePluginSelector,
+  platformDefaultConfig,
+  windowStatePath,
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
 const packageJson = require(path.join(root, 'package.json'));
@@ -25,7 +27,7 @@ Options:
   -h, --help                    Show this help.
   -v, --version                 Show the fpasoterm version.
   -l, --list                    List running fpasoterm windows, then exit.
-  -q, --close <pid|title>       Close one running window by PID or exact title.
+  -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
   -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
@@ -40,6 +42,7 @@ Options:
   -t, --title <text>            Override the titlebar title for this launch.
   -b, --titlebar-color <color>  Override the custom titlebar color for this launch.
   -r, --reset-window-state      Delete saved window size, then exit.
+  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.
       --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
       --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
   -W, --width <px>              Override the configured window width for this launch.
@@ -91,6 +94,7 @@ function parseArgs(argv) {
   let closeTarget = '';
   let setupSync = false;
   let resetWindowState = false;
+  let resetConfig = false;
   let selfUpdate = false;
   let selfUpdateCheckout = false;
   let updateDesktop = false;
@@ -147,6 +151,11 @@ function parseArgs(argv) {
 
     if (arg === '--reset-window-state' || arg === '-r') {
       resetWindowState = true;
+      continue;
+    }
+
+    if (arg === '--reset-config' || arg === '-R') {
+      resetConfig = true;
       continue;
     }
 
@@ -257,6 +266,7 @@ function parseArgs(argv) {
     closeTarget,
     setupSync,
     resetWindowState,
+    resetConfig,
     selfUpdate,
     selfUpdateCheckout,
     updateDesktop,
@@ -276,7 +286,7 @@ function validateArgs(argv) {
   const flags = new Set([
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
-    '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r',
+    '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
@@ -376,12 +386,13 @@ function printRunningInstances() {
   }
 }
 
-// Atomically broadcasts a graceful close request to windows matching a PID or exact title.
+// Atomically broadcasts a graceful close request by PID, exact title, or all.
 function closeRunningInstance(target) {
   const normalizedTarget = String(target || '').trim();
+  const closeAll = normalizedTarget.toLowerCase() === 'all';
   const numericPid = /^\d+$/.test(normalizedTarget) ? Number(normalizedTarget) : null;
   const matches = runningInstances().filter((instance) => (
-    numericPid === null ? instance.title === normalizedTarget : instance.pid === numericPid
+    closeAll || (numericPid === null ? instance.title === normalizedTarget : instance.pid === numericPid)
   ));
   if (matches.length === 0) {
     throw new Error(`no running window matches: ${normalizedTarget}`);
@@ -584,6 +595,24 @@ function resetWindowState(options) {
   const runtimeConfig = loadConfig();
   deleteWindowState(runtimeConfig.windowStatePath);
   console.log(`deleted ${runtimeConfig.windowStatePath}`);
+}
+
+// Renames the selected config.toml, restores defaults, and clears saved bounds.
+function resetConfig(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  let backupPath = '';
+  if (fs.existsSync(targetPath)) {
+    backupPath = `${targetPath}.backup-${Date.now()}`;
+    fs.renameSync(targetPath, backupPath);
+  }
+  writeUserConfig(platformDefaultConfig(), targetPath);
+  deleteWindowState(windowStatePath());
+  console.log(`reset config ${targetPath}`);
+  if (backupPath) {
+    console.log(`renamed previous config ${backupPath}`);
+  }
+  console.log(`deleted saved window state ${windowStatePath()}`);
 }
 
 // Prints plugin entries with simple status information.
@@ -1098,6 +1127,8 @@ try {
     // The config command has completed without starting the desktop process.
   } else if (options.resetWindowState) {
     resetWindowState(options);
+  } else if (options.resetConfig) {
+    resetConfig(options);
   } else if (options.setupSync) {
     Promise.resolve(setupSync(options)).catch((setupError) => {
       console.error(`fpasoterm: ${setupError.message}`);

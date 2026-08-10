@@ -1,0 +1,72 @@
+# fpasoterm user configuration.
+
+[window]
+title = "fpasoterm"
+width = 1000
+height = 680
+minWidth = 420
+minHeight = 260
+backgroundColor = "rgba(0, 0, 0, 0)"
+titlebarColor = "#1565c0"
+titleLocked = true
+themeSource = "system"
+frame = false
+rememberBounds = true
+
+[terminal]
+allowTransparency = true
+cursorBlink = true
+cursorStyle = "block"
+fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+fontSize = 14
+lineHeight = 1.12
+minimumContrastRatio = 4.5
+rescaleOverlappingGlyphs = true
+backgroundOpacity = 0.8
+scrollback = 1000
+termName = "xterm-256color"
+shell = ""
+
+[terminal.theme]
+background = "rgba(16, 19, 23, 0.80)"
+foreground = "#e8edf2"
+cursor = "#f5d76e"
+selectionBackground = "#35506b"
+black = "#11151a"
+red = "#ff6b6b"
+green = "#8bd17c"
+yellow = "#f5d76e"
+blue = "#7bb7ff"
+magenta = "#d7a8ff"
+cyan = "#63d4d5"
+white = "#e8edf2"
+brightBlack = "#5d6978"
+brightRed = "#ff8f8f"
+brightGreen = "#ade89f"
+brightYellow = "#ffe08a"
+brightBlue = "#a4ceff"
+brightMagenta = "#e3c3ff"
+brightCyan = "#9de9ea"
+brightWhite = "#ffffff"
+
+[ime]
+duplicateGuard = true
+duplicateWindowMs = 800
+repeatedTextWindowMs = 140
+
+[plugins]
+enabled = []
+
+[sync]
+enabled = false
+provider = "folder"
+path = ""
+channel = "default"
+diagnostics = true
+maxBytes = 1048576
+
+[logging]
+enabled = true
+directory = ""
+autoStart = false
+maxBytes = 10485760

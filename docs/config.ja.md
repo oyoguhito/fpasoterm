@@ -60,6 +60,19 @@ fpasoterm -s /usr/bin/fish
 fpasoterm --reset-window-state
 ```
 
+全設定をOSごとのデフォルトへ戻す場合:
+
+```sh
+fpasoterm --reset-config
+# 短縮形: fpasoterm -R
+```
+
+既存ファイルは同じ場所の `config.toml.backup-<timestamp>` へrenameして残し、
+完全な新しい`config.toml`を生成します。保存済み`window-state.json`も削除するため、
+次回起動時はデフォルトの幅1000、高さ680が使われます。このコマンドはwindowを
+開かず終了します。`--config <path>`と併用した場合は選択したconfigだけをrenameして
+resetし、標準のローカルwindow stateも削除します。
+
 解決済み設定と plugin 状態を表示する場合:
 
 ```sh
@@ -165,7 +178,7 @@ maxBytes = 10485760
 
 window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
-Windows では、起動した terminal process の `Path` 先頭に fpasoterm の実行ファイルがあるディレクトリを追加します。これにより、global user/system PATH を変更しなくても、fpasoterm 内で `fpasoterm --help` などを実行できます。
+WindowsとmacOSでは、起動したterminal processの`PATH`（Windowsでは`Path`）先頭にfpasotermの実行ファイルがあるdirectoryを追加します。これにより、global user/system PATHを変更しなくても、fpasoterm内で`fpasoterm --help`などを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。新しいwindowの終了まで待つ場合は`--foreground`を使います。
 
 起動中の titlebar は terminal 内の command からも変更できます。標準の OSC title sequence は window title を変更し、fpasoterm 独自の OSC 777 は titlebar 表示を変更します。
 
