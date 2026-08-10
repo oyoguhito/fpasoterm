@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.4.3
+
+- Reduced the default terminal font size on Intel macOS from 13px to 12px when no explicit `terminal.fontSize` is configured.
+- Consolidated logging, copy, and paste actions into the hamburger menu, with explicit `Log Start`, `Log Stop`, and `Log Show` labels.
+- Added `Ctrl+Shift+M` for the window menu and a `Help (^H)` action with `Ctrl+Shift+H` for displaying keyboard shortcuts.
+- Restored a visible `Logging` status while terminal output capture is active, left-aligned the title to avoid control overlap, and added `fpasoterm -l` / `--list` for running-window details.
+- Added `fpasoterm --close <pid|title>` / `-q` to gracefully close running windows by process ID or exact displayed title.
+
 ## 1.4.2
 
 - Rejected unknown or invalid CLI arguments with an error, full help text, and exit code 2 instead of opening the application.

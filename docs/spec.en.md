@@ -17,12 +17,15 @@ fpasoterm is a desktop terminal application focused on Japanese input in ChromeO
 
 fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to the platform webview and the operating system.
 
-For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The titlebar `Log (^L)` menu opens with `Ctrl+Shift+L`, toggles logging with `Start (^S)` / `Stop (^S)` or `Ctrl+Shift+S`, and shows captured logs with `Show (^P)` or `Ctrl+Shift+P`. It also exposes `Copy (^C)` and `Paste (^V)` buttons for keyboard-driven operation. Right-click copies when a terminal selection exists; otherwise it pastes. For terminal paste, `Ctrl+Shift+V`, the Log menu `Paste (^V)` button, and right-click paste read the OS clipboard through the backend and send it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard.
+For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The hamburger window menu contains `Log Start (^S)` / `Log Stop (^S)`, `Log Show (^P)`, `Copy (^C)`, and `Paste (^V)`. `Ctrl+Shift+L` opens that menu with the log action focused, while `Ctrl+Shift+S` and `Ctrl+Shift+P` invoke logging and log display directly. Right-click copies when a terminal selection exists; otherwise it pastes. Terminal paste reads the OS clipboard through the backend and sends it to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard. `Ctrl+Shift+M` opens the window menu, and its `Help (^H)` item or `Ctrl+Shift+H` displays the complete application shortcut list.
 
 The terminal log panel keeps keyboard focus inside the panel while it is open. `Tab` and `Shift+Tab` cycle through the log selector, search field, action buttons, close button, and log text area. The focused control is shown with a high-contrast outline. The `Search` button selects and scrolls to the next matching string in the displayed log and shows the current match count. `N` and `j` move to the next match, while `P` and `k` move to the previous match. Arrow keys remain reserved for normal text area scrolling.
 
 The npm binary name is `fpasoterm`. On Linux, `--disable-dmabuf` sets `WEBKIT_DISABLE_DMABUF_RENDERER=1` for WebKitGTK rendering diagnostics.
 By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
+`fpasoterm --list` / `fpasoterm -l` prints one line per running window with its process/session ID, displayed title, and startup time, then exits without opening a window.
+
+`fpasoterm --close <pid|title>` / `fpasoterm -q <pid|title>` requests a graceful close of a running window without opening another window. A numeric value selects a process ID; any other value must exactly match the displayed title. If several windows have the same exact title, all matching windows are closed.
 
 Users can install the published npm package directly:
 

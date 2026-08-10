@@ -17,12 +17,15 @@ fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクト�
 
 fpasoterm は `かな` / `英数` などの日本語キーボードキーを横取りしません。IME の切替と composition は platform webview と OS に任せます。
 
-terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。titlebar の `Log (^L)` menu は `Ctrl+Shift+L` で開き、`Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で logging を切り替え、`Show (^P)` または `Ctrl+Shift+P` で captured log の Show を実行できます。Log menu には keyboard 操作用の `Copy (^C)` / `Paste (^V)` button も表示します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は `Ctrl+Shift+V`、Log menu の `Paste (^V)` button、右クリック paste で OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。
+terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。hamburger の window menu には `Log Start (^S)` / `Log Stop (^S)`、`Log Show (^P)`、`Copy (^C)`、`Paste (^V)` を表示します。`Ctrl+Shift+L` は log 操作に focus した状態でこの menu を開き、`Ctrl+Shift+S` と `Ctrl+Shift+P` は logging と log 表示を直接実行します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。`Ctrl+Shift+M` で window menu を開き、menu 内の `Help (^H)` または `Ctrl+Shift+H` でアプリの全 shortcut 一覧を表示します。
 
 terminal log panel が開いている間、keyboard focus は panel 内に留まります。`Tab` と `Shift+Tab` で log selector、検索欄、操作 button、close button、log text area を循環できます。focus された control は高 contrast の outline で表示します。`Search` button は表示中の log から次の一致文字列を選択してその位置へ scroll し、現在の一致番号を表示します。`N` と `j` は次の一致、`P` と `k` は前の一致へ移動します。矢印キーは通常の text area scroll 用に残します。
 
 npm binary 名は `fpasoterm` です。Linux では `--disable-dmabuf` により、WebKitGTK の描画診断用に `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定できます。
 既定では launcher はコンソールから切り離して起動します。debug 時は `--foreground` で接続したままにできます。
+`fpasoterm --list` / `fpasoterm -l` は起動中のwindowごとにprocess/session ID、表示title、起動時刻を1行で出力し、新しいwindowを開かずに終了します。
+
+`fpasoterm --close <pid|title>` / `fpasoterm -q <pid|title>` は、新しいwindowを開かずに対象windowへ通常終了を要求します。数値はprocess IDとして扱い、それ以外は表示titleとの完全一致で選択します。同じ表示titleのwindowが複数ある場合は、一致した全windowを閉じます。
 
 npm registry から直接インストールできます。
 

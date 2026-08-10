@@ -301,10 +301,25 @@ impl Drop for InstanceMarker {
 
 const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the fpasoterm version.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
+// Adds the instance-list command to the shared direct-binary help text.
+fn cli_help_text() -> String {
+    HELP_TEXT
+        .replacen(
+        "  -d, --dev",
+        "  -l, --list                    List running fpasoterm windows, then exit.\n  -d, --dev",
+        1,
+        )
+        .replacen(
+            "  -d, --dev",
+            "  -q, --close <pid|title>       Close one running window by PID or exact title.\n  -d, --dev",
+            1,
+        )
+}
+
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
-        print_cli_error(&format!("fpasoterm: {error}\n{HELP_TEXT}"));
+        print_cli_error(&format!("fpasoterm: {error}\n{}", cli_help_text()));
         std::process::exit(2);
     }
 
@@ -319,11 +334,25 @@ fn main() {
     }
 
     if cli_has_flag(&["--help", "-h"]) {
-        print_cli_text(HELP_TEXT);
+        print_cli_text(&cli_help_text());
         return;
     }
     if cli_has_flag(&["--version", "-v"]) {
         print_cli_text(&format!("fpasoterm {}\n", env!("CARGO_PKG_VERSION")));
+        return;
+    }
+    if cli_has_flag(&["--list", "-l"]) {
+        print_running_instances();
+        return;
+    }
+    if let Some(target) = cli_option_value_any(&["--close", "-q"]) {
+        match broadcast_targeted_close_request(&sanitize_cli_value(&target)) {
+            Ok(lines) => print_cli_text(&lines),
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: {error}"));
+                std::process::exit(1);
+            }
+        }
         return;
     }
     if cli_has_flag(&["--show-config"]) {
@@ -453,6 +482,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-h",
         "--version",
         "-v",
+        "--list",
+        "-l",
         "--dev",
         "-d",
         "--foreground",
@@ -483,6 +514,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-t",
         "--titlebar-color",
         "-b",
+        "--close",
+        "-q",
         "--enable-plugin",
         "--disable-plugin",
         "--width",
@@ -705,7 +738,7 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
                 continue;
             };
             if pid == current_pid || instance_marker_is_live(pid, &path) {
-                if read_instance_marker_title(&path).as_deref() == Some(title) {
+                if read_instance_marker_base_title(&path).as_deref() == Some(title) {
                     matching_title_count += 1;
                 }
             } else {
@@ -715,9 +748,15 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     }
 
     let marker_path = dir.join(format!("{current_pid}.pid"));
+    let display_title = if matching_title_count == 0 {
+        title.to_string()
+    } else {
+        format!("{title}-{}", matching_title_count + 1)
+    };
     let marker = serde_json::json!({
         "pid": current_pid,
-        "title": title,
+        "baseTitle": title,
+        "title": display_title,
         "createdAt": now_millis()
     });
     if let Err(error) = fs::write(&marker_path, marker.to_string()) {
@@ -732,10 +771,130 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     matching_title_count
 }
 
-// Reads the configured title stored in a live instance marker.
-fn read_instance_marker_title(path: &Path) -> Option<String> {
+// Reads the unsuffixed configured title used to count same-title instances.
+fn read_instance_marker_base_title(path: &Path) -> Option<String> {
     let value: serde_json::Value = serde_json::from_str(&fs::read_to_string(path).ok()?).ok()?;
-    value.get("title")?.as_str().map(str::to_string)
+    value
+        .get("baseTitle")
+        .or_else(|| value.get("title"))?
+        .as_str()
+        .map(str::to_string)
+}
+
+// Prints one stable, script-friendly line for each live application window.
+fn print_running_instances() {
+    let directory = cache_dir_path().join("instances");
+    let mut instances = Vec::new();
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("pid") {
+                continue;
+            }
+            let Some(pid) = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                let _ = fs::remove_file(path);
+                continue;
+            };
+            if !instance_marker_is_live(pid, &path) {
+                let _ = fs::remove_file(path);
+                continue;
+            }
+            let value: serde_json::Value = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+            let title = value
+                .get("title")
+                .or_else(|| value.get("baseTitle"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("fpasoterm")
+                .to_string();
+            let created_at = value
+                .get("createdAt")
+                .and_then(serde_json::Value::as_u64)
+                .unwrap_or(0);
+            instances.push((created_at, pid, title));
+        }
+    }
+    instances.sort_by_key(|(created_at, pid, _)| (*created_at, *pid));
+    if instances.is_empty() {
+        print_cli_text("No running fpasoterm windows.\n");
+        return;
+    }
+    for (created_at, pid, title) in instances {
+        print_cli_text(&format!(
+            "session={pid} pid={pid} title={} started={created_at}\n",
+            serde_json::to_string(&title).unwrap_or_else(|_| "\"fpasoterm\"".to_string())
+        ));
+    }
+}
+
+// Resolves a PID or exact displayed title and broadcasts a graceful close request.
+fn broadcast_targeted_close_request(target: &str) -> Result<String, String> {
+    let numeric_pid = target.parse::<u32>().ok();
+    let directory = cache_dir_path().join("instances");
+    let mut matches = Vec::new();
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("pid") {
+                continue;
+            }
+            let Some(pid) = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if !instance_marker_is_live(pid, &path) {
+                let _ = fs::remove_file(path);
+                continue;
+            }
+            let value: serde_json::Value = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+            let title = value
+                .get("title")
+                .or_else(|| value.get("baseTitle"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("fpasoterm")
+                .to_string();
+            if numeric_pid.map_or(title == target, |target_pid| target_pid == pid) {
+                matches.push((pid, title));
+            }
+        }
+    }
+    if matches.is_empty() {
+        return Err(format!("no running window matches: {target}"));
+    }
+
+    fs::create_dir_all(cache_dir_path()).map_err(|error| error.to_string())?;
+    let request_path = close_request_path();
+    let temporary_path =
+        request_path.with_file_name(format!("close-{}.json.tmp", std::process::id()));
+    let request = serde_json::json!({
+        "createdAt": now_millis(),
+        "pids": matches.iter().map(|(pid, _)| *pid).collect::<Vec<_>>()
+    });
+    fs::write(&temporary_path, request.to_string()).map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(&request_path);
+    fs::rename(&temporary_path, &request_path).map_err(|error| error.to_string())?;
+
+    Ok(matches
+        .into_iter()
+        .map(|(pid, title)| {
+            format!(
+                "requested close session={pid} pid={pid} title={}\n",
+                serde_json::to_string(&title).unwrap_or_else(|_| "\"fpasoterm\"".to_string())
+            )
+        })
+        .collect())
 }
 
 // Returns true when a previous marker should still be considered active.
@@ -790,6 +949,11 @@ fn close_all_request_path() -> PathBuf {
     cache_dir_path().join("close-all.json")
 }
 
+// Returns the targeted close request shared by CLI and running instances.
+fn close_request_path() -> PathBuf {
+    cache_dir_path().join("close.json")
+}
+
 // Listens for placement broadcasts while this process owns its instance marker.
 fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, min_height: u32) {
     std::thread::spawn(move || {
@@ -798,6 +962,8 @@ fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, 
         // requests created after this process started may close this window.
         let last_close_request =
             request_timestamp(&close_all_request_path()).unwrap_or_else(now_millis);
+        let last_targeted_close_request =
+            request_timestamp(&close_request_path()).unwrap_or_else(now_millis);
         loop {
             if !marker_path.exists() {
                 break;
@@ -896,6 +1062,37 @@ fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, 
                         append_diagnostic(&app, &format!("close all dispatch failed: {error}"));
                     }
                     break;
+                }
+            }
+            if let Ok(text) = fs::read_to_string(close_request_path()) {
+                if let Ok(request) = serde_json::from_str::<serde_json::Value>(&text) {
+                    let created_at = request
+                        .get("createdAt")
+                        .and_then(serde_json::Value::as_u64)
+                        .map(u128::from)
+                        .unwrap_or_default();
+                    let targets_current_process = request
+                        .get("pids")
+                        .and_then(serde_json::Value::as_array)
+                        .is_some_and(|pids| {
+                            pids.iter()
+                                .any(|pid| pid.as_u64() == Some(u64::from(std::process::id())))
+                        });
+                    if created_at > last_targeted_close_request && targets_current_process {
+                        let close_app = app.clone();
+                        let result = app.run_on_main_thread(move || {
+                            if let Some(window) = close_app.get_webview_window("main") {
+                                let _ = window.close();
+                            }
+                        });
+                        if let Err(error) = result {
+                            append_diagnostic(
+                                &app,
+                                &format!("targeted close dispatch failed: {error}"),
+                            );
+                        }
+                        break;
+                    }
                 }
             }
             std::thread::sleep(Duration::from_millis(100));
@@ -1420,7 +1617,7 @@ fn default_terminal_font_size() -> u32 {
 // Keeps the platform rule testable from non-macOS CI hosts.
 fn terminal_font_size_for(platform: &str, architecture: &str) -> u32 {
     if platform == "macos" && architecture == "x86_64" {
-        13
+        12
     } else {
         14
     }
@@ -3834,6 +4031,9 @@ mod tests {
             "TEST".to_string(),
             "--size=800x600".to_string(),
             "--debug-keys".to_string(),
+            "--list".to_string(),
+            "--close".to_string(),
+            "12345".to_string(),
         ];
         assert_eq!(validate_direct_cli_args(&args), Ok(()));
     }
@@ -3864,7 +4064,7 @@ mod tests {
 
     #[test]
     fn intel_macos_uses_compact_default_font_size() {
-        assert_eq!(terminal_font_size_for("macos", "x86_64"), 13);
+        assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
         assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
     }

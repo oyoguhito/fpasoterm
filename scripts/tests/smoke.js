@@ -15,10 +15,10 @@ const {
   writeWindowState,
 } = require('../../src/config');
 
-assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 13);
+assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 12);
 assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
-assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 13/);
+assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
 
 const root = path.resolve(__dirname, '..', '..');
@@ -42,7 +42,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.2');
+assert.equal(packageJson.version, '1.4.3');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -126,6 +126,10 @@ const bin = read('bin/fpasoterm');
 assert.match(bin, /--help/);
 assert.match(bin, /--version/);
 assert.match(bin, /-v, --version/);
+assert.match(bin, /-l, --list/);
+assert.match(bin, /-q, --close <pid\|title>/);
+assert.match(bin, /printRunningInstances/);
+assert.match(bin, /closeRunningInstance/);
 assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
@@ -213,6 +217,45 @@ assert.equal(versionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
 assert.equal(shortVersionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+
+const listCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-list-cli-'));
+const listMarkerDir = path.join(listCacheDir, 'fpasoterm', 'instances');
+fs.mkdirSync(listMarkerDir, { recursive: true });
+fs.writeFileSync(path.join(listMarkerDir, `${process.pid}.pid`), JSON.stringify({
+  pid: process.pid,
+  baseTitle: 'fpasoterm',
+  title: 'review-shell',
+  createdAt: 1234,
+}));
+fs.writeFileSync(path.join(listMarkerDir, '999999999.pid'), JSON.stringify({
+  pid: 999999999,
+  title: 'stale',
+  createdAt: 1,
+}));
+const listResult = spawnSync(process.execPath, [path.join(root, 'bin', 'fpasoterm'), '--list'], {
+  encoding: 'utf8',
+  env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
+});
+assert.equal(listResult.status, 0, listResult.stderr);
+assert.match(listResult.stdout, new RegExp(`session=${process.pid} pid=${process.pid} title="review-shell" started=`));
+assert.doesNotMatch(listResult.stdout, /title="stale"/);
+assert.equal(fs.existsSync(path.join(listMarkerDir, '999999999.pid')), false);
+const closeResult = spawnSync(process.execPath, [path.join(root, 'bin', 'fpasoterm'), '--close', 'review-shell'], {
+  encoding: 'utf8',
+  env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
+});
+assert.equal(closeResult.status, 0, closeResult.stderr);
+assert.match(closeResult.stdout, new RegExp(`requested close session=${process.pid}`));
+assert.deepEqual(
+  JSON.parse(fs.readFileSync(path.join(listCacheDir, 'fpasoterm', 'close.json'), 'utf8')).pids,
+  [process.pid],
+);
+const missingCloseResult = spawnSync(process.execPath, [path.join(root, 'bin', 'fpasoterm'), '-q', 'missing'], {
+  encoding: 'utf8',
+  env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
+});
+assert.equal(missingCloseResult.status, 2);
+assert.match(missingCloseResult.stderr, /no running window matches: missing/);
 
 const unknownOptionResult = runCli('--foo');
 assert.equal(unknownOptionResult.status, 2);
@@ -404,8 +447,15 @@ assert.match(rustMain, /FPASOTERM_WINDOW_TITLE_LOCKED/);
 assert.match(rustMain, /title_locked/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_START_COMMAND"/);
 assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
-assert.match(rustMain, /print_cli_text\(HELP_TEXT\)/);
+assert.match(rustMain, /fn cli_help_text/);
+assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--list", "-l"\]\)/);
+assert.match(rustMain, /fn print_running_instances/);
+assert.match(rustMain, /fn broadcast_targeted_close_request/);
+assert.match(rustMain, /cli_option_value_any\(&\["--close", "-q"\]\)/);
+assert.match(rustMain, /fn close_request_path/);
+assert.match(rustMain, /"baseTitle": title/);
 assert.match(rustMain, /CARGO_PKG_VERSION/);
 assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
 assert.match(rustMain, /print_show_config/);
@@ -637,14 +687,15 @@ assert.doesNotMatch(indexHtml, /Write Diagnostics/);
 assert.doesNotMatch(indexHtml, /id="copy-diagnostics"/);
 assert.match(indexHtml, /id="close-diagnostics"/);
 assert.doesNotMatch(indexHtml, removedKebabHttpUiPattern);
-assert.match(indexHtml, /id="log-menu"/);
-assert.match(indexHtml, /id="log-menu-toggle"/);
-assert.match(indexHtml, /id="log-menu-items"/);
+assert.doesNotMatch(indexHtml, /id="log-menu"/);
+assert.doesNotMatch(indexHtml, /id="log-menu-toggle"/);
+assert.match(indexHtml, /id="terminal-log-status" hidden aria-live="polite">Logging</);
+assert.doesNotMatch(indexHtml, /id="log-menu-items"/);
 assert.match(indexHtml, /id="terminal-log-toggle"/);
 assert.match(indexHtml, /id="terminal-log-show"/);
 assert.match(indexHtml, /id="terminal-copy"/);
 assert.match(indexHtml, /id="terminal-paste"/);
-assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+L"/);
+assert.match(indexHtml, /aria-keyshortcuts="[^"]*Control\+Shift\+L[^"]*"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+S"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+P"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+C"/);
@@ -663,9 +714,9 @@ assert.match(indexHtml, /id="terminal-log-confirm"/);
 assert.match(indexHtml, /role="dialog"/);
 assert.match(indexHtml, /id="terminal-log-confirm-ok"/);
 assert.match(indexHtml, /id="terminal-log-confirm-cancel"/);
-assert.match(indexHtml, />Log \(\^L\)</);
-assert.match(indexHtml, />Start \(\^S\)</);
-assert.match(indexHtml, />Show \(\^P\)</);
+assert.doesNotMatch(indexHtml, />Log \(\^L\)</);
+assert.match(indexHtml, />Log Start \(\^S\)</);
+assert.match(indexHtml, />Log Show \(\^P\)</);
 assert.match(indexHtml, />Copy \(\^C\)</);
 assert.match(indexHtml, />Paste \(\^V\)</);
 assert.doesNotMatch(indexHtml, />Clear</);
@@ -691,6 +742,10 @@ assert.match(confirmHtml, /window_cancel_close_all/);
 assert.match(indexHtml, />Tile \(\^T\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+T"/);
 assert.match(indexHtml, /id="window-menu-toggle"/);
+assert.match(indexHtml, /id="window-menu-toggle"[^>]+aria-keyshortcuts="Control\+Shift\+M Control\+Shift\+L"/);
+assert.match(indexHtml, /id="keyboard-shortcuts-help"/);
+assert.match(indexHtml, />Help \(\^H\)</);
+assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+H"/);
 assert.match(indexHtml, /id="window-menu-items"/);
 assert.match(indexHtml, /id="close-window"/);
 assert.match(indexHtml, /id="terminal"/);
@@ -881,22 +936,28 @@ const specEn = read('docs/spec.en.md');
 assert.doesNotMatch(specEn, removedTemporaryHttpUiPattern);
 assert.match(specEn, /OSC 52 copy requests/);
 assert.match(specEn, /selected terminal text/);
-assert.match(specEn, /`Log \(\^L\)` menu opens with `Ctrl\+Shift\+L`/);
-assert.match(specEn, /`Copy \(\^C\)` and `Paste \(\^V\)` buttons/);
+assert.match(specEn, /hamburger window menu contains `Log Start/);
+assert.match(specEn, /`Ctrl\+Shift\+L` opens that menu/);
+assert.match(specEn, /`Ctrl\+Shift\+M` opens the window menu/);
+assert.match(specEn, /`Help \(\^H\)` item or `Ctrl\+Shift\+H`/);
+assert.match(specEn, /`Copy \(\^C\)`, and `Paste \(\^V\)`/);
 assert.match(specEn, /diagnostics and log panel textareas/);
-assert.match(specEn, /Ctrl\+Shift\+V/);
-assert.match(specEn, /right-click paste/);
+assert.match(specEn, /Terminal paste reads the OS clipboard/);
+assert.match(specEn, /otherwise it pastes/);
 assert.match(specEn, /Pane-specific logging is delegated to multiplexers/);
 
 const specJa = read('docs/spec.ja.md');
 assert.doesNotMatch(specJa, removedTemporaryHttpUiPattern);
 assert.match(specJa, /OSC 52 copy request/);
 assert.match(specJa, /選択した terminal text/);
-assert.match(specJa, /`Log \(\^L\)` menu は `Ctrl\+Shift\+L` で開き/);
-assert.match(specJa, /`Copy \(\^C\)` \/ `Paste \(\^V\)` button/);
+assert.match(specJa, /hamburger の window menu には `Log Start/);
+assert.match(specJa, /`Ctrl\+Shift\+L` は log 操作に focus/);
+assert.match(specJa, /`Ctrl\+Shift\+M` で window menu を開き/);
+assert.match(specJa, /`Help \(\^H\)` または `Ctrl\+Shift\+H`/);
+assert.match(specJa, /`Copy \(\^C\)`、`Paste \(\^V\)`/);
 assert.match(specJa, /diagnostics \/ log panel の textarea/);
-assert.match(specJa, /Ctrl\+Shift\+V/);
-assert.match(specJa, /右クリック paste/);
+assert.match(specJa, /terminal paste は OS clipboard/);
+assert.match(specJa, /selection がない場合は paste/);
 assert.match(specJa, /pane 単位の log は tmux/);
 
 const prReviewEn = read('docs/pr-review.en.md');
@@ -1109,6 +1170,13 @@ assert.match(renderer, /event\.ctrlKey && event\.shiftKey && event\.key\.toLower
 assert.match(renderer, /getAvailableScreenBounds/);
 assert.match(renderer, /event\.ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 't'/);
 assert.match(renderer, /setWindowMenuOpen/);
+assert.match(renderer, /showKeyboardShortcutsHelp/);
+assert.match(renderer, /key === 'm'/);
+assert.match(renderer, /key === 'h'/);
+assert.match(renderer, /Ctrl\+Shift\+M  Open or close the window menu/);
+assert.match(renderer, /Ctrl\+Shift\+H  Show this keyboard shortcut list/);
+assert.match(renderer, /terminalLogStatusElement\.hidden = !status\.active/);
+assert.doesNotMatch(renderer, /logMenuToggleButton/);
 assert.match(renderer, /startWindowResize/);
 assert.match(renderer, /startWindowResizeDrag/);
 assert.match(renderer, /startResizeDragging/);
@@ -1136,8 +1204,8 @@ assert.match(renderer, /terminal write failed/);
 assert.match(renderer, /sendTerminalInput/);
 assert.match(renderer, /lineHeight/);
 assert.match(renderer, /minimumContrastRatio/);
-assert.match(renderer, /Log capture is running/);
-assert.match(renderer, /Logging/);
+assert.match(renderer, /terminalLogStatusElement\.hidden = !status\.active/);
+assert.doesNotMatch(renderer, /Logging \(\^L\)/);
 assert.match(renderer, /normalizePasteText/);
 assert.match(renderer, /pasteClipboardToTerminal/);
 assert.match(renderer, /writeClipboardText/);
@@ -1149,7 +1217,7 @@ assert.match(renderer, /selectedTerminalText/);
 assert.match(renderer, /selectedDiagnosticsClipboardText/);
 assert.match(renderer, /selectedClipboardText/);
 assert.match(renderer, /requestTerminalCopyEvent/);
-assert.match(renderer, /focusLogMenuItem/);
+assert.doesNotMatch(renderer, /focusLogMenuItem/);
 assert.match(renderer, /focusWindowMenuItem/);
 assert.match(renderer, /diagnosticsPanelFocusItems/);
 assert.match(renderer, /focusDiagnosticsPanelItem/);
@@ -1176,7 +1244,7 @@ assert.match(renderer, /terminalLogConfirmResolver/);
 assert.match(renderer, /closeDiagnosticsButton/);
 assert.match(renderer, /toggleTerminalOutputLog/);
 assert.match(renderer, /showTerminalOutputLogFromMenu/);
-assert.match(renderer, /firstItem\?\.focus\(\)/);
+assert.match(renderer, /focusTarget\.focus\(\)/);
 assert.match(renderer, /event\.key === 'ArrowDown'/);
 assert.match(renderer, /event\.key === 'ArrowUp'/);
 assert.match(renderer, /event\.key === 'Escape'/);
@@ -1265,9 +1333,9 @@ assert.doesNotMatch(renderer, /web console/);
 assert.match(renderer, /startTerminalLog/);
 assert.match(renderer, /stopTerminalLog/);
 assert.match(renderer, /terminalLogStatus/);
-assert.match(renderer, /logMenuToggleButton/);
-assert.match(renderer, /setLogMenuOpen/);
-assert.match(renderer, /closeLogMenu/);
+assert.doesNotMatch(renderer, /logMenuToggleButton/);
+assert.doesNotMatch(renderer, /setLogMenuOpen/);
+assert.doesNotMatch(renderer, /closeLogMenu/);
 assert.match(renderer, /terminalLogToggleButton/);
 assert.match(renderer, /terminalLogShowButton/);
 assert.doesNotMatch(renderer, /terminalLogClearButton/);
@@ -1315,12 +1383,13 @@ assert.match(styles, /grid-template-rows: var\(--titlebar-height\) minmax\(0, 1f
 assert.match(styles, /height: var\(--titlebar-height\)/);
 assert.match(styles, /pointer-events: none/);
 assert.match(styles, /#window-controls/);
+assert.match(styles, /#window-title[\s\S]*flex: 1 1 auto/);
+assert.match(styles, /#terminal-log-status/);
+assert.match(styles, /#terminal-log-status\[hidden\]/);
 assert.doesNotMatch(styles, /#sync-menu/);
 assert.doesNotMatch(styles, /#sync-status/);
 assert.doesNotMatch(styles, /#sync-menu-items/);
-assert.match(styles, /#log-menu/);
-assert.match(styles, /#log-menu-items/);
-assert.match(styles, /#log-menu-toggle\[data-active="true"\]/);
+assert.doesNotMatch(styles, /#log-menu/);
 assert.match(styles, /#terminal-log-search/);
 assert.match(styles, /#terminal-log-search-next/);
 assert.match(styles, /#terminal-log-search-status/);
@@ -1332,7 +1401,6 @@ assert.match(styles, /#diagnostics-panel select:focus-visible/);
 assert.match(styles, /outline: 3px solid #f5d76e/);
 assert.match(styles, /box-shadow: 0 0 0 2px/);
 assert.match(styles, /#diagnostics::selection/);
-assert.match(styles, /min-width: 86px/);
 assert.match(styles, /padding: 0 2px 8px/);
 assert.match(styles, /\.resize-edge-bottom\s*\{[^}]*height: 4px/s);
 assert.match(styles, /\.resize-edge-bottom\s*\{[^}]*left: 96px/s);

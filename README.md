@@ -146,6 +146,22 @@ Show available options:
 fpasoterm --help
 ```
 
+List running fpasoterm windows without opening another window:
+
+```sh
+fpasoterm --list
+fpasoterm -l
+```
+
+Each line contains the process/session ID, displayed title, and startup time.
+
+Close a running window by PID or exact displayed title:
+
+```sh
+fpasoterm --close 12345
+fpasoterm -q review-shell
+```
+
 Useful one-shot overrides:
 
 ```sh
@@ -354,9 +370,9 @@ terminal output logs through a local sync folder such as Google Drive for
 desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
 Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
-Terminal output logs can be written with the `Log (^L)` menu `Start (^S)` /
-`Stop (^S)` actions or `Ctrl+Shift+S`, and inspected with `Show (^P)` or `Ctrl+Shift+P`.
-`Show` displays the active log or the last log closed by `Stop`. Point
+Terminal output logs can be written from the hamburger menu with `Log Start (^S)` /
+`Log Stop (^S)` or `Ctrl+Shift+S`, and inspected with `Log Show (^P)` or `Ctrl+Shift+P`.
+`Log Show` displays the active log or the last log closed by `Log Stop`. Point
 `logging.directory` at the same synced folder when you want those logs shared.
 The log panel includes a search field and `Search` button for selecting and
 scrolling to the next matching string in the displayed log. `N` moves to the
@@ -605,6 +621,22 @@ fpasoterm --show-config
 fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 ```
 
+起動中のwindowを新しいwindowを開かずに一覧表示:
+
+```sh
+fpasoterm --list
+fpasoterm -l
+```
+
+各行にprocess/session ID、表示title、起動時刻を表示します。
+
+process IDまたは表示titleの完全一致で起動中のwindowを閉じます:
+
+```sh
+fpasoterm --close 12345
+fpasoterm -q review-shell
+```
+
 Windows の packaged `fpasoterm.exe` を直接起動した場合、`--show-config` は
 解決済み runtime config を JSON で出力します。Node launcher を使える場合は
 TOML と plugin load detail を表示します。
@@ -690,7 +722,7 @@ api.terminal.options.cursorBlink = true;
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
-terminal output log は `Log (^L)` menu の `Start (^S)` / `Stop (^S)` または `Ctrl+Shift+S` で取得し、`Show (^P)` または `Ctrl+Shift+P` で active log または `Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+terminal output log は hamburger menu の `Log Start (^S)` / `Log Stop (^S)` または `Ctrl+Shift+S` で取得し、`Log Show (^P)` または `Ctrl+Shift+P` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
 log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
 npm registry から global install する場合:
