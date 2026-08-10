@@ -25,7 +25,7 @@ The npm binary name is `fpasoterm`. On Linux, `--disable-dmabuf` sets `WEBKIT_DI
 By default, the launcher detaches from the console. `--foreground` keeps it attached for debugging.
 `fpasoterm --list` / `fpasoterm -l` prints one line per running window with its process/session ID, displayed title, and startup time, then exits without opening a window.
 
-`fpasoterm --close <pid|title>` / `fpasoterm -q <pid|title>` requests a graceful close of a running window without opening another window. A numeric value selects a process ID; any other value must exactly match the displayed title. If several windows have the same exact title, all matching windows are closed.
+`fpasoterm --close <pid|title|all>` / `fpasoterm -q <pid|title|all>` requests a graceful close without opening another window. A numeric value selects a process ID, another value must exactly match the displayed title, and the reserved case-insensitive target `all` closes every running fpasoterm window. No confirmation dialog is shown. If several windows have the same exact title, all matching windows are closed.
 
 Users can install the published npm package directly:
 
@@ -45,6 +45,16 @@ X11 support native placement. Wayland compositors may reject application-
 controlled positions; the diagnostic log records the requested and actual
 positions in that case.
 
+Running instances refresh their cache markers periodically. Tile layout and
+title suffix allocation ignore markers that are no longer refreshed. Tile uses
+stable grids such as 2x1 for two windows, 2x2 for four, 4x2 for eight, 3x3 for
+nine, and 5x2 for ten. Later same-title windows use the next number after the
+highest live suffix.
+
+On macOS and Windows, the application executable directory is prepended to the
+child shell `PATH`. On macOS, launching `fpasoterm` from inside fpasoterm
+detaches the new GUI process so the current shell prompt is released.
+
 The application window uses that PNG as its runtime icon. Linux desktop entries still refer to `Icon=fpasoterm` so installers can place the image in the target icon theme. Size-specific hicolor PNGs are generated under `extra/linux/icons/hicolor/`.
 
 The package license is MIT and the repository must expose `bin.fpasoterm` from `package.json` for global installation.
@@ -54,7 +64,7 @@ When the shell-backed PTY exits, fpasoterm closes the owning application window.
 ## Configuration and Plugins
 
 User configuration is read from `~/.config/fpasoterm/User/config.toml`, or from `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` when `XDG_CONFIG_HOME` is set.
-`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch. `--shell <command>` selects another shell for one launch. `--command <command>` sends a command to the shell after launch. `--reset-window-state` deletes the saved window size.
+`fpasoterm --config <path>` uses another TOML file for one launch. `--width`, `--height`, and `--size` override the configured window size for one launch. `--shell <command>` selects another shell for one launch. `--command <command>` sends a command to the shell after launch. `--reset-window-state` deletes the saved window size. `--reset-config` (`-R`) renames the selected `config.toml` to a timestamped backup, restores all platform defaults, deletes the saved window state so the default 1000x680 size takes effect, and exits.
 `--show-config` prints the resolved settings and plugin load status. `--enable-plugin` and `--disable-plugin` select one or more files below `User/plugins` by file name and edit `plugins.enabled`.
 
 On launch, fpasoterm writes or refreshes `config.toml.example` with the default settings. fpasoterm does not overwrite an existing user config. When `window.rememberBounds` is enabled, the last window size is saved locally to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch. Saved size overrides explicit `window.width` and `window.height` values in `config.toml`; one-shot CLI overrides are applied last.

@@ -42,7 +42,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.3');
+assert.equal(packageJson.version, '1.4.4');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -106,6 +106,7 @@ for (const file of [
   'src/renderer/vendor/xterm/xterm.js',
   'src/renderer/vendor/addon-fit/addon-fit.js',
   'src-tauri/Cargo.toml',
+  'src-tauri/default-config.toml',
   'src-tauri/capabilities/default.json',
   'src-tauri/tauri.conf.json',
   'src-tauri/src/main.rs',
@@ -127,7 +128,7 @@ assert.match(bin, /--help/);
 assert.match(bin, /--version/);
 assert.match(bin, /-v, --version/);
 assert.match(bin, /-l, --list/);
-assert.match(bin, /-q, --close <pid\|title>/);
+assert.match(bin, /-q, --close <pid\|title\|all>/);
 assert.match(bin, /printRunningInstances/);
 assert.match(bin, /closeRunningInstance/);
 assert.match(bin, /--dev/);
@@ -142,6 +143,7 @@ assert.match(bin, /--command/);
 assert.match(bin, /--title/);
 assert.match(bin, /--titlebar-color/);
 assert.match(bin, /--reset-window-state/);
+assert.match(bin, /-R, --reset-config/);
 assert.match(bin, /--enable-plugin/);
 assert.match(bin, /--disable-plugin/);
 assert.match(bin, /--size/);
@@ -250,6 +252,16 @@ assert.deepEqual(
   JSON.parse(fs.readFileSync(path.join(listCacheDir, 'fpasoterm', 'close.json'), 'utf8')).pids,
   [process.pid],
 );
+const closeAllResult = spawnSync(process.execPath, [path.join(root, 'bin', 'fpasoterm'), '-q', 'all'], {
+  encoding: 'utf8',
+  env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
+});
+assert.equal(closeAllResult.status, 0, closeAllResult.stderr);
+assert.match(closeAllResult.stdout, new RegExp(`requested close session=${process.pid}`));
+assert.deepEqual(
+  JSON.parse(fs.readFileSync(path.join(listCacheDir, 'fpasoterm', 'close.json'), 'utf8')).pids,
+  [process.pid],
+);
 const missingCloseResult = spawnSync(process.execPath, [path.join(root, 'bin', 'fpasoterm'), '-q', 'missing'], {
   encoding: 'utf8',
   env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
@@ -261,6 +273,35 @@ const unknownOptionResult = runCli('--foo');
 assert.equal(unknownOptionResult.status, 2);
 assert.match(unknownOptionResult.stderr, /fpasoterm: unknown option: --foo/);
 assert.match(unknownOptionResult.stderr, /Usage: fpasoterm \[options\]/);
+
+const resetConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-reset-config-'));
+const resetConfigPath = path.join(resetConfigDir, 'User', 'config.toml');
+const resetStatePath = path.join(resetConfigDir, 'fpasoterm', 'User', 'window-state.json');
+fs.mkdirSync(path.dirname(resetConfigPath), { recursive: true });
+fs.writeFileSync(resetConfigPath, '[window]\ntitle = "custom"\n');
+fs.mkdirSync(path.dirname(resetStatePath), { recursive: true });
+fs.writeFileSync(resetStatePath, '{"window":{"width":777,"height":333}}\n');
+const resetConfigResult = spawnSync(
+  process.execPath,
+  [path.join(root, 'bin', 'fpasoterm'), '--config', resetConfigPath, '--reset-config'],
+  { encoding: 'utf8', env: { ...process.env, XDG_CONFIG_HOME: resetConfigDir } },
+);
+assert.equal(resetConfigResult.status, 0, resetConfigResult.stderr);
+assert.match(resetConfigResult.stdout, /reset config/);
+assert.match(resetConfigResult.stdout, /renamed previous config/);
+assert.match(resetConfigResult.stdout, /deleted saved window state/);
+const resetConfigValue = toml.parse(fs.readFileSync(resetConfigPath, 'utf8'));
+assert.equal(resetConfigValue.window.title, 'fpasoterm');
+assert.equal(resetConfigValue.window.width, 1000);
+assert.equal(resetConfigValue.window.height, 680);
+assert.equal(resetConfigValue.terminal.fontSize, platformDefaultConfig().terminal.fontSize);
+assert.equal(resetConfigValue.sync.enabled, false);
+const resetBackups = fs.readdirSync(path.dirname(resetConfigPath))
+  .filter((name) => name.startsWith('config.toml.backup-'));
+assert.equal(resetBackups.length, 1);
+assert.match(fs.readFileSync(path.join(path.dirname(resetConfigPath), resetBackups[0]), 'utf8'), /custom/);
+assert.equal(fs.existsSync(resetStatePath), false);
+fs.rmSync(resetConfigDir, { recursive: true, force: true });
 
 const enableResult = runCli('--enable-plugin', 'hello.ts, theme.js');
 assert.equal(enableResult.status, 0, enableResult.stderr);
@@ -454,8 +495,16 @@ assert.match(rustMain, /cli_has_flag\(&\["--list", "-l"\]\)/);
 assert.match(rustMain, /fn print_running_instances/);
 assert.match(rustMain, /fn broadcast_targeted_close_request/);
 assert.match(rustMain, /cli_option_value_any\(&\["--close", "-q"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--reset-config", "-R"\]\)/);
+assert.match(rustMain, /fn reset_config_cli/);
 assert.match(rustMain, /fn close_request_path/);
 assert.match(rustMain, /"baseTitle": title/);
+assert.match(rustMain, /fn instance_marker_is_fresh/);
+assert.match(rustMain, /INSTANCE_HEARTBEAT_INTERVAL/);
+assert.match(rustMain, /fn instance_number_from_display_title/);
+assert.match(rustMain, /fn tile_grid/);
+assert.match(rustMain, /fn detach_nested_macos_launch/);
+assert.match(rustMain, /command\.env\("PATH", path_value\)/);
 assert.match(rustMain, /CARGO_PKG_VERSION/);
 assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
 assert.match(rustMain, /print_show_config/);
@@ -547,8 +596,8 @@ assert.match(rustMain, /ArrangeRequest/);
 assert.match(rustMain, /fpasoterm-debug\.log/);
 assert.match(rustMain, /arrange tile minimum override/);
 assert.match(rustMain, /arrange requested windows=.*cells=/);
-assert.match(rustMain, /preferred_columns/);
-assert.match(rustMain, /width_capacity/);
+assert.match(rustMain, /let \(columns, rows\) = tile_grid\(count\)/);
+assert.doesNotMatch(rustMain, /width_capacity/);
 assert.match(rustMain, /startup window size restore skipped because Tile was requested/);
 assert.match(rustMain, /arrange immediate pid=/);
 assert.match(rustMain, /tile_gap/);
@@ -821,7 +870,9 @@ assert.match(configDocsEn, /shell = ""/);
 assert.match(configDocsEn, /pwsh\.exe/);
 assert.match(configDocsEn, /PowerShell 7 \(`pwsh\.exe`\) is the default/);
 assert.match(configDocsEn, /PowerShell\\7\\pwsh\.exe/);
-assert.match(configDocsEn, /fpasoterm executable directory at the front of `Path`/);
+assert.match(configDocsEn, /Windows and macOS/);
+assert.match(configDocsEn, /executable directory at the front of `PATH`/);
+assert.match(configDocsEn, /nested GUI launch detaches/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);
 assert.match(configDocsEn, /window-state\.json/);
 assert.match(configDocsEn, /same table to be defined more than once/);
@@ -883,7 +934,9 @@ assert.match(configDocsJa, /shell = ""/);
 assert.match(configDocsJa, /pwsh\.exe/);
 assert.match(configDocsJa, /PowerShell 7 \(`pwsh\.exe`\) が利用可能な場合に既定 shell/);
 assert.match(configDocsJa, /PowerShell\\7\\pwsh\.exe/);
-assert.match(configDocsJa, /fpasoterm の実行ファイルがあるディレクトリを追加/);
+assert.match(configDocsJa, /WindowsとmacOS/);
+assert.match(configDocsJa, /実行ファイルがあるdirectoryを追加/);
+assert.match(configDocsJa, /新しいGUIを起動する場合は既定でprocessを切り離/);
 assert.match(configDocsJa, /window-state\.json/);
 assert.match(configDocsJa, /同じ table を複数回定義できません/);
 assert.match(configDocsJa, /OSC 777/);

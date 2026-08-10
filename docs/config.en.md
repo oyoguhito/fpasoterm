@@ -60,6 +60,20 @@ Delete the saved window size:
 fpasoterm --reset-window-state
 ```
 
+Restore every setting to its platform default:
+
+```sh
+fpasoterm --reset-config
+# Short form: fpasoterm -R
+```
+
+An existing file is renamed beside it as `config.toml.backup-<timestamp>` before
+a complete new `config.toml` is written. The saved `window-state.json` is also
+deleted, so the default width of 1000 and height of 680 are used on the next
+launch. This command exits without opening a window. With `--config <path>`,
+only that selected config file is renamed and reset; the standard local window
+state is still cleared.
+
 Print the resolved configuration and plugin status:
 
 ```sh
@@ -165,7 +179,7 @@ When `window.rememberBounds` is enabled, the last window size is saved to `~/.co
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
-On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. This allows `fpasoterm --help` and other fpasoterm commands to run from inside the opened terminal without changing the global user or system PATH.
+On Windows and macOS, the terminal process receives the fpasoterm executable directory at the front of `PATH` (`Path` on Windows). This allows `fpasoterm --help` and other fpasoterm commands to run from inside the opened terminal without changing the global user or system PATH. On macOS, a nested GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional.
 
 The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance.
 

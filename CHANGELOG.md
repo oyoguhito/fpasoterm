@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.4.4
+
+- Excluded stale instance markers with a cross-platform heartbeat so Tile counts and title suffixes reflect running windows on Windows and macOS.
+- Stabilized Tile grids, including 2x1 for two windows, 3x3 for nine windows, and 5x2 for ten windows.
+- Added the macOS application executable directory to child-shell `PATH` and detached nested GUI launches so `fpasoterm` opens another window without blocking the prompt.
+- Allocated `-2`, `-3`, and later title suffixes after the highest live suffix instead of using an ambiguous marker count.
+- Added the reserved `all` target to `fpasoterm --close` / `-q` for closing every running window from the CLI.
+- Added `fpasoterm --reset-config` / `-R` to rename the selected config as a timestamped backup, restore every platform default, and clear saved bounds so the default 1000x680 size takes effect.
+
 ## 1.4.3
 
 - Reduced the default terminal font size on Intel macOS from 13px to 12px when no explicit `terminal.fontSize` is configured.

@@ -25,7 +25,7 @@ npm binary 名は `fpasoterm` です。Linux では `--disable-dmabuf` により
 既定では launcher はコンソールから切り離して起動します。debug 時は `--foreground` で接続したままにできます。
 `fpasoterm --list` / `fpasoterm -l` は起動中のwindowごとにprocess/session ID、表示title、起動時刻を1行で出力し、新しいwindowを開かずに終了します。
 
-`fpasoterm --close <pid|title>` / `fpasoterm -q <pid|title>` は、新しいwindowを開かずに対象windowへ通常終了を要求します。数値はprocess IDとして扱い、それ以外は表示titleとの完全一致で選択します。同じ表示titleのwindowが複数ある場合は、一致した全windowを閉じます。
+`fpasoterm --close <pid|title|all>` / `fpasoterm -q <pid|title|all>`は、新しいwindowを開かずに通常終了を要求します。数値はprocess ID、それ以外は表示titleとの完全一致で選択し、大文字小文字を区別しない予約targetの`all`は起動中の全fpasoterm windowを閉じます。確認dialogは表示しません。同じ表示titleのwindowが複数ある場合は、一致した全windowを閉じます。
 
 npm registry から直接インストールできます。
 
@@ -44,6 +44,10 @@ npm install -g fpasoterm
 X11 では native placement を使用します。Wayland compositor が位置変更を
 拒否した場合は、diagnostics に要求位置と実際の位置を記録します。
 
+起動中instanceはcache markerを定期更新します。Tileのwindow件数とtitle suffix採番では、更新が停止したmarkerを除外します。Tileは2 windowを2x1、4 windowを2x2、8 windowを4x2、9 windowを3x3、10 windowを5x2の安定したgridへ配置します。同じbase titleの追加windowは、現在起動中の最大suffixの次の番号を使います。
+
+macOSとWindowsではapplication executable directoryをchild shellの`PATH`先頭へ追加します。macOSのfpasoterm内で`fpasoterm`を実行した場合は、新しいGUI processを切り離して現在のshell promptを解放します。
+
 アプリケーションウィンドウはこの PNG を runtime icon として使います。Linux desktop entry は `Icon=fpasoterm` を参照するため、installer はこの画像を対象環境の icon theme へ配置します。サイズ別 hicolor PNG は `extra/linux/icons/hicolor/` に生成します。
 
 license は MIT です。global install で `fpasoterm` コマンドを作るため、`package.json` の `bin.fpasoterm` を公開します。
@@ -53,7 +57,7 @@ shell 付き PTY が終了した場合、fpasoterm は対応するアプリケ�
 ## 設定とプラグイン
 
 ユーザー設定は `~/.config/fpasoterm/User/config.toml` から読み込みます。`XDG_CONFIG_HOME` がある場合は `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` を使います。
-`fpasoterm --config <path>` で一度だけ別の TOML file を使えます。`--width`、`--height`、`--size` は一度だけ window size を上書きします。`--shell <command>` は一度だけ別の shell を使います。`--command <command>` は起動後に shell へ command を送ります。`--reset-window-state` は保存済み window size を削除します。
+`fpasoterm --config <path>` で一度だけ別の TOML file を使えます。`--width`、`--height`、`--size` は一度だけ window size を上書きします。`--shell <command>` は一度だけ別の shell を使います。`--command <command>` は起動後に shell へ command を送ります。`--reset-window-state` は保存済み window size を削除します。`--reset-config` (`-R`) は選択した `config.toml` をtimestamp付きbackup名へrenameし、OSごとの全デフォルト値へ戻し、保存済みwindow stateも削除してデフォルトの1000x680を反映して終了します。
 `--show-config` は解決済み設定と plugin 読み込み状況を表示します。`--enable-plugin` と `--disable-plugin` は `User/plugins` 配下から一つ以上のファイル名を選択し、`plugins.enabled` を編集します。
 
 起動時に fpasoterm は既定値を `config.toml.example` として書き出し、古い場合は更新します。既存のユーザー設定は上書きしません。`window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。保存済み size は `config.toml` に明示した `window.width`、`window.height` より優先され、CLI の一時指定は最後に適用されます。
