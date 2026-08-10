@@ -21,6 +21,7 @@ const maximizeWindowButton = document.getElementById('maximize-window');
 const newWindowButton = document.getElementById('new-window');
 const arrangeWindowButton = document.getElementById('arrange-window');
 const closeAllWindowsButton = document.getElementById('close-all-windows');
+const keyboardShortcutsHelpButton = document.getElementById('keyboard-shortcuts-help');
 const closeAllConfirmElement = document.getElementById('close-all-confirm');
 const closeAllConfirmMessageElement = document.getElementById('close-all-confirm-message');
 const closeAllConfirmOkButton = document.getElementById('close-all-confirm-ok');
@@ -28,9 +29,7 @@ const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-c
 const windowMenu = document.getElementById('window-menu');
 const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
-const logMenu = document.getElementById('log-menu');
-const logMenuToggleButton = document.getElementById('log-menu-toggle');
-const logMenuItems = document.getElementById('log-menu-items');
+const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
 const terminalCopyButton = document.getElementById('terminal-copy');
@@ -1179,50 +1178,15 @@ async function installSyncControls() {
 
 // Updates the terminal output log button label from backend state.
 async function refreshTerminalLogControl() {
-  if (!terminalLogToggleButton || !logMenuToggleButton) {
+  if (!terminalLogToggleButton || !terminalLogStatusElement) {
     return;
   }
   const status = await window.fpasoterm.terminalLogStatus();
-  if (logMenu) {
-    logMenu.hidden = status.enabled === false;
-  }
-  terminalLogToggleButton.textContent = status.active ? 'Stop (^S)' : 'Start (^S)';
+  terminalLogToggleButton.hidden = status.enabled === false;
+  terminalLogShowButton.hidden = status.enabled === false;
+  terminalLogToggleButton.textContent = status.active ? 'Log Stop (^S)' : 'Log Start (^S)';
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
-  logMenuToggleButton.dataset.active = status.active ? 'true' : 'false';
-  logMenuToggleButton.textContent = status.active ? 'Logging (^L)' : 'Log (^L)';
-  logMenuToggleButton.setAttribute('aria-label', status.active ? 'Log capture is running' : 'Open log menu');
-}
-
-// Opens or closes the compact log action menu in the custom titlebar.
-function setLogMenuOpen(open) {
-  if (!logMenuItems || !logMenuToggleButton) {
-    return;
-  }
-  logMenuItems.hidden = !open;
-  logMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
-  if (open) {
-    const firstItem = logMenuItems.querySelector('button:not([hidden])');
-    firstItem?.focus();
-  }
-}
-
-// Closes the log menu after actions or outside clicks.
-function closeLogMenu() {
-  setLogMenuOpen(false);
-}
-
-// Moves keyboard focus inside the compact log menu.
-function focusLogMenuItem(delta) {
-  if (!logMenuItems || logMenuItems.hidden) {
-    return;
-  }
-  const items = Array.from(logMenuItems.querySelectorAll('button:not([hidden])'));
-  if (items.length === 0) {
-    return;
-  }
-  const currentIndex = items.indexOf(document.activeElement);
-  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
-  items[nextIndex].focus();
+  terminalLogStatusElement.hidden = !status.active;
 }
 
 // Moves keyboard focus inside the compact window menu.
@@ -1462,7 +1426,7 @@ function toggleTerminalOutputLog() {
     terminalLogToggleButton.textContent = 'Error';
     setTimeout(() => refreshTerminalLogControl().catch(() => {}), 1400);
     showDiagnostic(`terminal log toggle failed: ${error}`);
-  }).finally(closeLogMenu);
+  }).finally(() => setWindowMenuOpen(false));
 }
 
 // Opens the terminal log viewer from both button clicks and shortcuts.
@@ -1470,10 +1434,10 @@ function showTerminalOutputLogFromMenu() {
   showTerminalOutputLog().catch((error) => {
     terminalLogShowButton.textContent = 'Error';
     setTimeout(() => {
-      terminalLogShowButton.textContent = 'Show (^P)';
+      terminalLogShowButton.textContent = 'Log Show (^P)';
     }, 1400);
     showDiagnostic(`terminal log show failed: ${error}`);
-  }).finally(closeLogMenu);
+  }).finally(() => setWindowMenuOpen(false));
 }
 
 // Starts terminal output logging to the configured or requested file.
@@ -1507,6 +1471,31 @@ function setTerminalLogPickerVisible(visible) {
       element.hidden = !visible;
     }
   }
+}
+
+// Displays the application keyboard shortcuts in the existing accessible panel.
+function showKeyboardShortcutsHelp() {
+  diagnosticsPanelMode = 'keyboard-shortcuts';
+  setTerminalLogPickerVisible(false);
+  setWindowMenuOpen(false);
+  diagnosticsTitleElement.textContent = 'Keyboard Shortcuts';
+  diagnosticsElement.value = [
+    'Ctrl+Shift+L  Open the window menu at Log actions',
+    'Ctrl+Shift+S  Start or stop terminal output logging',
+    'Ctrl+Shift+P  Show terminal output logs',
+    'Ctrl+Shift+C  Copy selected terminal or log text',
+    'Ctrl+Shift+V  Paste clipboard text into the terminal',
+    'Ctrl+Shift+M  Open or close the window menu',
+    'Ctrl+Shift+H  Show this keyboard shortcut list',
+    'Ctrl+Shift+N  Open a new terminal window',
+    'Ctrl+Shift+T  Tile all fpasoterm windows',
+    'Ctrl+Shift+X  Close all fpasoterm windows after confirmation',
+    'Escape        Close the current menu or panel',
+  ].join('\n');
+  diagnosticsElement.scrollTop = 0;
+  diagnosticsPathElement.textContent = '';
+  diagnosticsPanel.hidden = false;
+  closeDiagnosticsButton.focus({ preventScroll: true });
 }
 
 // Formats one log item for the selector dropdown.
@@ -1713,25 +1702,13 @@ closeAllConfirmElement.addEventListener('keydown', (event) => {
 terminalCopyButton.addEventListener('click', () => {
   copyTerminalSelection().catch((error) => {
     showDiagnostic(`terminal menu copy failed: ${error}`);
-  }).finally(closeLogMenu);
+  }).finally(() => setWindowMenuOpen(false));
 });
 
 terminalPasteButton.addEventListener('click', () => {
   pasteClipboardToTerminal().catch((error) => {
     showDiagnostic(`terminal menu paste failed: ${error}`);
-  }).finally(closeLogMenu);
-});
-
-logMenuToggleButton.addEventListener('click', (event) => {
-  event.stopPropagation();
-  setLogMenuOpen(logMenuItems?.hidden !== false);
-});
-
-logMenuToggleButton.addEventListener('keydown', (event) => {
-  if (event.key === 'ArrowDown' || event.key === 'Enter' || event.key === ' ') {
-    event.preventDefault();
-    setLogMenuOpen(true);
-  }
+  }).finally(() => setWindowMenuOpen(false));
 });
 
 document.addEventListener('keydown', (event) => {
@@ -1742,7 +1719,20 @@ document.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'l') {
     event.preventDefault();
-    setLogMenuOpen(logMenuItems?.hidden !== false);
+    const open = windowMenuItems?.hidden !== false;
+    setWindowMenuOpen(open, terminalLogToggleButton);
+    return;
+  }
+
+  if (key === 'm') {
+    event.preventDefault();
+    setWindowMenuOpen(windowMenuItems?.hidden !== false);
+    return;
+  }
+
+  if (key === 'h') {
+    event.preventDefault();
+    showKeyboardShortcutsHelp();
     return;
   }
 
@@ -1757,29 +1747,6 @@ document.addEventListener('keydown', (event) => {
     showTerminalOutputLogFromMenu();
   }
 }, true);
-
-logMenuItems.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    closeLogMenu();
-    logMenuToggleButton.focus();
-    return;
-  }
-  if (event.key === 'ArrowDown') {
-    event.preventDefault();
-    focusLogMenuItem(1);
-    return;
-  }
-  if (event.key === 'Tab') {
-    event.preventDefault();
-    focusLogMenuItem(event.shiftKey ? -1 : 1);
-    return;
-  }
-  if (event.key === 'ArrowUp') {
-    event.preventDefault();
-    focusLogMenuItem(-1);
-  }
-});
 
 diagnosticsPanel.addEventListener('keydown', (event) => {
   if (diagnosticsPanel.hidden) {
@@ -1861,9 +1828,6 @@ diagnosticsPanel.addEventListener('keydown', (event) => {
 });
 
 document.addEventListener('pointerdown', (event) => {
-  if (logMenu && !logMenu.hidden && !logMenu.contains(event.target)) {
-    closeLogMenu();
-  }
   if (windowMenu && !windowMenuItems.hidden && !windowMenu.contains(event.target)) {
     setWindowMenuOpen(false);
   }
@@ -1909,6 +1873,11 @@ closeAllWindowsButton.addEventListener('click', () => {
   requestCloseAllWindows();
 });
 
+// Opens the keyboard shortcut reference from the window menu.
+keyboardShortcutsHelpButton.addEventListener('click', () => {
+  showKeyboardShortcutsHelp();
+});
+
 // Reports the logical work area so ChromeOS shelf and display scaling are not
 // mistaken for usable native monitor pixels during window tiling.
 function getAvailableScreenBounds() {
@@ -1923,14 +1892,17 @@ function getAvailableScreenBounds() {
 }
 
 // Opens or closes the compact window action menu.
-function setWindowMenuOpen(open) {
+function setWindowMenuOpen(open, preferredItem = newWindowButton) {
   if (!windowMenuItems || !windowMenuToggleButton) {
     return;
   }
   windowMenuItems.hidden = !open;
   windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (open) {
-    newWindowButton.focus();
+    const focusTarget = preferredItem && !preferredItem.hidden && !preferredItem.disabled
+      ? preferredItem
+      : newWindowButton;
+    focusTarget.focus();
   }
 }
 

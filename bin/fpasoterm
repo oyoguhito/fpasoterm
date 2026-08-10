@@ -24,6 +24,8 @@ const helpText = `Usage: fpasoterm [options]
 Options:
   -h, --help                    Show this help.
   -v, --version                 Show the fpasoterm version.
+  -l, --list                    List running fpasoterm windows, then exit.
+  -q, --close <pid|title>       Close one running window by PID or exact title.
   -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
@@ -85,6 +87,8 @@ function parseArgs(argv) {
   let foreground = false;
   let dev = false;
   let showConfig = false;
+  let listInstances = false;
+  let closeTarget = '';
   let setupSync = false;
   let resetWindowState = false;
   let selfUpdate = false;
@@ -107,6 +111,17 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--list' || arg === '-l') {
+      listInstances = true;
+      continue;
+    }
+
+    if (arg === '--close' || arg === '-q') {
+      closeTarget = requireValue(argv, index, arg);
+      index += 1;
       continue;
     }
 
@@ -238,6 +253,8 @@ function parseArgs(argv) {
     foreground,
     dev,
     showConfig,
+    listInstances,
+    closeTarget,
     setupSync,
     resetWindowState,
     selfUpdate,
@@ -257,14 +274,14 @@ function parseArgs(argv) {
 // Rejects unknown options before help/version handling can bypass validation.
 function validateArgs(argv) {
   const flags = new Set([
-    '--help', '-h', '--version', '-v', '--dev', '-d', '--foreground', '-F',
+    '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--shell', '-s', '--command', '-e', '--title', '-t',
-    '--titlebar-color', '-b', '--enable-plugin', '--disable-plugin', '--width', '-W',
+    '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--width', '-W',
     '--height', '-H', '--size', '-z',
   ]);
 
@@ -287,6 +304,102 @@ function validateArgs(argv) {
 // Prints the package version without starting the desktop process.
 function printVersion() {
   console.log(`fpasoterm ${packageJson.version}`);
+}
+
+// Returns the runtime marker directory shared with the native application.
+function instanceMarkerDirectory() {
+  const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(cacheHome, 'fpasoterm', 'instances');
+}
+
+// Checks whether a marker PID still belongs to a running process.
+function instanceProcessIsLive(pid) {
+  if (process.platform === 'linux') {
+    return fs.existsSync(`/proc/${pid}`);
+  }
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return error?.code === 'EPERM';
+  }
+}
+
+// Best-effort cleanup must not prevent a read-only instance listing.
+function removeStaleInstanceMarker(markerPath) {
+  try {
+    fs.rmSync(markerPath, { force: true });
+  } catch {
+    // Read-only cache mounts can still be inspected even when cleanup is denied.
+  }
+}
+
+// Reads live native per-process markers and removes stale entries when possible.
+function runningInstances() {
+  const directory = instanceMarkerDirectory();
+  const instances = [];
+  if (fs.existsSync(directory)) {
+    for (const name of fs.readdirSync(directory).filter((entry) => entry.endsWith('.pid')).sort()) {
+      const markerPath = path.join(directory, name);
+      try {
+        const marker = JSON.parse(fs.readFileSync(markerPath, 'utf8'));
+        const pid = Number(marker.pid || path.basename(name, '.pid'));
+        if (!Number.isInteger(pid) || pid <= 0 || !instanceProcessIsLive(pid)) {
+          removeStaleInstanceMarker(markerPath);
+          continue;
+        }
+        instances.push({
+          pid,
+          title: String(marker.title || marker.baseTitle || 'fpasoterm'),
+          createdAt: Number(marker.createdAt || 0),
+        });
+      } catch {
+        removeStaleInstanceMarker(markerPath);
+      }
+    }
+  }
+
+  instances.sort((left, right) => left.createdAt - right.createdAt || left.pid - right.pid);
+  return instances;
+}
+
+// Lists running windows from the native per-process markers without launching the GUI.
+function printRunningInstances() {
+  const instances = runningInstances();
+  if (instances.length === 0) {
+    console.log('No running fpasoterm windows.');
+    return;
+  }
+  for (const instance of instances) {
+    const started = instance.createdAt > 0 ? new Date(instance.createdAt).toISOString() : 'unknown';
+    console.log(`session=${instance.pid} pid=${instance.pid} title=${JSON.stringify(instance.title)} started=${started}`);
+  }
+}
+
+// Atomically broadcasts a graceful close request to windows matching a PID or exact title.
+function closeRunningInstance(target) {
+  const normalizedTarget = String(target || '').trim();
+  const numericPid = /^\d+$/.test(normalizedTarget) ? Number(normalizedTarget) : null;
+  const matches = runningInstances().filter((instance) => (
+    numericPid === null ? instance.title === normalizedTarget : instance.pid === numericPid
+  ));
+  if (matches.length === 0) {
+    throw new Error(`no running window matches: ${normalizedTarget}`);
+  }
+
+  const cacheDirectory = path.dirname(instanceMarkerDirectory());
+  fs.mkdirSync(cacheDirectory, { recursive: true });
+  const requestPath = path.join(cacheDirectory, 'close.json');
+  const temporaryPath = path.join(cacheDirectory, `close-${process.pid}.json.tmp`);
+  fs.writeFileSync(temporaryPath, JSON.stringify({
+    createdAt: Date.now(),
+    pids: matches.map((instance) => instance.pid),
+  }));
+  removeStaleInstanceMarker(requestPath);
+  fs.renameSync(temporaryPath, requestPath);
+  for (const instance of matches) {
+    console.log(`requested close session=${instance.pid} pid=${instance.pid} title=${JSON.stringify(instance.title)}`);
+  }
 }
 
 // Selects the npm executable in a way that works on Windows and Unix.
@@ -977,6 +1090,10 @@ try {
     process.stdout.write(helpText);
   } else if (options.version) {
     printVersion();
+  } else if (options.listInstances) {
+    printRunningInstances();
+  } else if (options.closeTarget) {
+    closeRunningInstance(options.closeTarget);
   } else if (updatePluginConfig(options)) {
     // The config command has completed without starting the desktop process.
   } else if (options.resetWindowState) {

@@ -98,7 +98,7 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
-# When omitted, the default is 13 on Intel macOS and 14 on other platforms.
+# When omitted, the default is 12 on Intel macOS and 14 on other platforms.
 lineHeight = 1.12
 minimumContrastRatio = 4.5
 rescaleOverlappingGlyphs = true
@@ -159,7 +159,7 @@ maxBytes = 10485760
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. See [Sync Folder](sync.en.md).
-- `logging`: terminal output logging. The `Log (^L)` menu opens with `Ctrl+Shift+L`; `Start (^S)` / `Stop (^S)` or `Ctrl+Shift+S` writes readable terminal output with control sequences removed to a local file, and `Show (^P)` or `Ctrl+Shift+P` opens a selector so you can choose which captured `terminal-*.log` to view. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
+- `logging`: terminal output logging. The hamburger menu contains `Log Start (^S)` / `Log Stop (^S)` and `Log Show (^P)`. `Ctrl+Shift+L` opens that menu at the log actions; `Ctrl+Shift+S` toggles logging directly, and `Ctrl+Shift+P` opens a selector for captured logs. Logging writes readable terminal output with control sequences removed to a local file. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 

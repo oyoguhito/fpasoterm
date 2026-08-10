@@ -11,21 +11,18 @@
     <header id="drag-region" data-tauri-drag-region>
       <span id="window-title">fpasoterm</span>
       <div id="window-controls" aria-label="Window controls">
-        <div id="log-menu">
-          <button id="log-menu-toggle" type="button" aria-label="Open log menu" aria-expanded="false" aria-keyshortcuts="Control+Shift+L">Log (^L)</button>
-          <div id="log-menu-items" role="menu" hidden>
-            <button id="terminal-log-toggle" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+S">Start (^S)</button>
-            <button id="terminal-log-show" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+P">Show (^P)</button>
+        <div id="window-menu">
+          <span id="terminal-log-status" hidden aria-live="polite">Logging</span>
+          <button id="window-menu-toggle" type="button" aria-label="Open window menu" aria-expanded="false" aria-keyshortcuts="Control+Shift+M Control+Shift+L">&#9776;</button>
+          <div id="window-menu-items" role="menu" hidden>
+            <button id="terminal-log-toggle" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+S">Log Start (^S)</button>
+            <button id="terminal-log-show" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+P">Log Show (^P)</button>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (^C)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (^V)</button>
-          </div>
-        </div>
-        <div id="window-menu">
-          <button id="window-menu-toggle" type="button" aria-label="Open window menu" aria-expanded="false">&#9776;</button>
-          <div id="window-menu-items" role="menu" hidden>
             <button id="new-window" type="button" role="menuitem" aria-label="Open a new fpasoterm window" aria-keyshortcuts="Control+Shift+N">New (^N)</button>
             <button id="arrange-window" type="button" role="menuitem" aria-label="Arrange fpasoterm windows" aria-keyshortcuts="Control+Shift+T">Tile (^T)</button>
             <button id="close-all-windows" type="button" role="menuitem" aria-label="Close all fpasoterm windows" aria-keyshortcuts="Control+Shift+X">Close All (^X)</button>
+            <button id="keyboard-shortcuts-help" type="button" role="menuitem" aria-label="Show keyboard shortcuts" aria-keyshortcuts="Control+Shift+H">Help (^H)</button>
           </div>
         </div>
         <button id="minimize-window" type="button" aria-label="Minimize">-</button>

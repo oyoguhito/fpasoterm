@@ -85,7 +85,7 @@ const defaultConfig = Object.freeze({
 // otherwise make the terminal noticeably larger than other supported hosts.
 function platformDefaultConfig(platform = process.platform, architecture = process.arch) {
   if (platform === 'darwin' && architecture === 'x64') {
-    return mergeConfig(defaultConfig, { terminal: { fontSize: 13 } });
+    return mergeConfig(defaultConfig, { terminal: { fontSize: 12 } });
   }
   return defaultConfig;
 }
