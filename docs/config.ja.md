@@ -178,7 +178,7 @@ maxBytes = 10485760
 
 window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
-WindowsとmacOSでは、起動したterminal processの`PATH`（Windowsでは`Path`）先頭にfpasotermの実行ファイルがあるdirectoryを追加します。これにより、global user/system PATHを変更しなくても、fpasoterm内で`fpasoterm --help`などを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。新しいwindowの終了まで待つ場合は`--foreground`を使います。
+Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executable directoryを追加します。macOSでは、現在起動中のapp bundleを参照する`~/.config/fpasoterm/bin/fpasoterm` shimを毎回生成して`PATH`先頭に置き、全引数を変更せず転送します。これによりglobal user/system PATHを変更せず、fpasoterm内で`fpasoterm --help`、`--list`、`--close`など直接binaryのcommandを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。終了まで待つ場合は`--foreground`を使います。Node launcher専用optionを配布binaryへ指定した場合は、無関係なGUIを開かずhelp付きerrorにします。
 
 起動中の titlebar は terminal 内の command からも変更できます。標準の OSC title sequence は window title を変更し、fpasoterm 独自の OSC 777 は titlebar 表示を変更します。
 

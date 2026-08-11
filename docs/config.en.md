@@ -179,7 +179,7 @@ When `window.rememberBounds` is enabled, the last window size is saved to `~/.co
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
-On Windows and macOS, the terminal process receives the fpasoterm executable directory at the front of `PATH` (`Path` on Windows). This allows `fpasoterm --help` and other fpasoterm commands to run from inside the opened terminal without changing the global user or system PATH. On macOS, a nested GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional.
+On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. On macOS, fpasoterm regenerates `~/.config/fpasoterm/bin/fpasoterm` for the currently running app bundle and places that shim first in `PATH`; it forwards every argument unchanged. This allows `fpasoterm --help`, `--list`, `--close`, and other direct-binary commands to run inside the opened terminal without changing the global user or system PATH. A nested macOS GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional. Options documented as Node-launcher-only are rejected with help by a packaged binary instead of opening an unrelated GUI window.
 
 The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance.
 

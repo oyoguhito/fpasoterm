@@ -507,10 +507,6 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--console-diagnostics",
         "-C",
         "--show-config",
-        "--setup-sync",
-        "--self-update",
-        "--self-update-checkout",
-        "--update-desktop",
         "--reset-window-state",
         "-r",
         "--reset-config",
@@ -534,8 +530,6 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-b",
         "--close",
         "-q",
-        "--enable-plugin",
-        "--disable-plugin",
         "--width",
         "-W",
         "--height",
@@ -2350,12 +2344,66 @@ fn windows_path_executable(name: &str) -> Option<String> {
     None
 }
 
-#[cfg(any(windows, target_os = "macos"))]
+#[cfg(windows)]
 // Prepends the installed executable directory so child shells can run `fpasoterm`.
 fn terminal_path_with_app_dir() -> Option<String> {
     let app_dir = env::current_exe().ok()?.parent()?.to_path_buf();
     let existing_path = env::var_os("PATH").unwrap_or_default();
     let mut paths = vec![app_dir];
+    paths.extend(env::split_paths(&existing_path));
+    env::join_paths(paths)
+        .ok()
+        .map(|value| value.to_string_lossy().to_string())
+}
+
+#[cfg(target_os = "macos")]
+// Prepends a regenerated CLI shim so app-bundle launches preserve every argument.
+fn terminal_path_with_app_dir() -> Option<String> {
+    let executable = env::current_exe().ok()?;
+    let app_dir = executable.parent()?.to_path_buf();
+    let shim_dir = PathBuf::from(home_dir())
+        .join(".config")
+        .join("fpasoterm")
+        .join("bin");
+    let shim_path = shim_dir.join("fpasoterm");
+    if write_macos_cli_shim(&shim_path, &executable).is_err() {
+        return joined_terminal_path(vec![app_dir]);
+    }
+    joined_terminal_path(vec![shim_dir, app_dir])
+}
+
+#[cfg(target_os = "macos")]
+// Writes an executable shell shim that forwards argv to the current app binary.
+fn write_macos_cli_shim(path: &Path, executable: &Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+
+    let parent = path
+        .parent()
+        .ok_or_else(|| "macOS CLI shim has no parent directory".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let temporary = path.with_extension(format!("tmp-{}", std::process::id()));
+    let quoted_executable = shell_single_quote(&executable.to_string_lossy());
+    fs::write(
+        &temporary,
+        format!("#!/bin/sh\nexec {quoted_executable} \"$@\"\n"),
+    )
+    .map_err(|error| error.to_string())?;
+    fs::set_permissions(&temporary, fs::Permissions::from_mode(0o755))
+        .map_err(|error| error.to_string())?;
+    let _ = fs::remove_file(path);
+    fs::rename(&temporary, path).map_err(|error| error.to_string())
+}
+
+#[cfg(target_os = "macos")]
+// Quotes one path for a POSIX shell without evaluating its contents.
+fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\"'\"'"))
+}
+
+#[cfg(target_os = "macos")]
+// Joins prepended directories with the inherited process PATH.
+fn joined_terminal_path(mut paths: Vec<PathBuf>) -> Option<String> {
+    let existing_path = env::var_os("PATH").unwrap_or_default();
     paths.extend(env::split_paths(&existing_path));
     env::join_paths(paths)
         .ok()
@@ -4213,6 +4261,15 @@ mod tests {
         assert_eq!(
             validate_direct_cli_args(&args),
             Err("--width must be a positive integer".to_string())
+        );
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_node_launcher_only_options() {
+        let args = vec!["--setup-sync".to_string()];
+        assert_eq!(
+            validate_direct_cli_args(&args),
+            Err("unknown option: --setup-sync".to_string())
         );
     }
 
