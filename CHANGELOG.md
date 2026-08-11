@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.5
+
+- Added a regenerated macOS user CLI shim that forwards all arguments to the current app-bundle executable, preventing stale or argument-dropping launch paths inside fpasoterm terminals.
+- Changed direct packaged binaries to reject Node-launcher-only options with help instead of silently opening a GUI window.
+
 ## 1.4.4
 
 - Excluded stale instance markers with a cross-platform heartbeat so Tile counts and title suffixes reflect running windows on Windows and macOS.
