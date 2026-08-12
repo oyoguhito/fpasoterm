@@ -42,7 +42,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.5');
+assert.equal(packageJson.version, '1.4.6');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -274,6 +274,13 @@ assert.equal(unknownOptionResult.status, 2);
 assert.match(unknownOptionResult.stderr, /fpasoterm: unknown option: --foo/);
 assert.match(unknownOptionResult.stderr, /Usage: fpasoterm \[options\]/);
 
+for (const unknownOption of ['--hoge', '-?']) {
+  const result = runCli(unknownOption);
+  assert.equal(result.status, 2);
+  assert.ok(result.stderr.includes(`unknown option: ${unknownOption}`));
+  assert.match(result.stderr, /Usage: fpasoterm \[options\]/);
+}
+
 const resetConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-reset-config-'));
 const resetConfigPath = path.join(resetConfigDir, 'User', 'config.toml');
 const resetStatePath = path.join(resetConfigDir, 'fpasoterm', 'User', 'window-state.json');
@@ -497,6 +504,10 @@ assert.match(rustMain, /fn broadcast_targeted_close_request/);
 assert.match(rustMain, /cli_option_value_any\(&\["--close", "-q"\]\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-config", "-R"\]\)/);
 assert.match(rustMain, /fn reset_config_cli/);
+assert.match(rustMain, /fn app_version/);
+assert.match(rustMain, /fn exit_requested_app_instance/);
+assert.match(rustMain, /app\.exit\(0\)/);
+assert.match(rustMain, /stdout\.flush/);
 assert.match(rustMain, /fn write_macos_cli_shim/);
 assert.match(rustMain, /exec \{quoted_executable\} \\"\$@\\"/);
 assert.match(rustMain, /fn shell_single_quote/);
@@ -1229,6 +1240,8 @@ assert.match(renderer, /getAvailableScreenBounds/);
 assert.match(renderer, /event\.ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 't'/);
 assert.match(renderer, /setWindowMenuOpen/);
 assert.match(renderer, /showKeyboardShortcutsHelp/);
+assert.match(renderer, /getAppVersion: \(\) => invoke\('app_version'\)/);
+assert.match(renderer, /`fpasoterm \$\{version\}`/);
 assert.match(renderer, /key === 'm'/);
 assert.match(renderer, /key === 'h'/);
 assert.match(renderer, /Ctrl\+Shift\+M  Open or close the window menu/);

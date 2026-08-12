@@ -468,6 +468,7 @@ fn main() {
             diagnostics_log,
             clipboard_read,
             clipboard_write,
+            app_version,
             config_get,
             config_apply_path,
             sync_status,
@@ -500,8 +501,6 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-v",
         "--list",
         "-l",
-        "--dev",
-        "-d",
         "--foreground",
         "-F",
         "--console-diagnostics",
@@ -562,7 +561,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         if VALUE_OPTIONS.contains(&argument.as_str()) {
             let value = args
                 .get(index + 1)
-                .filter(|value| !value.starts_with("--"))
+                .filter(|value| !value.starts_with('-'))
                 .ok_or_else(|| format!("{argument} requires a value"))?;
             validate_direct_cli_value(argument, value)?;
             index += 2;
@@ -1117,9 +1116,7 @@ fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, 
                 if created_at > last_close_request {
                     let close_app = app.clone();
                     let result = app.run_on_main_thread(move || {
-                        if let Some(window) = close_app.get_webview_window("main") {
-                            let _ = window.close();
-                        }
+                        exit_requested_app_instance(&close_app);
                     });
                     if let Err(error) = result {
                         append_diagnostic(&app, &format!("close all dispatch failed: {error}"));
@@ -1144,9 +1141,7 @@ fn start_arrange_listener(app: AppHandle, marker_path: PathBuf, min_width: u32, 
                     if created_at > last_targeted_close_request && targets_current_process {
                         let close_app = app.clone();
                         let result = app.run_on_main_thread(move || {
-                            if let Some(window) = close_app.get_webview_window("main") {
-                                let _ = window.close();
-                            }
+                            exit_requested_app_instance(&close_app);
                         });
                         if let Err(error) = result {
                             append_diagnostic(
@@ -1357,10 +1352,14 @@ fn tile_grid(count: usize) -> (u32, u32) {
 // Broadcasts a close request and closes the current window immediately.
 fn window_close_all(app: AppHandle) -> Result<String, String> {
     broadcast_close_all_request()?;
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.close();
-    }
+    exit_requested_app_instance(&app);
     Ok("closed all fpasoterm windows".to_string())
+}
+
+// Exits one application process after a CLI or Close All request.
+// On macOS, closing the last window alone intentionally leaves the menu-bar app running.
+fn exit_requested_app_instance(app: &AppHandle) {
+    app.exit(0);
 }
 
 #[tauri::command]
@@ -2008,7 +2007,9 @@ fn print_cli_text(text: &str) {
     }
     #[cfg(not(windows))]
     {
-        print!("{text}");
+        let mut stdout = std::io::stdout().lock();
+        let _ = stdout.write_all(text.as_bytes());
+        let _ = stdout.flush();
     }
 }
 
@@ -3883,6 +3884,12 @@ fn config_get() -> RuntimeConfig {
 }
 
 #[tauri::command]
+// Returns the version compiled into the running application binary.
+fn app_version() -> &'static str {
+    env!("CARGO_PKG_VERSION")
+}
+
+#[tauri::command]
 // Loads and returns a config file requested by an in-terminal OSC command.
 fn config_apply_path(app: AppHandle, path: String) -> Result<RuntimeConfig, String> {
     let config = runtime_config_from_path(&path)?;
@@ -4242,17 +4249,67 @@ mod tests {
 
     #[test]
     fn direct_cli_validation_accepts_supported_options() {
-        let args = vec![
-            "--title".to_string(),
-            "TEST".to_string(),
-            "--size=800x600".to_string(),
-            "--debug-keys".to_string(),
-            "--list".to_string(),
-            "--close".to_string(),
-            "12345".to_string(),
-            "--reset-config".to_string(),
+        let flags = [
+            "--help",
+            "-h",
+            "--version",
+            "-v",
+            "--list",
+            "-l",
+            "--foreground",
+            "-F",
+            "--console-diagnostics",
+            "-C",
+            "--show-config",
+            "--reset-window-state",
+            "-r",
+            "--reset-config",
+            "-R",
+            "--debug-keys",
+            "-k",
+            "--x11",
+            "--debug-opaque-terminal",
+            "--disable-dmabuf",
         ];
-        assert_eq!(validate_direct_cli_args(&args), Ok(()));
+        for flag in flags {
+            assert_eq!(
+                validate_direct_cli_args(&[flag.to_string()]),
+                Ok(()),
+                "flag {flag} should be accepted"
+            );
+        }
+
+        let value_options = [
+            ("--config", "config.toml"),
+            ("-c", "config.toml"),
+            ("--shell", "/bin/zsh"),
+            ("-s", "/bin/zsh"),
+            ("--command", "echo ok"),
+            ("-e", "echo ok"),
+            ("--title", "TEST"),
+            ("-t", "TEST"),
+            ("--titlebar-color", "#1565c0"),
+            ("-b", "#1565c0"),
+            ("--close", "all"),
+            ("-q", "all"),
+            ("--width", "800"),
+            ("-W", "800"),
+            ("--height", "600"),
+            ("-H", "600"),
+            ("--size", "800x600"),
+            ("-z", "800x600"),
+        ];
+        for (option, value) in value_options {
+            assert_eq!(
+                validate_direct_cli_args(&[option.to_string(), value.to_string()]),
+                Ok(()),
+                "option {option} should be accepted"
+            );
+        }
+        assert_eq!(
+            validate_direct_cli_args(&["--size=800x600".to_string()]),
+            Ok(())
+        );
     }
 
     #[test]
@@ -4266,10 +4323,34 @@ mod tests {
 
     #[test]
     fn direct_cli_validation_rejects_node_launcher_only_options() {
-        let args = vec!["--setup-sync".to_string()];
+        for option in [
+            "--dev",
+            "-d",
+            "--setup-sync",
+            "--self-update",
+            "--self-update-checkout",
+            "--update-desktop",
+            "--enable-plugin",
+            "--disable-plugin",
+        ] {
+            assert!(
+                validate_direct_cli_args(&[option.to_string()]).is_err(),
+                "Node-only option {option} must not launch the packaged GUI"
+            );
+        }
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_unknown_and_missing_values() {
+        for option in ["--hoge", "-?"] {
+            assert_eq!(
+                validate_direct_cli_args(&[option.to_string()]),
+                Err(format!("unknown option: {option}"))
+            );
+        }
         assert_eq!(
-            validate_direct_cli_args(&args),
-            Err("unknown option: --setup-sync".to_string())
+            validate_direct_cli_args(&["--title".to_string(), "-v".to_string()]),
+            Err("--title requires a value".to_string())
         );
     }
 

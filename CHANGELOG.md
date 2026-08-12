@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.4.6
+
+- Audited every packaged-binary long and short CLI option, rejected Node-launcher-only `--dev` / `-d`, unknown options, and missing values before GUI startup, and explicitly flushed non-Windows CLI output.
+- Added the running binary version to the in-app `Help (^H)` keyboard-shortcut panel.
+- Changed CLI and Close All requests to exit each application process, so macOS does not leave fpasoterm active in the menu bar after `fpasoterm -q all`.
+
 ## 1.4.5
 
 - Added a regenerated macOS user CLI shim that forwards all arguments to the current app-bundle executable, preventing stale or argument-dropping launch paths inside fpasoterm terminals.
