@@ -1113,8 +1113,10 @@ async function launch(options) {
   });
 }
 
+let parsedArguments = false;
 try {
   const options = parseArgs(process.argv.slice(2));
+  parsedArguments = true;
   if (options.help) {
     process.stdout.write(helpText);
   } else if (options.version) {
@@ -1151,7 +1153,9 @@ try {
   }
 } catch (error) {
   console.error(`fpasoterm: ${error.message}`);
-  console.error(helpText.trimEnd());
+  if (!parsedArguments) {
+    console.error(helpText.trimEnd());
+  }
   // Let stdout/stderr flush before Node exits, including when called from a pipe.
-  process.exitCode = 2;
+  process.exitCode = parsedArguments ? 1 : 2;
 }
