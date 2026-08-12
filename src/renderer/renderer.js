@@ -170,6 +170,7 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
+    getAppVersion: () => invoke('app_version'),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
     syncStatus: () => invoke('sync_status'),
@@ -1474,12 +1475,15 @@ function setTerminalLogPickerVisible(visible) {
 }
 
 // Displays the application keyboard shortcuts in the existing accessible panel.
-function showKeyboardShortcutsHelp() {
+async function showKeyboardShortcutsHelp() {
+  const version = await window.fpasoterm?.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   diagnosticsPanelMode = 'keyboard-shortcuts';
   setTerminalLogPickerVisible(false);
   setWindowMenuOpen(false);
   diagnosticsTitleElement.textContent = 'Keyboard Shortcuts';
   diagnosticsElement.value = [
+    `fpasoterm ${version}`,
+    '',
     'Ctrl+Shift+L  Open the window menu at Log actions',
     'Ctrl+Shift+S  Start or stop terminal output logging',
     'Ctrl+Shift+P  Show terminal output logs',
@@ -1732,7 +1736,7 @@ document.addEventListener('keydown', (event) => {
 
   if (key === 'h') {
     event.preventDefault();
-    showKeyboardShortcutsHelp();
+    showKeyboardShortcutsHelp().catch((error) => showDiagnostic(`help failed: ${error}`));
     return;
   }
 
@@ -1875,7 +1879,7 @@ closeAllWindowsButton.addEventListener('click', () => {
 
 // Opens the keyboard shortcut reference from the window menu.
 keyboardShortcutsHelpButton.addEventListener('click', () => {
-  showKeyboardShortcutsHelp();
+  showKeyboardShortcutsHelp().catch((error) => showDiagnostic(`help failed: ${error}`));
 });
 
 // Reports the logical work area so ChromeOS shelf and display scaling are not
