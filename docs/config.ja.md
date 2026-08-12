@@ -120,6 +120,9 @@ scrollback = 1000
 termName = "xterm-256color"
 shell = ""
 
+# [terminal.images] は将来の安定した renderer 用に予約されています。
+# 現在の build はこの section を無視します。config.toml へ追加しないでください。
+
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
@@ -142,6 +145,24 @@ brightMagenta = "#e3c3ff"
 brightCyan = "#9de9ea"
 brightWhite = "#ffffff"
 
+[keybindings]
+# Mod は Windows/Linux の Ctrl、macOS の Cmd を表します。
+prefix = "Mod+Shift"
+# 一文字の value は prefix を継承します。full shortcut はその操作だけ上書きします。
+# physical key の例: newWindow = "Ctrl+Alt+KeyN"
+logMenu = "L"
+logToggle = "S"
+logShow = "P"
+copy = "C"
+paste = "V"
+menu = "M"
+help = "H"
+newWindow = "N"
+broadcast = "B"
+kill = "K"
+tile = "T"
+closeAll = "X"
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800
@@ -157,6 +178,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
+commands = true
+commandTtlSeconds = 60
 
 [logging]
 enabled = true
@@ -168,11 +191,12 @@ maxBytes = 10485760
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は半角カタカナや CJK 文字を優先して描画するため、日本語対応フォントを先頭にしています。`minimumContrastRatio` は既定で有効で、暗い terminal background と近すぎる ANSI foreground 色も読めるように補正します。`rescaleOverlappingGlyphs` は CJK glyph の欠けや重なりを抑えるため既定で有効です。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は半角カタカナや CJK 文字を優先して描画するため、日本語対応フォントを先頭にしています。`minimumContrastRatio` は既定で有効で、暗い terminal background と近すぎる ANSI foreground 色も読めるように補正します。`rescaleOverlappingGlyphs` は CJK glyph の欠けや重なりを抑えるため既定で有効です。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+- `keybindings`: application shortcut の設定。`prefix = "Mod+Shift"` はWindows/Linuxでは`Ctrl+Shift`、macOSでは`Cmd+Shift`を表します。Windowsでkeyboard layoutまたは他applicationが`Ctrl+Shift`を捕捉する場合は、`prefix = "Ctrl+Alt"`へ変更してください。一文字のaction valueは`prefix`を継承し、full shortcut はそのactionだけを上書きします。`KeyN`のような値はphysical keyboard keyで照合するため、keyboard layoutによる`event.key`の違いを避けられます。再起動またはruntime config fileの適用でmenu labelとbindingを更新します。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
-- `sync`: diagnostics を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。詳細は [Sync Folder](sync.ja.md) を参照してください。
-- `logging`: terminal output logging 設定。hamburger menu に `Log Start (^S)` / `Log Stop (^S)` と `Log Show (^P)` を表示します。`Ctrl+Shift+L` はlog操作にfocusした状態でmenuを開き、`Ctrl+Shift+S` は記録を直接切り替え、`Ctrl+Shift+P` はcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。制御シーケンスを除去した readable terminal output を local file に記録します。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
+- `sync`: diagnostics と明示的に送信した broadcast command を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。`commands` は短寿命の共有 command を許可し、`commandTtlSeconds` は実行可能な時間を制限します。詳細は [Sync Folder](sync.ja.md) を参照してください。
+- `logging`: terminal output logging 設定。hamburger menu に `Log Start (^S)` / `Log Stop (^S)` と `Log Show (^P)` を表示します。`Ctrl+Shift+L` はlog操作にfocusした状態でmenuを開き、`Ctrl+Shift+S` は記録を直接切り替え、`Ctrl+Shift+P` はcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。制御シーケンスを除去した readable terminal output を local file に記録します。自動生成されるlog名には titlebar の title と timestamp が入り、例は `terminal-work-<timestamp>.log` です。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 
@@ -183,6 +207,20 @@ Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executab
 macOSは最後のwindowを閉じてもapplicationをactiveのまま維持するのが通常動作です。CLIの`--close` / `-q`とapp内のClose Allでは一致する各fpasoterm processを明示終了するため、`fpasoterm -q all`後はmacOSのメニューバーにもfpasotermを残しません。
 
 起動中の titlebar は terminal 内の command からも変更できます。標準の OSC title sequence は window title を変更し、fpasoterm 独自の OSC 777 は titlebar 表示を変更します。
+
+## Terminal Graphics
+
+Kitty Graphics Protocol、SIXEL、iTerm inline imageは、現在のbuildでは未対応です。xterm.js image addonはChromeOSの現行Tauri/WebKitGTKでWebViewを無反応にすることがあるため、`config.toml`に`[terminal.images]`があっても意図的にloadしません。
+
+graphicsの検証目的でも、fpasoterm内で`kitten icat`、`chafa --format kitty`、`chafa --format sixels`を実行しないでください。fpasotermは`TERM=xterm-256color`を維持し、Kitty graphics capability queryへ応答しないため、`kitten icat`はgraphics非対応のerrorを表示します。これは想定どおりであり、以前再現したrenderer freezeを避けるためです。
+
+## Broadcast Input
+
+hamburger menu の `Broadcast (^B)`、または `Ctrl+Shift+B` を押します。title と PID ごとに一つ以上の local window を選択し、command を入力して `Send` を選ぶと、fpasoterm が改行を正規化して Enter を追加し、選択した local fpasoterm window だけへ送ります。関係のない window を操作せず、複数 terminal で同じ tmux、herdr、diagnostic command を実行できます。
+
+全 local window を選択し、sync が有効な場合、dialog に `Include synced channel` が表示されます。これを選ぶと、同じ sync path と channel を使う、すでに起動している全ての fpasoterm instance にも同じ短寿命 command を送ります。remote window の identity は共有していないため、local の一部だけを選択している場合は sync delivery を無効にします。command file は `sync.commandTtlSeconds`（既定 60 秒）で期限切れとなり、instance は自分の起動前に作成された command を実行しません。
+
+この機能は remote server、OAuth token、後から起動した instance での command 自動実行を使用しません。この機能を使う場合、shared sync folder は command channel になります。参加する全 machine で信頼できる folder と channel だけを使用してください。
 
 次の `printf` 例は POSIX shell (`bash`、`dash`、`fish` など) 向けです。Windows の PowerShell や cmd.exe ではそのまま使えません。
 

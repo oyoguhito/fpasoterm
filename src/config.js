@@ -34,6 +34,14 @@ const defaultConfig = Object.freeze({
     scrollback: 1000,
     termName: 'xterm-256color',
     shell: '',
+    images: {
+      enabled: false,
+      kittySupport: false,
+      kittySizeLimit: 33554432,
+      storageLimit: 64,
+      sixelSupport: false,
+      iipSupport: false,
+    },
     theme: {
       background: 'rgba(16, 19, 23, 0.80)',
       foreground: '#e8edf2',
@@ -62,6 +70,21 @@ const defaultConfig = Object.freeze({
     duplicateWindowMs: 800,
     repeatedTextWindowMs: 140,
   },
+  keybindings: {
+    prefix: 'Mod+Shift',
+    logMenu: 'L',
+    logToggle: 'S',
+    logShow: 'P',
+    copy: 'C',
+    paste: 'V',
+    menu: 'M',
+    help: 'H',
+    newWindow: 'N',
+    broadcast: 'B',
+    kill: 'K',
+    tile: 'T',
+    closeAll: 'X',
+  },
   plugins: {
     enabled: [],
   },
@@ -72,6 +95,8 @@ const defaultConfig = Object.freeze({
     channel: 'default',
     diagnostics: true,
     maxBytes: 1048576,
+    commands: true,
+    commandTtlSeconds: 60,
   },
   logging: {
     enabled: true,
@@ -139,6 +164,17 @@ termName = "xterm-256color"
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
 
+# Reserved inline image protocol options. Current Tauri/WebKitGTK builds keep
+# ImageAddon disabled because graphics streams can block the terminal WebView.
+[terminal.images]
+enabled = false
+kittySupport = false
+kittySizeLimit = 33554432
+storageLimit = 64
+# Enable these only when the terminal program explicitly needs them.
+sixelSupport = false
+iipSupport = false
+
 # Terminal color palette.
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
@@ -168,6 +204,25 @@ duplicateGuard = true
 duplicateWindowMs = 800
 repeatedTextWindowMs = 140
 
+# Keybindings use Mod for Ctrl on Windows/Linux and Cmd on macOS.
+# Set prefix = "Ctrl+Alt" on Windows when Ctrl+Shift is unavailable.
+# Individual values may be a key such as "N" or a full shortcut such as
+# "Ctrl+Alt+KeyN". Use KeyN-style values for physical-key bindings.
+[keybindings]
+prefix = "Mod+Shift"
+logMenu = "L"
+logToggle = "S"
+logShow = "P"
+copy = "C"
+paste = "V"
+menu = "M"
+help = "H"
+newWindow = "N"
+broadcast = "B"
+kill = "K"
+tile = "T"
+closeAll = "X"
+
 # Plugins are relative to ~/.config/fpasoterm/User/.
 # Example: enabled = ["plugins/hello.ts", "plugins/theme.ts"]
 [plugins]
@@ -183,6 +238,10 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
+# commands enables explicitly requested broadcast input through this folder.
+commands = true
+# Command files expire quickly so they are not executed after a delayed sync.
+commandTtlSeconds = 60
 
 # Terminal output logging records readable PTY output with control sequences
 # removed when started from the titlebar or an OSC 777 command.

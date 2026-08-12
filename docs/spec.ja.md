@@ -11,13 +11,13 @@ fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクト�
 - portable-pty が Rust backend で shell 付き PTY を作成します。
 - renderer と backend の通信は Tauri command / event に限定します。
 - terminal clipboard integration は選択した terminal text の copy、multiplexer からの OSC 52 copy request、paste shortcut の backend OS clipboard fallback 経由送信を処理します。
-- terminal output logging は fpasoterm が受け取る PTY stream から一般的な terminal control sequence を除去して記録します。fpasoterm は split-pane を認識しないため、pane 単位の log は tmux、screen、byobu、herdr などの multiplexer 側に委ねます。
+- terminal output logging は fpasoterm が受け取る PTY stream から一般的な terminal control sequence を除去して記録します。自動生成 log 名には titlebar title と timestamp を含めます。fpasoterm は split-pane を認識しないため、pane 単位の log は tmux、screen、byobu、herdr などの multiplexer 側に委ねます。
 
 ## ChromeOS Linux の入力方針
 
 fpasoterm は `かな` / `英数` などの日本語キーボードキーを横取りしません。IME の切替と composition は platform webview と OS に任せます。
 
-terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。hamburger の window menu には `Log Start (^S)` / `Log Stop (^S)`、`Log Show (^P)`、`Copy (^C)`、`Paste (^V)` を表示します。`Ctrl+Shift+L` は log 操作に focus した状態でこの menu を開き、`Ctrl+Shift+S` と `Ctrl+Shift+P` は logging と log 表示を直接実行します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は OS clipboard を backend 経由で読み取り、PTY へ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。`Ctrl+Shift+M` で window menu を開き、menu 内の `Help (^H)` または `Ctrl+Shift+H` でアプリの全 shortcut 一覧を表示します。
+terminal copy は、terminal text を選択して `Ctrl+Shift+C` を押すと、その選択範囲を WebView clipboard event/API と backend clipboard 経路の両方で OS clipboard へ書き込みます。hamburger の window menu には `Log Start (^S)` / `Log Stop (^S)`、`Log Show (^P)`、`Broadcast (^B)`、`Kill (^K)`、`Copy (^C)`、`Paste (^V)` を表示します。Unixでは、`Kill (^K)` または `Ctrl+Shift+K` が前景 PTY process group に `SIGKILL` を送ります。Windowsではterminal shellの子孫processを深い順に強制終了します。いずれも実行中commandを終了し、interactive shell とその window は残します。shell promptで実行対象がない場合は、shellを終了しないためerrorを表示します。その場合の終了はclose buttonを使用します。通常の terminal input である `Ctrl+C` とは別の強制終了操作です。`Ctrl+Shift+B` は改行を正規化して Enter を追加した text を選択した local PTY だけに送信し、全local windowを選択した場合だけtrustedなsync channelも明示選択できます。Kitty APC graphics は上限付きの image storage で描画します。`Ctrl+Shift+L` は log 操作に focus した状態でこの menu を開き、`Ctrl+Shift+S` と `Ctrl+Shift+P` は logging と log 表示を直接実行します。右クリックは terminal selection がある場合は copy、selection がない場合は paste として動作します。terminal paste は、user gesture中のWebView clipboard APIを先に読み、空または利用不可の場合だけbackend clipboardを使ってPTYへ送ります。herdr、tmux、screen などが OSC 52 clipboard sequence を出す設定の場合、fpasoterm はその payload を OS clipboard に書き込みます。`Ctrl+Shift+M` で window menu を開き、menu 内の `Help (^H)` または `Ctrl+Shift+H` でアプリの全 shortcut 一覧を表示します。
 
 terminal log panel が開いている間、keyboard focus は panel 内に留まります。`Tab` と `Shift+Tab` で log selector、検索欄、操作 button、close button、log text area を循環できます。focus された control は高 contrast の outline で表示します。`Search` button は表示中の log から次の一致文字列を選択してその位置へ scroll し、現在の一致番号を表示します。`N` と `j` は次の一致、`P` と `k` は前の一致へ移動します。矢印キーは通常の text area scroll 用に残します。
 

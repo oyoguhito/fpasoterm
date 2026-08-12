@@ -28,7 +28,7 @@ Options:
   -v, --version                 Show the fpasoterm version.
   -l, --list                    List running fpasoterm windows, then exit.
   -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
-  -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
+  -d, --dev                     Force a local debug-binary rebuild and launch.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
@@ -937,6 +937,10 @@ function findStampedTauriBinary() {
 
 // Builds the debug binary used by normal source-checkout launches.
 function buildTauriBinary(options) {
+  if (options.dev) {
+    appendLauncherLog('launcher build=forced debug binary');
+    return buildLocalTauriBinary(options);
+  }
   const stampedBinary = findStampedTauriBinary();
   if (stampedBinary) {
     appendLauncherLog(`launcher build=skip stamped binary=${stampedBinary}`);
@@ -951,6 +955,11 @@ function buildTauriBinary(options) {
   }
 
   appendLauncherLog('launcher build=cargo build');
+  return buildLocalTauriBinary(options);
+}
+
+// Builds the static-asset debug binary without starting a localhost dev server.
+function buildLocalTauriBinary(options) {
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
     env: process.env,
@@ -1048,15 +1057,13 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
-  const tauriBinary = options.dev ? undefined : await buildTauriBinary(options);
-  const command = options.dev ? process.execPath : tauriBinary;
-  const args = options.dev
-    ? [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs]
-    : options.runtimeArgs;
+  const tauriBinary = await buildTauriBinary(options);
+  const command = tauriBinary;
+  const args = options.runtimeArgs;
   const env = runtimeEnv(options);
   appendLauncherLog(`launcher command=${command}`);
   appendLauncherLog(`launcher args=${JSON.stringify(args)}`);
-  appendLauncherLog(`launcher mode=${options.dev ? 'tauri-dev' : 'binary'}`);
+  appendLauncherLog(`launcher mode=${options.dev ? 'debug-binary' : 'binary'}`);
   appendLauncherLog(`launcher cwd=${root}`);
 
   let logFd;
