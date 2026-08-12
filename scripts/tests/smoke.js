@@ -42,7 +42,7 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.6');
+assert.equal(packageJson.version, '1.4.7');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -266,8 +266,9 @@ const missingCloseResult = spawnSync(process.execPath, [path.join(root, 'bin', '
   encoding: 'utf8',
   env: { ...process.env, XDG_CACHE_HOME: listCacheDir },
 });
-assert.equal(missingCloseResult.status, 2);
+assert.equal(missingCloseResult.status, 1);
 assert.match(missingCloseResult.stderr, /no running window matches: missing/);
+assert.doesNotMatch(missingCloseResult.stderr, /Usage: fpasoterm \[options\]/);
 
 const unknownOptionResult = runCli('--foo');
 assert.equal(unknownOptionResult.status, 2);
@@ -509,6 +510,8 @@ assert.match(rustMain, /fn exit_requested_app_instance/);
 assert.match(rustMain, /app\.exit\(0\)/);
 assert.match(rustMain, /stdout\.flush/);
 assert.match(rustMain, /fn write_macos_cli_shim/);
+assert.match(rustMain, /join\("\.local"\)\.join\("bin"\)/);
+assert.match(rustMain, /joined_terminal_path\(vec!\[local_bin_dir, config_bin_dir, app_dir\]\)/);
 assert.match(rustMain, /exec \{quoted_executable\} \\"\$@\\"/);
 assert.match(rustMain, /fn shell_single_quote/);
 assert.match(rustMain, /fn close_request_path/);
@@ -886,6 +889,7 @@ assert.match(configDocsEn, /PowerShell 7 \(`pwsh\.exe`\) is the default/);
 assert.match(configDocsEn, /PowerShell\\7\\pwsh\.exe/);
 assert.match(configDocsEn, /On Windows/);
 assert.match(configDocsEn, /\.config\/fpasoterm\/bin\/fpasoterm/);
+assert.match(configDocsEn, /\.local\/bin\/fpasoterm/);
 assert.match(configDocsEn, /forwards every argument unchanged/);
 assert.match(configDocsEn, /nested macOS GUI launch detaches/);
 assert.match(configDocsEn, /duplicateWindowMs = 800/);

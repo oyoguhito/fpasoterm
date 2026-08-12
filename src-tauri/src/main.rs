@@ -2358,19 +2358,21 @@ fn terminal_path_with_app_dir() -> Option<String> {
 }
 
 #[cfg(target_os = "macos")]
-// Prepends a regenerated CLI shim so app-bundle launches preserve every argument.
+// Restores the conventional user CLI path and keeps the config shim for compatibility.
 fn terminal_path_with_app_dir() -> Option<String> {
     let executable = env::current_exe().ok()?;
     let app_dir = executable.parent()?.to_path_buf();
-    let shim_dir = PathBuf::from(home_dir())
+    let local_bin_dir = PathBuf::from(home_dir()).join(".local").join("bin");
+    let config_bin_dir = PathBuf::from(home_dir())
         .join(".config")
         .join("fpasoterm")
         .join("bin");
-    let shim_path = shim_dir.join("fpasoterm");
-    if write_macos_cli_shim(&shim_path, &executable).is_err() {
+    let local_shim = local_bin_dir.join("fpasoterm");
+    if write_macos_cli_shim(&local_shim, &executable).is_err() {
         return joined_terminal_path(vec![app_dir]);
     }
-    joined_terminal_path(vec![shim_dir, app_dir])
+    let _ = write_macos_cli_shim(&config_bin_dir.join("fpasoterm"), &executable);
+    joined_terminal_path(vec![local_bin_dir, config_bin_dir, app_dir])
 }
 
 #[cfg(target_os = "macos")]

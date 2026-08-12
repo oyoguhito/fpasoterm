@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.4.7
+
+- Restored the macOS CLI wrapper at `~/.local/bin/fpasoterm`, kept the config-directory shim for compatibility, and placed the conventional user bin directory first in child-shell `PATH`.
+- Limited automatic help output to argument-validation errors; runtime failures such as a missing `--close` target now print only the actionable error.
+
 ## 1.4.6
 
 - Audited every packaged-binary long and short CLI option, rejected Node-launcher-only `--dev` / `-d`, unknown options, and missing values before GUI startup, and explicitly flushed non-Windows CLI output.
