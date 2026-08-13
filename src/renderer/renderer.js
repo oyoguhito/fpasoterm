@@ -29,6 +29,7 @@ const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-c
 const windowMenu = document.getElementById('window-menu');
 const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
+const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
@@ -197,6 +198,22 @@ function keybindingLabel(name) {
   return keybindingSpec(name).replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
 }
 
+// Returns the compact action-key label used in the constrained titlebar menu.
+function keybindingActionLabel(name) {
+  const key = keybindingSpec(name).split('+').map((token) => token.trim()).filter(Boolean).pop() || '';
+  const physicalLetter = /^Key([A-Z])$/i.exec(key);
+  const physicalDigit = /^Digit([0-9])$/i.exec(key);
+  return physicalLetter?.[1].toUpperCase() || physicalDigit?.[1] || key;
+}
+
+// Resolves the common prefix separately so each menu item can stay compact.
+function keybindingPrefixLabel() {
+  const settings = appConfig.keybindings || {};
+  const prefix = String(settings.prefix ?? fallbackConfig.keybindings.prefix).trim()
+    || fallbackConfig.keybindings.prefix;
+  return prefix.replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
+}
+
 // Keeps menu labels and accessibility metadata aligned with config.toml.
 function applyKeybindingLabels() {
   const items = [
@@ -216,10 +233,13 @@ function applyKeybindingLabels() {
       continue;
     }
     const shortcut = keybindingLabel(action);
-    element.setAttribute('aria-keyshortcuts', shortcut.replace(/\+/g, '+'));
+    element.setAttribute('aria-keyshortcuts', shortcut);
     if (element !== terminalLogToggleButton || element.dataset.active !== 'true') {
-      element.textContent = `${label} (${shortcut})`;
+      element.textContent = `${label} (${keybindingActionLabel(action)})`;
     }
+  }
+  if (keybindingPrefixElement) {
+    keybindingPrefixElement.textContent = `Shortcut prefix: ${keybindingPrefixLabel()}`;
   }
   if (windowMenuToggleButton) {
     windowMenuToggleButton.setAttribute('aria-keyshortcuts', `${keybindingLabel('menu')} ${keybindingLabel('logMenu')}`);
@@ -1437,7 +1457,7 @@ async function refreshTerminalLogControl() {
   const status = await window.fpasoterm.terminalLogStatus();
   terminalLogToggleButton.hidden = status.enabled === false;
   terminalLogShowButton.hidden = status.enabled === false;
-  terminalLogToggleButton.textContent = `${status.active ? 'Log Stop' : 'Log Start'} (${keybindingLabel('logToggle')})`;
+  terminalLogToggleButton.textContent = `${status.active ? 'Log Stop' : 'Log Start'} (${keybindingActionLabel('logToggle')})`;
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
   terminalLogStatusElement.hidden = !status.active;
 }

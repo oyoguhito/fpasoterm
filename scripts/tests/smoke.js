@@ -353,6 +353,9 @@ fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), [
   '[window]',
   'width = 777',
   '',
+  '[keybindings]',
+  'prefix = "Ctrl+Alt"',
+  '',
 ].join('\n'));
 fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml.example'), 'old example\n');
 writeWindowState({ window: { width: 1200, height: 900 } });
@@ -365,6 +368,8 @@ assert.equal(windowStatePath(), path.join(stateTestDir, 'fpasoterm', 'User', 'wi
 assert.equal(stateConfig.config.window.width, 1200);
 assert.equal(stateConfig.config.window.height, 900);
 assert.equal(stateConfig.config.terminal.shell, '');
+assert.equal(stateConfig.config.keybindings.prefix, 'Ctrl+Alt');
+assert.equal(stateConfig.config.keybindings.newWindow, 'N');
 deleteWindowState();
 assert.ok(!fs.existsSync(statePath));
 if (originalConfigHome === undefined) {
@@ -776,6 +781,8 @@ assert.match(indexHtml, /id="terminal-log-toggle"/);
 assert.match(indexHtml, /id="terminal-log-show"/);
 assert.match(indexHtml, /id="terminal-copy"/);
 assert.match(indexHtml, /id="terminal-paste"/);
+assert.match(indexHtml, /id="keybinding-prefix"/);
+assert.match(indexHtml, /Shortcut prefix: Ctrl\+Shift/);
 assert.match(indexHtml, /aria-keyshortcuts="[^"]*Control\+Shift\+L[^"]*"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+S"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+P"/);
@@ -796,19 +803,19 @@ assert.match(indexHtml, /role="dialog"/);
 assert.match(indexHtml, /id="terminal-log-confirm-ok"/);
 assert.match(indexHtml, /id="terminal-log-confirm-cancel"/);
 assert.doesNotMatch(indexHtml, />Log \(\^L\)</);
-assert.match(indexHtml, />Log Start \(\^S\)</);
-assert.match(indexHtml, />Log Show \(\^P\)</);
-assert.match(indexHtml, />Copy \(\^C\)</);
-assert.match(indexHtml, />Paste \(\^V\)</);
+assert.match(indexHtml, />Log Start \(S\)</);
+assert.match(indexHtml, />Log Show \(P\)</);
+assert.match(indexHtml, />Copy \(C\)</);
+assert.match(indexHtml, />Paste \(V\)</);
 assert.doesNotMatch(indexHtml, />Clear</);
 assert.match(indexHtml, /id="minimize-window"/);
 assert.match(indexHtml, /id="maximize-window"/);
 assert.match(indexHtml, /id="new-window"/);
-assert.match(indexHtml, />New \(\^N\)</);
+assert.match(indexHtml, />New \(N\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+N"/);
 assert.match(indexHtml, /id="arrange-window"/);
 assert.match(indexHtml, /id="close-all-windows"/);
-assert.match(indexHtml, />Close All \(\^X\)</);
+assert.match(indexHtml, />Close All \(X\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+X"/);
 assert.match(indexHtml, /id="close-all-confirm" hidden role="dialog"/);
 assert.match(indexHtml, /id="close-all-confirm-ok"/);
@@ -820,12 +827,12 @@ assert.match(confirmHtml, /event\.key === 'Enter'/);
 assert.match(confirmHtml, /currentWindow\.setFocus/);
 assert.match(confirmHtml, /cancel\.focus/);
 assert.match(confirmHtml, /window_cancel_close_all/);
-assert.match(indexHtml, />Tile \(\^T\)</);
+assert.match(indexHtml, />Tile \(T\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+T"/);
 assert.match(indexHtml, /id="window-menu-toggle"/);
 assert.match(indexHtml, /id="window-menu-toggle"[^>]+aria-keyshortcuts="Control\+Shift\+M Control\+Shift\+L"/);
 assert.match(indexHtml, /id="keyboard-shortcuts-help"/);
-assert.match(indexHtml, />Help \(\^H\)</);
+assert.match(indexHtml, />Help \(H\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+H"/);
 assert.match(indexHtml, /id="window-menu-items"/);
 assert.match(indexHtml, /id="close-window"/);
