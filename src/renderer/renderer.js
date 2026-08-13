@@ -168,8 +168,39 @@ function keybindingSpec(name) {
   const defaults = fallbackConfig.keybindings;
   const settings = appConfig.keybindings || {};
   const configured = String(settings[name] ?? defaults[name] ?? '').trim() || defaults[name];
-  const prefix = String(settings.prefix ?? defaults.prefix).trim() || defaults.prefix;
-  return configured.includes('+') ? configured : `${prefix}+${configured}`;
+  const prefix = configuredKeybindingPrefix();
+  if (configured.includes('+')) {
+    return isValidFullKeybinding(configured) ? configured : `${prefix}+${defaults[name]}`;
+  }
+  return `${prefix}+${configured}`;
+}
+
+// Only modifier names may be used in the shared prefix. Key names such as
+// Escape belong to an action binding, for example "Ctrl+Alt+Escape".
+function isKeybindingModifier(token) {
+  return ['ctrl', 'control', 'alt', 'option', 'shift', 'meta', 'cmd', 'command', 'mod']
+    .includes(token.toLowerCase());
+}
+
+function keybindingTokens(value) {
+  return String(value).split('+').map((token) => token.trim()).filter(Boolean);
+}
+
+function isValidKeybindingPrefix(value) {
+  const tokens = keybindingTokens(value);
+  return tokens.length > 0 && tokens.every(isKeybindingModifier);
+}
+
+function isValidFullKeybinding(value) {
+  const tokens = keybindingTokens(value);
+  return tokens.length > 1
+    && tokens.slice(0, -1).every(isKeybindingModifier)
+    && !isKeybindingModifier(tokens[tokens.length - 1]);
+}
+
+function configuredKeybindingPrefix() {
+  const configured = String(appConfig.keybindings?.prefix ?? '').trim();
+  return isValidKeybindingPrefix(configured) ? configured : fallbackConfig.keybindings.prefix;
 }
 
 // Matches the configured shortcut by key value or a physical KeyN-style code.
@@ -208,9 +239,7 @@ function keybindingActionLabel(name) {
 
 // Resolves the common prefix separately so each menu item can stay compact.
 function keybindingPrefixLabel() {
-  const settings = appConfig.keybindings || {};
-  const prefix = String(settings.prefix ?? fallbackConfig.keybindings.prefix).trim()
-    || fallbackConfig.keybindings.prefix;
+  const prefix = configuredKeybindingPrefix();
   return prefix.replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
 }
 
@@ -240,6 +269,10 @@ function applyKeybindingLabels() {
   }
   if (keybindingPrefixElement) {
     keybindingPrefixElement.textContent = `Shortcut prefix: ${keybindingPrefixLabel()}`;
+    const configured = String(appConfig.keybindings?.prefix ?? '').trim();
+    keybindingPrefixElement.title = configured && !isValidKeybindingPrefix(configured)
+      ? `Invalid prefix \"${configured}\"; using ${keybindingPrefixLabel()}`
+      : '';
   }
   if (windowMenuToggleButton) {
     windowMenuToggleButton.setAttribute('aria-keyshortcuts', `${keybindingLabel('menu')} ${keybindingLabel('logMenu')}`);
