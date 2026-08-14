@@ -37,21 +37,37 @@ window は TOML file の変更を監視しません。編集後は対象 window 
 
 ```mermaid
 flowchart TD
-  A[config.toml を編集] --> B{起動中 window へ直ちに適用するか}
-  B -->|しない| C[対象 fpasoterm window を閉じる]
-  C --> D[fpasoterm を起動]
-  D --> E{起動経路}
-  E -->|Node launcher| F[TOML を読み既定値と merge]
-  E -->|配布済み direct binary| G[TOML を読み embedded default と merge]
-  F --> H[解決済み config を in-memory JSON で渡す]
-  G --> H
-  H --> I[native window と renderer を生成]
-  I --> J[theme terminal option keybinding plugin を適用]
-  B -->|する| K[terminal から OSC 777 config path を出力]
-  K --> L[指定 TOML を現在の renderer へ読み込み適用]
-  L --> J
-  M[window-state.json] -. 保存済み size は width height を上書き .-> I
+  U["User TOML<br/>~/.config/fpasoterm/User/config.toml"]
+  X["自動生成 example<br/>config.toml.example"]
+  S["保存済み bounds<br/>window-state.json"]
+  N["Node launcher<br/>bin/fpasoterm"]
+  E["embedded default<br/>src-tauri/default-config.toml"]
+  D["配布済み direct binary<br/>fpasoterm.exe / fpasoterm"]
+  J["FPASOTERM_RUNTIME_CONFIG_JSON<br/>一つの process 用 snapshot"]
+  W["native window と renderer"]
+  T["terminal shell から fpasoterm を実行"]
+
+  U --> N
+  N --> X
+  S -. 保存済み width height .-> N
+  N --> J --> W
+  U --> D
+  E --> D
+  S -. 保存済み width height .-> D
+  D --> W
+  W --> T --> D
+  J -. 子 process は継承した native snapshot を無視 .-> D
 ```
+
+`FPASOTERM_RUNTIME_CONFIG_JSON` はdiskへ保存されず、古いTOML fileのcacheでもありません。
+新しい起動ごとに、Node launcherは選択された`config.toml`を読み直して新しいJSON snapshotを作り、
+配布済みdirect binaryは選択されたTOMLを自身で読みます。fileが無い場合や古いpartial TOMLの場合も、
+current defaultとmergeして読み込みます。`config.toml.example`の更新は別処理であり、既存userの
+`config.toml`を変更しません。
+
+設定の読込処理が`config.toml`または`window-state.json`を書き換えることはありません。保存済み
+boundsは`window.rememberBounds = true`の場合だけTOMLのwidth/heightより優先され続けます。保存sizeを
+削除する操作は明示的な`--reset-window-state`だけです。
 
 window を閉じずに現在の terminal session へ適用する場合は、terminal から次の OSC sequence を
 出力します。不明な場合は `Help` に表示される絶対pathを使用してください。

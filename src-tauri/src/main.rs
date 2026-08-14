@@ -1449,6 +1449,8 @@ fn spawn_new_instance() -> Result<(), String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     Command::new(executable)
         .env_remove("FPASOTERM_RUNTIME_CONFIG_JSON")
+        .env_remove("FPASOTERM_RUNTIME_CONFIG_SOURCE")
+        .env_remove("FPASOTERM_RUNTIME_CONFIG_OWNER_PID")
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -1609,10 +1611,16 @@ fn apply_instance_identity(config: &mut RuntimeConfig, instance_index: usize) {
 }
 
 // Re-publishes startup mutations so renderer-side config_get sees the same title
-// and titlebar color that the native window received during setup.
+// and titlebar color that the native window received during setup. The owner
+// PID prevents terminal-shell children from reusing this process snapshot.
 fn publish_runtime_config(config: &RuntimeConfig) {
     if let Ok(value) = serde_json::to_string(config) {
         env::set_var("FPASOTERM_RUNTIME_CONFIG_JSON", value);
+        env::set_var("FPASOTERM_RUNTIME_CONFIG_SOURCE", "native");
+        env::set_var(
+            "FPASOTERM_RUNTIME_CONFIG_OWNER_PID",
+            std::process::id().to_string(),
+        );
     }
 }
 
@@ -1757,12 +1765,44 @@ fn window_state_path() -> String {
     runtime_config().window_state_path
 }
 
-// Loads launcher-provided JSON config, falling back to direct binary parsing.
+// Returns whether an inherited snapshot belongs to this process. Terminal
+// shells inherit their parent's environment, so a native snapshot must only be
+// used by the process whose PID published it.
+fn should_use_runtime_config_json_values(
+    source: Option<&str>,
+    owner_pid: Option<&str>,
+    current_pid: &str,
+) -> bool {
+    if source == Some("launcher") {
+        return true;
+    }
+
+    source == Some("native") && owner_pid == Some(current_pid)
+}
+
+// Checks process ownership before consuming an inherited runtime JSON snapshot.
+fn should_use_runtime_config_json() -> bool {
+    let current_pid = std::process::id().to_string();
+    should_use_runtime_config_json_values(
+        env::var("FPASOTERM_RUNTIME_CONFIG_SOURCE").ok().as_deref(),
+        env::var("FPASOTERM_RUNTIME_CONFIG_OWNER_PID")
+            .ok()
+            .as_deref(),
+        &current_pid,
+    )
+}
+
+// Loads a valid launcher/current-process JSON config, falling back to direct
+// config.toml parsing for a packaged binary or terminal-launched child.
 fn runtime_config() -> RuntimeConfig {
-    let mut config = env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
-        .ok()
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_else(direct_runtime_config);
+    let mut config = if should_use_runtime_config_json() {
+        env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
+            .ok()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_else(direct_runtime_config)
+    } else {
+        direct_runtime_config()
+    };
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -1775,8 +1815,20 @@ fn direct_runtime_config() -> RuntimeConfig {
         config = merge_runtime_config_from_path(config, &config_path)
             .unwrap_or_else(|_| default_runtime_config());
     }
-    apply_direct_cli_overrides(&mut config);
+    apply_saved_window_bounds(&mut config);
     config
+}
+
+// Applies remembered bounds only after the selected TOML has set
+// window.rememberBounds and its state-file directory.
+fn apply_saved_window_bounds(runtime: &mut RuntimeConfig) {
+    if !runtime.config.window.remember_bounds {
+        return;
+    }
+    if let Some((width, height)) = read_saved_window_size(&runtime.window_state_path) {
+        runtime.config.window.width = width;
+        runtime.config.window.height = height;
+    }
 }
 
 // Matches the Intel macOS renderer default to the host's more compact terminal metrics.
@@ -1855,7 +1907,7 @@ fn default_runtime_config() -> RuntimeConfig {
         .or_else(|| cli_option_value_any(&["--config", "-c"]))
         .unwrap_or_else(|| format!("{config_dir}/config.toml"));
     let window_state_path = format!("{config_dir}/window-state.json");
-    let mut window = WindowConfig {
+    let window = WindowConfig {
         title: env::var("FPASOTERM_WINDOW_TITLE")
             .ok()
             .or_else(|| cli_option_value_any(&["--title", "-t"]))
@@ -1877,21 +1929,6 @@ fn default_runtime_config() -> RuntimeConfig {
         frame: false,
         remember_bounds: true,
     };
-    if let Some((width, height)) = read_saved_window_size(&window_state_path) {
-        window.width = width;
-        window.height = height;
-    }
-    if let Some((width, height)) = cli_size_option() {
-        window.width = width;
-        window.height = height;
-    }
-    if let Some(width) = cli_positive_u32_option_any(&["--width", "-W"]) {
-        window.width = width;
-    }
-    if let Some(height) = cli_positive_u32_option_any(&["--height", "-H"]) {
-        window.height = height;
-    }
-
     RuntimeConfig {
         config: Config {
             window,
@@ -5125,6 +5162,26 @@ mod tests {
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commands"].as_bool(), Some(true));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn runtime_snapshot_only_applies_to_launcher_or_owner_process() {
+        assert!(should_use_runtime_config_json_values(
+            Some("launcher"),
+            None,
+            "200"
+        ));
+        assert!(should_use_runtime_config_json_values(
+            Some("native"),
+            Some("200"),
+            "200"
+        ));
+        assert!(!should_use_runtime_config_json_values(
+            Some("native"),
+            Some("100"),
+            "200"
+        ));
+        assert!(!should_use_runtime_config_json_values(None, None, "200"));
     }
 
     #[test]

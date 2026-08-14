@@ -1104,6 +1104,10 @@ function runtimeEnv(options) {
     ...process.env,
     ...options.env,
     FPASOTERM_RUNTIME_CONFIG_JSON: JSON.stringify(runtimeConfig),
+    // Native processes replace this marker with their own PID. A command
+    // launched from a terminal shell must reload config.toml instead.
+    FPASOTERM_RUNTIME_CONFIG_SOURCE: 'launcher',
+    FPASOTERM_RUNTIME_CONFIG_OWNER_PID: '',
   };
 }
 

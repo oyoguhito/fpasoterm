@@ -39,21 +39,39 @@ startup, not while the TOML file is being edited.
 
 ```mermaid
 flowchart TD
-  A[Edit config.toml] --> B{Apply to an existing window now?}
-  B -->|No| C[Close the affected fpasoterm window]
-  C --> D[Start fpasoterm]
-  D --> E{Launch path}
-  E -->|Node launcher| F[Read TOML and merge defaults]
-  E -->|Direct packaged binary| G[Read TOML and merge embedded defaults]
-  F --> H[Pass resolved config as in-memory JSON]
-  G --> H
-  H --> I[Create native window and renderer]
-  I --> J[Apply theme, terminal options, keybindings, and plugins]
-  B -->|Yes| K[Print OSC 777 config path from the terminal]
-  K --> L[Load and apply the specified TOML to this renderer]
-  L --> J
-  M[window-state.json] -. saved size overrides width and height .-> I
+  U["User TOML<br/>~/.config/fpasoterm/User/config.toml"]
+  X["Generated example<br/>config.toml.example"]
+  S["Saved bounds<br/>window-state.json"]
+  N["Node launcher<br/>bin/fpasoterm"]
+  E["Embedded defaults<br/>src-tauri/default-config.toml"]
+  D["Direct packaged binary<br/>fpasoterm.exe / fpasoterm"]
+  J["FPASOTERM_RUNTIME_CONFIG_JSON<br/>one-process snapshot"]
+  W["Native window and renderer"]
+  T["Terminal shell runs fpasoterm"]
+
+  U --> N
+  N --> X
+  S -. saved width and height .-> N
+  N --> J --> W
+  U --> D
+  E --> D
+  S -. saved width and height .-> D
+  D --> W
+  W --> T --> D
+  J -. inherited native snapshot is ignored by child .-> D
 ```
+
+`FPASOTERM_RUNTIME_CONFIG_JSON` is never written to disk and is not a cache of
+an old TOML file. On every new launch, the Node launcher reads the selected
+`config.toml` and creates a new JSON snapshot; the direct packaged binary reads
+the selected TOML itself. A missing or older partial TOML is still read and
+merged with current defaults. `config.toml.example` is refreshed separately and
+does not change the existing user `config.toml`.
+
+Reading configuration never rewrites `config.toml` or `window-state.json`.
+Remembered bounds continue to win over TOML width and height only when
+`window.rememberBounds = true`; `--reset-window-state` is the explicit command
+that removes that saved size.
 
 To apply a file to the current terminal session without closing it, write this
 OSC sequence from the terminal. Use the absolute path shown in `Help` when in
