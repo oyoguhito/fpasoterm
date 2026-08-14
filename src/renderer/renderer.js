@@ -222,9 +222,13 @@ function matchesKeybinding(event, name) {
   }
   // Use event.code for layout-independent keys, including Space whose event.key
   // is a literal whitespace character and cannot be represented cleanly in TOML.
-  return /^(Key|Digit|Numpad|F\d|Arrow|Space$)/i.test(key)
+  const matches = /^(Key|Digit|Numpad|F\d|Arrow|Space$)/i.test(key)
     ? event.code.toLowerCase() === key.toLowerCase()
     : event.key.toLowerCase() === key.toLowerCase();
+  if (matches && debugKeys && event.type === 'keydown') {
+    showDebugDiagnostic(`shortcut matched action=${name} spec=${keybindingSpec(name)}`);
+  }
+  return matches;
 }
 
 // Produces the visible shortcut form used by menus and the Help panel.

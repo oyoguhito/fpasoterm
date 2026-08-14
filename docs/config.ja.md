@@ -282,6 +282,23 @@ literal の `Space` で指定できます。例: `broadcast = "Space"`。通常�
 shortcut は fpasoterm に届かないことがあります。同じ full shortcut を複数の fpasoterm action へ
 割り当てないでください。
 
+`Ctrl+X` 単体は、例えば `closeAll = "Ctrl+X"` として指定できる有効な full shortcut です。
+`Ctrl+X` を押してから `N` を押す形式は、一つのshortcutではなく順序付きkey chordです。現行の
+config formatではkey chordには対応していません。
+
+Windows では `Ctrl+N` や `Ctrl+Shift+N` を fpasoterm の確認に使わないでください。WebView または
+IME が renderer より先に捕捉する場合があります。代わりに、OS予約と競合しにくい明示的なbindingを
+指定します。
+
+```toml
+[keybindings]
+newWindow = "Ctrl+F2"
+```
+
+`--debug-keys --console-diagnostics` で起動すると、動作するshortcutではF2 eventに`ctrl=true`と
+`shortcut matched action=newWindow spec=Ctrl+F2`の両方が出ます。`ctrl=false`の場合はOSがmodifierを
+渡していないため、renderer側では修正できません。
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800

@@ -293,6 +293,24 @@ Likewise, OS-reserved combinations such as `Alt+Tab`, `Ctrl+Alt+Tab`, and some
 function keys may not be delivered. Do not assign one full shortcut to multiple
 fpasoterm actions.
 
+`Ctrl+X` is a valid complete shortcut, for example `closeAll = "Ctrl+X"`.
+`Ctrl+X` followed by another key such as `N` is an ordered key chord, not one
+shortcut; key chords are not supported by the current configuration format.
+
+On Windows, do not use `Ctrl+N` or `Ctrl+Shift+N` to test fpasoterm: WebView or
+the IME can consume them before the renderer receives them. Use an explicit
+non-reserved test binding instead:
+
+```toml
+[keybindings]
+newWindow = "Ctrl+F2"
+```
+
+Run with `--debug-keys --console-diagnostics`. A working shortcut reports both
+`ctrl=true` on the F2 event and `shortcut matched action=newWindow spec=Ctrl+F2`.
+If it reports `ctrl=false`, the operating system did not deliver the modifier
+and this cannot be corrected from the renderer.
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800
