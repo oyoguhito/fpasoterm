@@ -242,6 +242,39 @@ kill = "K"
 tile = "T"
 closeAll = "X"
 
+### Key names
+
+`prefix` accepts only modifiers separated by `+`: `Ctrl` or `Control`, `Alt` or
+`Option`, `Shift`, `Meta` or `Cmd` or `Command`, and `Mod`. `Mod` means `Ctrl`
+on Windows/Linux and `Cmd` on macOS. Modifier spelling is case-insensitive.
+Action keys such as `Escape` cannot be part of `prefix`.
+
+Every action accepts one action key, which inherits `prefix`, or a complete
+shortcut such as `Ctrl+Shift+KeyN`. The following names are supported:
+
+| Type | Names | Matching |
+| --- | --- | --- |
+| Characters | `A`-`Z`, `0`-`9`, `-` | Browser key value; keyboard-layout dependent |
+| Named keys | `Tab`, `Enter`, `Escape`, `Space`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown` | `Space` and physical forms use keyboard code; other names use key value |
+| Function/cursor | `F1`-`F24`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight` | Physical keyboard code |
+| Physical keys | `KeyA`-`KeyZ`, `Digit0`-`Digit9`, `Space`, `Numpad0`-`Numpad9`, `NumpadEnter`, `NumpadAdd`, `NumpadSubtract`, `NumpadMultiply`, `NumpadDivide`, `NumpadDecimal` | Physical keyboard code |
+| Japanese IME keys | `ZenkakuHankaku`, `KanaMode`, `KanjiMode` | Browser key value; keyboard and OS dependent |
+
+`Tab`, `Escape`, `Delete`, and `Backspace` are available. For example,
+`kill = "Escape"` inherits the configured prefix, and
+`help = "Ctrl+Shift+F1"` applies a full shortcut only to Help. `Space` is
+available through the literal name `Space`, for example `broadcast = "Space"`.
+Use `KeyN` and `Digit1` for layout-independent ordinary keys.
+
+`Fn` is not available as an action or modifier. It is normally handled by the
+keyboard firmware and does not generate an independent browser key event.
+`Fn+F1` can be configured as `F1` only when the operating system exposes it as
+an F1 event. Japanese IME keys may be intercepted by the IME or OS before
+fpasoterm receives them, so they are not recommended for application actions.
+Likewise, OS-reserved combinations such as `Alt+Tab`, `Ctrl+Alt+Tab`, and some
+function keys may not be delivered. Do not assign one full shortcut to multiple
+fpasoterm actions.
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800

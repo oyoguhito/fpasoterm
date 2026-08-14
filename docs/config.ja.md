@@ -236,6 +236,36 @@ kill = "K"
 tile = "T"
 closeAll = "X"
 
+### キー名
+
+`prefix` には `+` 区切りで modifier だけを指定できます。値は `Ctrl` または `Control`、`Alt`
+または `Option`、`Shift`、`Meta` または `Cmd` または `Command`、`Mod` です。`Mod` は
+Windows/Linux の `Ctrl`、macOS の `Cmd` を表します。modifier の大文字小文字は区別しません。
+`Escape` など action key を `prefix` の一部にはできません。
+
+各 action には、`prefix` を継承する action key 一つ、または `Ctrl+Shift+KeyN` のような full
+shortcut 一つを指定できます。以下の名前を使用できます。
+
+| 種類 | 名前 | 照合 |
+| --- | --- | --- |
+| 文字 | `A`-`Z`、`0`-`9`、`-` | browser の key value。keyboard layout 依存 |
+| 名前付きキー | `Tab`、`Enter`、`Escape`、`Space`、`Backspace`、`Delete`、`Insert`、`Home`、`End`、`PageUp`、`PageDown` | `Space` と physical form は keyboard code、それ以外は key value |
+| function/cursor | `F1`-`F24`、`ArrowUp`、`ArrowDown`、`ArrowLeft`、`ArrowRight` | physical keyboard code |
+| physical key | `KeyA`-`KeyZ`、`Digit0`-`Digit9`、`Space`、`Numpad0`-`Numpad9`、`NumpadEnter`、`NumpadAdd`、`NumpadSubtract`、`NumpadMultiply`、`NumpadDivide`、`NumpadDecimal` | physical keyboard code |
+| 日本語 IME key | `ZenkakuHankaku`、`KanaMode`、`KanjiMode` | browser の key value。keyboard/OS 依存 |
+
+`Tab`、`Escape`、`Delete`、`Backspace` は使用可能です。例えば `kill = "Escape"` は設定済み
+prefix を継承し、`help = "Ctrl+Shift+F1"` は Help だけ full shortcut になります。`Space` は
+literal の `Space` で指定できます。例: `broadcast = "Space"`。通常のキーは keyboard layout
+に依存しない `KeyN`、`Digit1` を推奨します。
+
+`Fn` は action / modifier として使用できません。通常は keyboard firmware が処理し、browser に
+独立した key event が届かないためです。`Fn+F1` は OS が F1 event として渡す場合だけ `F1` として
+指定できます。日本語 IME key は IME または OS が先に捕捉する場合があるため、application action
+には推奨しません。同様に `Alt+Tab`、`Ctrl+Alt+Tab`、一部の function key のような OS 予約済み
+shortcut は fpasoterm に届かないことがあります。同じ full shortcut を複数の fpasoterm action へ
+割り当てないでください。
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800

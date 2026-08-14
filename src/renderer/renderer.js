@@ -220,7 +220,9 @@ function matchesKeybinding(event, name) {
   if (event.ctrlKey !== wantsCtrl || event.metaKey !== wantsMeta || event.altKey !== wantsAlt || event.shiftKey !== wantsShift) {
     return false;
   }
-  return /^(Key|Digit|Numpad|F\d|Arrow)/i.test(key)
+  // Use event.code for layout-independent keys, including Space whose event.key
+  // is a literal whitespace character and cannot be represented cleanly in TOML.
+  return /^(Key|Digit|Numpad|F\d|Arrow|Space$)/i.test(key)
     ? event.code.toLowerCase() === key.toLowerCase()
     : event.key.toLowerCase() === key.toLowerCase();
 }
@@ -2570,7 +2572,7 @@ async function initialize() {
       const message =
         eventName.startsWith('composition')
           ? `renderer ${eventName} data=${event.data}`
-          : `renderer ${eventName} key=${event.key} code=${event.code} composing=${event.isComposing}`;
+          : `renderer ${eventName} key=${event.key} code=${event.code} ctrl=${event.ctrlKey} alt=${event.altKey} shift=${event.shiftKey} meta=${event.metaKey} composing=${event.isComposing}`;
       showDiagnostic(message);
     });
   }
