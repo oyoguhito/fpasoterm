@@ -307,6 +307,47 @@ function mergeConfig(base, override) {
   return merged;
 }
 
+// Lists default leaf settings that are absent from a user configuration.
+function missingConfigKeys(defaults, config, prefix = '') {
+  const missing = [];
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const hasValue = isObject(config) && Object.hasOwn(config, key);
+    const configuredValue = hasValue ? config[key] : undefined;
+    if (isObject(defaultValue)) {
+      missing.push(...missingConfigKeys(defaultValue, configuredValue, path));
+    } else if (!hasValue) {
+      missing.push(path);
+    }
+  }
+  return missing;
+}
+
+// Removes settings that are not part of the current supported configuration.
+function pruneUnsupportedConfig(defaults, config, prefix = '') {
+  if (!isObject(config)) {
+    return { config, removed: [] };
+  }
+
+  const pruned = {};
+  const removed = [];
+  for (const [key, value] of Object.entries(config)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!Object.hasOwn(defaults, key)) {
+      removed.push(path);
+      continue;
+    }
+    if (isObject(defaults[key]) && isObject(value)) {
+      const nested = pruneUnsupportedConfig(defaults[key], value, path);
+      pruned[key] = nested.config;
+      removed.push(...nested.removed);
+    } else {
+      pruned[key] = value;
+    }
+  }
+  return { config: pruned, removed };
+}
+
 // Drops config sections that were removed from the supported schema.
 function removeUnsupportedConfigSections(config) {
   delete config[['web', 'Console'].join('')];
@@ -529,6 +570,9 @@ module.exports = {
   readWindowState,
   writeWindowState,
   loadConfig,
+  mergeConfig,
+  missingConfigKeys,
+  pruneUnsupportedConfig,
   platformDefaultConfig,
   windowStatePath,
 };

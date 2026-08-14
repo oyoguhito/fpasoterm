@@ -78,6 +78,30 @@ launch. This command exits without opening a window. With `--config <path>`,
 only that selected config file is renamed and reset; the standard local window
 state is still cleared.
 
+Add settings introduced in a newer fpasoterm version without replacing your
+existing values:
+
+```sh
+fpasoterm --update-config
+```
+
+The command writes a complete normalized `config.toml`, preserves existing
+supported values, and creates `config.toml.backup-<timestamp>` before writing.
+It does not change `window-state.json`. Use `--config <path>` to update another
+file. This command is provided by the Node launcher, not a direct packaged
+binary.
+
+Remove settings that no longer belong to the supported configuration schema:
+
+```sh
+fpasoterm --prune-config
+```
+
+This also creates a backup and leaves supported values intact. It removes every
+unknown setting, including custom keys intended for third-party plugins, so use
+it only after checking the backup. Use `--update-config` afterward when both
+adding current defaults and removing retired settings is desired.
+
 Print the resolved configuration and plugin status:
 
 ```sh

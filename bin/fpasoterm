@@ -13,9 +13,12 @@ const {
   deleteWindowState,
   discoverPluginFiles,
   loadConfig,
+  mergeConfig,
+  missingConfigKeys,
   readUserConfig,
   resolvePluginSelector,
   platformDefaultConfig,
+  pruneUnsupportedConfig,
   windowStatePath,
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
@@ -33,6 +36,8 @@ Options:
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --update-config           Add missing default settings and back up config.toml, then exit.
+      --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
       --self-update             Update an npm-installed fpasoterm package, then refresh desktop files on Linux.
       --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
@@ -95,6 +100,8 @@ function parseArgs(argv) {
   let setupSync = false;
   let resetWindowState = false;
   let resetConfig = false;
+  let updateConfig = false;
+  let pruneConfig = false;
   let selfUpdate = false;
   let selfUpdateCheckout = false;
   let updateDesktop = false;
@@ -156,6 +163,16 @@ function parseArgs(argv) {
 
     if (arg === '--reset-config' || arg === '-R') {
       resetConfig = true;
+      continue;
+    }
+
+    if (arg === '--update-config') {
+      updateConfig = true;
+      continue;
+    }
+
+    if (arg === '--prune-config') {
+      pruneConfig = true;
       continue;
     }
 
@@ -267,6 +284,8 @@ function parseArgs(argv) {
     setupSync,
     resetWindowState,
     resetConfig,
+    updateConfig,
+    pruneConfig,
     selfUpdate,
     selfUpdateCheckout,
     updateDesktop,
@@ -287,6 +306,8 @@ function validateArgs(argv) {
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
+    '--update-config',
+    '--prune-config',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
@@ -618,6 +639,55 @@ function resetConfig(options) {
     console.log(`renamed previous config ${backupPath}`);
   }
   console.log(`deleted saved window state ${windowStatePath()}`);
+}
+
+// Adds newly introduced defaults while retaining every existing user value.
+function updateConfig(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const userConfig = readUserConfig(targetPath);
+  const defaults = platformDefaultConfig();
+  const missing = missingConfigKeys(defaults, userConfig);
+  if (missing.length === 0) {
+    console.log(`config already includes all defaults: ${targetPath}`);
+    return;
+  }
+
+  let backupPath = '';
+  if (fs.existsSync(targetPath)) {
+    backupPath = `${targetPath}.backup-${Date.now()}`;
+    fs.copyFileSync(targetPath, backupPath);
+  }
+  writeUserConfig(mergeConfig(defaults, userConfig), targetPath);
+  console.log(`updated ${targetPath}`);
+  console.log(`added ${missing.length} default setting(s)`);
+  if (backupPath) {
+    console.log(`backed up previous config ${backupPath}`);
+  }
+}
+
+// Removes obsolete configuration keys while retaining every supported value.
+function pruneConfigFile(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  if (!fs.existsSync(targetPath)) {
+    console.log(`config does not exist: ${targetPath}`);
+    return;
+  }
+
+  const userConfig = readUserConfig(targetPath);
+  const result = pruneUnsupportedConfig(platformDefaultConfig(), userConfig);
+  if (result.removed.length === 0) {
+    console.log(`config has no unsupported settings: ${targetPath}`);
+    return;
+  }
+
+  const backupPath = `${targetPath}.backup-${Date.now()}`;
+  fs.copyFileSync(targetPath, backupPath);
+  writeUserConfig(result.config, targetPath);
+  console.log(`pruned ${targetPath}`);
+  console.log(`removed ${result.removed.length} unsupported setting(s): ${result.removed.join(', ')}`);
+  console.log(`backed up previous config ${backupPath}`);
 }
 
 // Prints plugin entries with simple status information.
@@ -1143,6 +1213,10 @@ try {
     resetWindowState(options);
   } else if (options.resetConfig) {
     resetConfig(options);
+  } else if (options.updateConfig) {
+    updateConfig(options);
+  } else if (options.pruneConfig) {
+    pruneConfigFile(options);
   } else if (options.setupSync) {
     Promise.resolve(setupSync(options)).catch((setupError) => {
       console.error(`fpasoterm: ${setupError.message}`);

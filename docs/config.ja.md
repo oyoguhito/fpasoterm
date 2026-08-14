@@ -76,6 +76,28 @@ fpasoterm --reset-config
 開かず終了します。`--config <path>`と併用した場合は選択したconfigだけをrenameして
 resetし、標準のローカルwindow stateも削除します。
 
+既存の値を置き換えず、新しい fpasoterm version で追加された設定項目だけを追加する場合:
+
+```sh
+fpasoterm --update-config
+```
+
+このcommandは既存の対応済みvalueを維持した完全な正規化済み`config.toml`を書き出し、
+書換前に`config.toml.backup-<timestamp>`を作成します。`window-state.json`は変更しません。
+`--config <path>`で別fileも更新できます。このcommandはNode launcher用で、配布済みの
+direct binaryでは使用できません。
+
+現在の対応設定schemaに含まれない項目を削除する場合:
+
+```sh
+fpasoterm --prune-config
+```
+
+こちらもbackupを作成し、対応済みvalueは維持します。ただしthird-party plugin用のcustom key
+を含め、unknownな設定を全て削除します。backupを確認できる状態でだけ実行してください。
+新しい既定値の追加と削除済み項目の除去の両方が必要な場合は、先に`--prune-config`、次に
+`--update-config`を実行します。
+
 解決済み設定と plugin 状態を表示する場合:
 
 ```sh

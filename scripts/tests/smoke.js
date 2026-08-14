@@ -9,7 +9,9 @@ const {
   defaultConfigExample,
   discoverPluginFiles,
   loadConfig,
+  missingConfigKeys,
   platformDefaultConfig,
+  pruneUnsupportedConfig,
   resolvePluginSelector,
   windowStatePath,
   writeWindowState,
@@ -20,6 +22,17 @@ assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
 assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
+const missingDefaults = missingConfigKeys(platformDefaultConfig(), { keybindings: { prefix: 'Ctrl+Alt' } });
+assert.ok(missingDefaults.includes('keybindings.newWindow'));
+assert.ok(missingDefaults.includes('terminal.images.enabled'));
+assert.equal(missingDefaults.includes('keybindings.prefix'), false);
+assert.deepEqual(
+  pruneUnsupportedConfig(platformDefaultConfig(), {
+    window: { title: 'test', oldSetting: true },
+    retiredSection: { enabled: true },
+  }),
+  { config: { window: { title: 'test' } }, removed: ['window.oldSetting', 'retiredSection'] },
+);
 
 const root = path.resolve(__dirname, '..', '..');
 const removedSnakeHttpUiPattern = new RegExp(['web', 'console'].join('_'));
@@ -141,6 +154,8 @@ assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
 assert.match(bin, /--show-config/);
+assert.match(bin, /--update-config/);
+assert.match(bin, /--prune-config/);
 assert.match(bin, /--self-update/);
 assert.match(bin, /--self-update-checkout/);
 assert.match(bin, /--update-desktop/);
@@ -217,6 +232,28 @@ const runCli = (...args) => spawnSync(
   [path.join(root, 'bin', 'fpasoterm'), '--config', cliConfigPath, ...args],
   { encoding: 'utf8' },
 );
+
+const configMigrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-config-migration-'));
+const configMigrationPath = path.join(configMigrationDir, 'config.toml');
+fs.writeFileSync(configMigrationPath, '[keybindings]\nprefix = "Ctrl+Alt"\n');
+const runConfigMigration = (...args) => spawnSync(
+  process.execPath,
+  [path.join(root, 'bin', 'fpasoterm'), '--config', configMigrationPath, ...args],
+  { encoding: 'utf8' },
+);
+const updateConfigResult = runConfigMigration('--update-config');
+assert.equal(updateConfigResult.status, 0, updateConfigResult.stderr);
+assert.match(updateConfigResult.stdout, /added \d+ default setting\(s\)/);
+const updatedConfig = toml.parse(fs.readFileSync(configMigrationPath, 'utf8'));
+assert.equal(updatedConfig.keybindings.prefix, 'Ctrl+Alt');
+assert.equal(updatedConfig.keybindings.newWindow, 'N');
+assert.ok(fs.readdirSync(configMigrationDir).some((name) => name.startsWith('config.toml.backup-')));
+fs.appendFileSync(configMigrationPath, '\n[retired]\nenabled = true\n');
+const pruneConfigResult = runConfigMigration('--prune-config');
+assert.equal(pruneConfigResult.status, 0, pruneConfigResult.stderr);
+assert.match(pruneConfigResult.stdout, /removed 1 unsupported setting\(s\): retired/);
+assert.equal(toml.parse(fs.readFileSync(configMigrationPath, 'utf8')).retired, undefined);
+fs.rmSync(configMigrationDir, { recursive: true, force: true });
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
@@ -957,6 +994,8 @@ assert.match(configDocsEn, /Ctrl\+Shift\+P/);
 assert.match(configDocsEn, /Ctrl\+Esc.*invalid/);
 assert.match(configDocsEn, /Ctrl\+Alt\+Escape/);
 assert.match(configDocsEn, /absolute path of the configuration/);
+assert.match(configDocsEn, /--update-config/);
+assert.match(configDocsEn, /--prune-config/);
 assert.match(configDocsEn, /Delete All/);
 assert.match(configDocsEn, /opens a selector/);
 assert.match(configDocsEn, /delete the selected stopped log/);
@@ -1024,6 +1063,8 @@ assert.match(configDocsJa, /Ctrl\+Shift\+P/);
 assert.match(configDocsJa, /Ctrl\+Esc.*無効/);
 assert.match(configDocsJa, /Ctrl\+Alt\+Escape/);
 assert.match(configDocsJa, /設定ファイルの絶対path/);
+assert.match(configDocsJa, /--update-config/);
+assert.match(configDocsJa, /--prune-config/);
 assert.match(configDocsJa, /Delete All/);
 assert.match(configDocsJa, /一覧から表示対象を選択/);
 assert.match(configDocsJa, /選択した停止済み log/);
@@ -1250,6 +1291,14 @@ assert.match(defaultConfig, /rescaleOverlappingGlyphs = true/);
 assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.80\)"/);
 assert.match(defaultConfig, /foreground = "#e8edf2"/);
 assert.match(defaultConfig, /cursor = "#f5d76e"/);
+assert.match(defaultConfig, /\[keybindings\]/);
+assert.match(defaultConfig, /prefix = "Mod\+Shift"/);
+assert.match(defaultConfig, /newWindow = "N"/);
+
+const minimalConfig = read('examples/config/minimal.toml');
+assert.match(minimalConfig, /\[keybindings\]/);
+assert.match(minimalConfig, /prefix = "Mod\+Shift"/);
+assert.match(minimalConfig, /tile = "T"/);
 
 const defaultApplyScript = read('examples/apply-default-appearance.sh');
 assert.match(defaultApplyScript, /default-appearance\.toml/);
