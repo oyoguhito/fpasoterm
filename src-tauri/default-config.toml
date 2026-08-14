@@ -27,6 +27,9 @@ scrollback = 1000
 termName = "xterm-256color"
 shell = ""
 
+# [terminal.images] is reserved for a future stable renderer.
+# Current builds ignore this section. Do not add it to config.toml.
+
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
@@ -54,6 +57,25 @@ duplicateGuard = true
 duplicateWindowMs = 800
 repeatedTextWindowMs = 140
 
+# Mod means Ctrl on Windows/Linux and Cmd on macOS. Set prefix = "Ctrl+Alt"
+# when Ctrl+Shift is reserved by a Windows application or keyboard layout.
+# An individual value may be a key such as "N" or a full shortcut such as
+# "Ctrl+Alt+KeyN". KeyN-style values bind by physical keyboard position.
+[keybindings]
+prefix = "Mod+Shift"
+logMenu = "L"
+logToggle = "S"
+logShow = "P"
+copy = "C"
+paste = "V"
+menu = "M"
+help = "H"
+newWindow = "N"
+broadcast = "B"
+kill = "K"
+tile = "T"
+closeAll = "X"
+
 [plugins]
 enabled = []
 
@@ -64,6 +86,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
+commands = true
+commandTtlSeconds = 60
 
 [logging]
 enabled = true

@@ -147,6 +147,8 @@ path = "~/Google Drive/fpasoterm-sync"
 channel = "work"
 diagnostics = true
 maxBytes = 1048576
+commands = true
+commandTtlSeconds = 60
 ```
 
 同期したい別の fpasoterm でも同じ `path` と `channel` を指定します。Google Drive のローカルフォルダ名が異なる場合は、その環境の実際の path を指定してください。
@@ -170,9 +172,12 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 
 ```text
 <sync path>/work/diagnostics.json
+<sync path>/work/commands/command-<source>-<timestamp>.json
 ```
 
 `diagnostics.json` の JSON には `kind`、`channel`、`sourceId`、`updatedAt`、`text` が入ります。
+
+`commands` は Broadcast dialog で user が `Include synced channel` を明示選択した時だけ短寿命の broadcast-input request を保存します。`commandTtlSeconds` の既定値は 60 秒で、最大 600 秒です。diagnostics/log の同期は残したまま remote input command を拒否する場合は `commands = false` にしてください。
 
 ## 使用方法
 
@@ -188,6 +193,12 @@ enabled = false
 `sync.path` を空にした場合も、書き込み先が無いため sync は無効になります。`config.toml` を編集した後は、fpasoterm を再起動するか、起動中の terminal から config を適用してください。
 
 要点として、`sync.enabled = false` が sync folder diagnostics を書き込まないローカル専用の設定です。
+
+## Broadcast Input
+
+`Ctrl+Shift+B` で Broadcast dialog を開きます。title と PID で対象の local fpasoterm window を選択して `Send` を実行すると、選択した window だけへ command を送ります。全 local window を選択して `Include synced channel` を選ぶと、追加で `<sync path>/<channel>/commands` 配下へ一時 request を保存します。同じ folder と channel を使って、すでに起動している各 fpasoterm は一度だけ自身の PTY へ書き込みます。local の一部選択時は sync channel へ送信しません。
+
+これは trusted folder を前提にした機能です。この folder に command JSON を書き込める人は参加中の terminal へ command を入力できます。暗号化、認証、remote 起動、遅延実行は行いません。shared または信頼できない folder では synced command を有効にしないでください。
 
 ## Terminal Output Logs
 

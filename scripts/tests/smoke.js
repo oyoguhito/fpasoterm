@@ -9,8 +9,12 @@ const {
   defaultConfigExample,
   discoverPluginFiles,
   loadConfig,
+  mergeConfig,
+  missingConfigKeys,
   platformDefaultConfig,
+  pruneUnsupportedConfig,
   resolvePluginSelector,
+  writableConfigDefaults,
   windowStatePath,
   writeWindowState,
 } = require('../../src/config');
@@ -20,6 +24,17 @@ assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
 assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
+const missingDefaults = missingConfigKeys(writableConfigDefaults(), { keybindings: { prefix: 'Ctrl+Alt' } });
+assert.ok(missingDefaults.includes('keybindings.newWindow'));
+assert.equal(missingDefaults.includes('terminal.images.enabled'), false);
+assert.equal(missingDefaults.includes('keybindings.prefix'), false);
+assert.deepEqual(
+  pruneUnsupportedConfig(writableConfigDefaults(), {
+    window: { title: 'test', oldSetting: true },
+    retiredSection: { enabled: true },
+  }),
+  { config: { window: { title: 'test' } }, removed: ['window.oldSetting', 'retiredSection'] },
+);
 
 const root = path.resolve(__dirname, '..', '..');
 const removedSnakeHttpUiPattern = new RegExp(['web', 'console'].join('_'));
@@ -42,13 +57,14 @@ function assertFile(relativePath) {
 const packageJson = JSON.parse(read('package.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.4.7');
+assert.equal(packageJson.version, '1.5.0');
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
 assert.ok(packageJson.dependencies['@tauri-apps/api'], '@tauri-apps/api should expose Tauri APIs');
 assert.ok(packageJson.dependencies['@tauri-apps/cli'], '@tauri-apps/cli should launch and build the app');
 assert.ok(packageJson.dependencies['smol-toml'], 'smol-toml should parse config.toml');
+assert.ok(packageJson.dependencies['@xterm/addon-image'], '@xterm/addon-image should render Kitty graphics');
 assert.ok(packageJson.dependencies.typescript, 'typescript should be available for .ts plugins');
 assert.equal(packageJson.scripts.start, 'node ./bin/fpasoterm');
 assert.equal(packageJson.scripts.build, 'tauri build');
@@ -66,6 +82,8 @@ for (const file of [
   'CHANGELOG.md',
   'CONTRIBUTING.md',
   'INSTALL.md',
+  'INSTALL.ja.md',
+  'README.ja.md',
   'docs/config.en.md',
   'docs/config.ja.md',
   'docs/fpasoterm-plugin.d.ts',
@@ -105,7 +123,10 @@ for (const file of [
   'src/renderer/vendor/xterm/xterm.css',
   'src/renderer/vendor/xterm/xterm.js',
   'src/renderer/vendor/addon-fit/addon-fit.js',
+  'src/renderer/vendor/addon-image/addon-image.js',
+  'src/renderer/vendor/addon-image/LICENSE',
   'src-tauri/Cargo.toml',
+  'src-tauri/build.rs',
   'src-tauri/default-config.toml',
   'src-tauri/capabilities/default.json',
   'src-tauri/tauri.conf.json',
@@ -135,6 +156,8 @@ assert.match(bin, /--dev/);
 assert.match(bin, /--foreground/);
 assert.match(bin, /--config/);
 assert.match(bin, /--show-config/);
+assert.match(bin, /--update-config/);
+assert.match(bin, /--prune-config/);
 assert.match(bin, /--self-update/);
 assert.match(bin, /--self-update-checkout/);
 assert.match(bin, /--update-desktop/);
@@ -174,7 +197,7 @@ assert.match(bin, /npmCommand\(\), \['install'\]/);
 assert.match(bin, /debugKeys/);
 assert.match(bin, /consoleDiagnostics/);
 assert.match(bin, /opaqueTerminal/);
-assert.match(bin, /@tauri-apps/);
+assert.doesNotMatch(bin, /node_modules.*@tauri-apps.*tauri\.js/);
 assert.match(bin, /detached: !options\.foreground/);
 assert.match(bin, /child\.unref\(\)/);
 assert.match(bin, /windowsHide: !options\.foreground/);
@@ -189,8 +212,8 @@ assert.match(bin, /FPASOTERM_X11/);
 assert.match(bin, /launcher build=skip current binary/);
 assert.match(bin, /\.fpasoterm-normal-build\.json/);
 assert.match(bin, /cargo', \['build', '--manifest-path'/);
-assert.match(bin, /options\.dev \? 'tauri-dev' : 'binary'/);
-assert.match(bin, /options\.dev \? undefined : await buildTauriBinary\(options\)/);
+assert.match(bin, /launcher mode=\$\{options\.dev \? 'debug-binary' : 'binary'\}/);
+assert.match(bin, /const tauriBinary = await buildTauriBinary\(options\)/);
 assert.match(bin, /src-tauri\/src\/main\.rs/);
 assert.doesNotMatch(bin, new RegExp(`--${'ozo'}${'ne'}-platform`));
 assert.doesNotMatch(bin, new RegExp(`FPASOTERM_${'OZONE'}_PLATFORM`));
@@ -212,13 +235,31 @@ const runCli = (...args) => spawnSync(
   { encoding: 'utf8' },
 );
 
+// Covers the data transformations used by --update-config and --prune-config
+// without relying on a nested launcher process.
+const migratedConfig = mergeConfig(writableConfigDefaults(), {
+  keybindings: { prefix: 'Ctrl+Alt' },
+});
+assert.equal(migratedConfig.keybindings.prefix, 'Ctrl+Alt');
+assert.equal(migratedConfig.keybindings.newWindow, 'N');
+assert.equal(migratedConfig.terminal.images, undefined);
+const prunedConfig = pruneUnsupportedConfig(writableConfigDefaults(), {
+  ...migratedConfig,
+  retired: { enabled: true },
+});
+assert.deepEqual(prunedConfig.removed, ['retired']);
+
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-assert.equal(versionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+const sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+  encoding: 'utf8',
+});
+const expectedVersion = `fpasoterm ${packageJson.version} (commit ${sourceCommit.stdout.trim() || 'unknown'})`;
+assert.equal(versionResult.stdout.trim(), expectedVersion);
 
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
-assert.equal(shortVersionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
 
 const listCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-list-cli-'));
 const listMarkerDir = path.join(listCacheDir, 'fpasoterm', 'instances');
@@ -348,6 +389,9 @@ fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), [
   '[window]',
   'width = 777',
   '',
+  '[keybindings]',
+  'prefix = "Ctrl+Alt"',
+  '',
 ].join('\n'));
 fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml.example'), 'old example\n');
 writeWindowState({ window: { width: 1200, height: 900 } });
@@ -360,6 +404,8 @@ assert.equal(windowStatePath(), path.join(stateTestDir, 'fpasoterm', 'User', 'wi
 assert.equal(stateConfig.config.window.width, 1200);
 assert.equal(stateConfig.config.window.height, 900);
 assert.equal(stateConfig.config.terminal.shell, '');
+assert.equal(stateConfig.config.keybindings.prefix, 'Ctrl+Alt');
+assert.equal(stateConfig.config.keybindings.newWindow, 'N');
 deleteWindowState();
 assert.ok(!fs.existsSync(statePath));
 if (originalConfigHome === undefined) {
@@ -485,6 +531,10 @@ assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
 assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
+const rustBuild = read('src-tauri/build.rs');
+assert.match(rustBuild, /FPASOTERM_BUILD_COMMIT/);
+assert.match(rustBuild, /rev-parse.*HEAD/);
+assert.match(rustBuild, /rerun-if-changed/);
 assert.match(rustMain, /windows_subsystem = "windows"/);
 assert.match(rustMain, /HELP_TEXT/);
 assert.match(rustMain, /apply_direct_cli_env_overrides/);
@@ -506,6 +556,8 @@ assert.match(rustMain, /cli_option_value_any\(&\["--close", "-q"\]\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-config", "-R"\]\)/);
 assert.match(rustMain, /fn reset_config_cli/);
 assert.match(rustMain, /fn app_version/);
+assert.match(rustMain, /FPASOTERM_BUILD_COMMIT/);
+assert.match(rustMain, /commit \{\}/);
 assert.match(rustMain, /fn exit_requested_app_instance/);
 assert.match(rustMain, /app\.exit\(0\)/);
 assert.match(rustMain, /stdout\.flush/);
@@ -728,7 +780,14 @@ assert.match(rustMain, /terminal output log files deleted/);
 assert.match(rustMain, /selected terminal output log deleted/);
 assert.match(rustMain, /delete_or_clear_terminal_log_file/);
 assert.match(rustMain, /locked log files emptied/);
-assert.match(rustMain, /terminal-\{\}\.log/);
+assert.match(rustMain, /terminal-\{\}-\{\}\.log/);
+assert.match(rustMain, /log_file_component/);
+assert.match(rustMain, /terminal_broadcast/);
+assert.match(rustMain, /TerminalBroadcastItem/);
+assert.match(rustMain, /sync_command_directory/);
+assert.match(rustMain, /target_instance_ids/);
+assert.match(rustMain, /terminal_broadcast_targets/);
+assert.match(rustMain, /live_terminal_broadcast_targets/);
 assert.match(rustMain, /expand_path_variables/);
 assert.match(rustMain, /env::var\(&name\)/);
 assert.match(rustMain, /SyncItem/);
@@ -736,6 +795,9 @@ assert.doesNotMatch(rustMain, /clipboard\.json/);
 assert.match(rustMain, /diagnostics\.json/);
 
 const indexHtml = read('src/renderer/index.html');
+assert.match(indexHtml, /id="terminal-broadcast-target-list"/);
+assert.match(indexHtml, /Select All/);
+assert.match(indexHtml, /Select None/);
 const confirmHtml = read('src/renderer/confirm.html');
 assert.match(indexHtml, /id="drag-region"/);
 assert.match(indexHtml, /id="window-title"/);
@@ -761,6 +823,8 @@ assert.match(indexHtml, /id="terminal-log-toggle"/);
 assert.match(indexHtml, /id="terminal-log-show"/);
 assert.match(indexHtml, /id="terminal-copy"/);
 assert.match(indexHtml, /id="terminal-paste"/);
+assert.match(indexHtml, /id="keybinding-prefix"/);
+assert.match(indexHtml, /Shortcut prefix: Ctrl\+Shift/);
 assert.match(indexHtml, /aria-keyshortcuts="[^"]*Control\+Shift\+L[^"]*"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+S"/);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+P"/);
@@ -781,19 +845,19 @@ assert.match(indexHtml, /role="dialog"/);
 assert.match(indexHtml, /id="terminal-log-confirm-ok"/);
 assert.match(indexHtml, /id="terminal-log-confirm-cancel"/);
 assert.doesNotMatch(indexHtml, />Log \(\^L\)</);
-assert.match(indexHtml, />Log Start \(\^S\)</);
-assert.match(indexHtml, />Log Show \(\^P\)</);
-assert.match(indexHtml, />Copy \(\^C\)</);
-assert.match(indexHtml, />Paste \(\^V\)</);
+assert.match(indexHtml, />Log Start \(S\)</);
+assert.match(indexHtml, />Log Show \(P\)</);
+assert.match(indexHtml, />Copy \(C\)</);
+assert.match(indexHtml, />Paste \(V\)</);
 assert.doesNotMatch(indexHtml, />Clear</);
 assert.match(indexHtml, /id="minimize-window"/);
 assert.match(indexHtml, /id="maximize-window"/);
 assert.match(indexHtml, /id="new-window"/);
-assert.match(indexHtml, />New \(\^N\)</);
+assert.match(indexHtml, />New \(N\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+N"/);
 assert.match(indexHtml, /id="arrange-window"/);
 assert.match(indexHtml, /id="close-all-windows"/);
-assert.match(indexHtml, />Close All \(\^X\)</);
+assert.match(indexHtml, />Close All \(X\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+X"/);
 assert.match(indexHtml, /id="close-all-confirm" hidden role="dialog"/);
 assert.match(indexHtml, /id="close-all-confirm-ok"/);
@@ -805,12 +869,12 @@ assert.match(confirmHtml, /event\.key === 'Enter'/);
 assert.match(confirmHtml, /currentWindow\.setFocus/);
 assert.match(confirmHtml, /cancel\.focus/);
 assert.match(confirmHtml, /window_cancel_close_all/);
-assert.match(indexHtml, />Tile \(\^T\)</);
+assert.match(indexHtml, />Tile \(T\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+T"/);
 assert.match(indexHtml, /id="window-menu-toggle"/);
 assert.match(indexHtml, /id="window-menu-toggle"[^>]+aria-keyshortcuts="Control\+Shift\+M Control\+Shift\+L"/);
 assert.match(indexHtml, /id="keyboard-shortcuts-help"/);
-assert.match(indexHtml, />Help \(\^H\)</);
+assert.match(indexHtml, />Help \(H\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+H"/);
 assert.match(indexHtml, /id="window-menu-items"/);
 assert.match(indexHtml, /id="close-window"/);
@@ -825,19 +889,19 @@ assert.match(readme, /~\/\.config\/fpasoterm\/User\/config\.toml/);
 assert.match(readme, /plugins\/.*\.ts/);
 assert.match(readme, /docs\/config\.en\.md/);
 assert.match(readme, /docs\/sync\.en\.md/);
-assert.match(readme, /docs\/sync\.ja\.md/);
+assert.match(readme, /README\.ja\.md/);
+assert.match(readme, /INSTALL\.ja\.md/);
 assert.doesNotMatch(readme, removedTemporaryHttpUiDocPattern);
 assert.match(readme, /--setup-sync/);
 assert.match(readme, /node \.\\bin\\fpasoterm --setup-sync/);
 assert.match(readme, /docs\/pr-review\.en\.md/);
-assert.match(readme, /docs\/pr-review\.ja\.md/);
 assert.match(readme, /examples\/plugins/);
 assert.match(readme, /--shell/);
 assert.match(readme, /PowerShell\\7\\pwsh\.exe/);
 assert.match(readme, /PowerShell 7 \(`pwsh\.exe`\) by default/);
 assert.match(readme, /fpasoterm executable directory at the[\s\S]*front of `Path`/);
 assert.match(readme, /GTK application id is disabled/);
-assert.match(readme, /Tile.*button/);
+assert.match(readme, /Tile \(\^T\)/);
 assert.match(readme, /ChromeOS shelf/);
 assert.match(readme, /removes fpasoterm-specific directories from the[\s\S]*current user's `Path`/);
 assert.match(readme, /By default, fpasoterm keeps its configured title/);
@@ -912,6 +976,8 @@ assert.match(configDocsEn, /apply-default-appearance\.bat/);
 assert.match(configDocsEn, /\\a\\r\\n/);
 assert.match(configDocsEn, /Settings that require a new PTY/);
 assert.match(configDocsEn, /TERM=xterm-256color/);
+assert.match(configDocsEn, /Do not run `kitten icat`, `chafa --format kitty`, or `chafa --format sixels`/);
+assert.match(configDocsEn, /`\[terminal\.images\]` is reserved and ignored by current builds/);
 assert.match(configDocsEn, /\[sync\]/);
 assert.match(configDocsEn, /provider = "folder"/);
 assert.match(configDocsEn, /sync\.en\.md/);
@@ -919,6 +985,11 @@ assert.match(configDocsEn, /\[logging\]/);
 assert.match(configDocsEn, /Ctrl\+Shift\+L/);
 assert.match(configDocsEn, /Ctrl\+Shift\+S/);
 assert.match(configDocsEn, /Ctrl\+Shift\+P/);
+assert.match(configDocsEn, /Ctrl\+Esc.*invalid/);
+assert.match(configDocsEn, /Ctrl\+Alt\+Escape/);
+assert.match(configDocsEn, /absolute path of the configuration/);
+assert.match(configDocsEn, /--update-config/);
+assert.match(configDocsEn, /--prune-config/);
 assert.match(configDocsEn, /Delete All/);
 assert.match(configDocsEn, /opens a selector/);
 assert.match(configDocsEn, /delete the selected stopped log/);
@@ -983,6 +1054,11 @@ assert.match(configDocsJa, /\[logging\]/);
 assert.match(configDocsJa, /Ctrl\+Shift\+L/);
 assert.match(configDocsJa, /Ctrl\+Shift\+S/);
 assert.match(configDocsJa, /Ctrl\+Shift\+P/);
+assert.match(configDocsJa, /Ctrl\+Esc.*無効/);
+assert.match(configDocsJa, /Ctrl\+Alt\+Escape/);
+assert.match(configDocsJa, /設定ファイルの絶対path/);
+assert.match(configDocsJa, /--update-config/);
+assert.match(configDocsJa, /--prune-config/);
 assert.match(configDocsJa, /Delete All/);
 assert.match(configDocsJa, /一覧から表示対象を選択/);
 assert.match(configDocsJa, /選択した停止済み log/);
@@ -1013,9 +1089,11 @@ assert.match(specEn, /hamburger window menu contains `Log Start/);
 assert.match(specEn, /`Ctrl\+Shift\+L` opens that menu/);
 assert.match(specEn, /`Ctrl\+Shift\+M` opens the window menu/);
 assert.match(specEn, /`Help \(\^H\)` item or `Ctrl\+Shift\+H`/);
-assert.match(specEn, /`Copy \(\^C\)`, and `Paste \(\^V\)`/);
+assert.match(specEn, /`Kill \(\^K\)`, `Copy \(\^C\)`, and `Paste \(\^V\)`/);
+assert.match(specEn, /On Unix, `Kill \(\^K\)` or `Ctrl\+Shift\+K` sends `SIGKILL` to the foreground PTY process group/);
+assert.match(specEn, /On Windows, it force-terminates descendants of the terminal shell/);
 assert.match(specEn, /diagnostics and log panel textareas/);
-assert.match(specEn, /Terminal paste reads the OS clipboard/);
+assert.match(specEn, /Terminal paste first reads the WebView clipboard API/);
 assert.match(specEn, /otherwise it pastes/);
 assert.match(specEn, /Pane-specific logging is delegated to multiplexers/);
 
@@ -1027,9 +1105,11 @@ assert.match(specJa, /hamburger の window menu には `Log Start/);
 assert.match(specJa, /`Ctrl\+Shift\+L` は log 操作に focus/);
 assert.match(specJa, /`Ctrl\+Shift\+M` で window menu を開き/);
 assert.match(specJa, /`Help \(\^H\)` または `Ctrl\+Shift\+H`/);
-assert.match(specJa, /`Copy \(\^C\)`、`Paste \(\^V\)`/);
+assert.match(specJa, /`Kill \(\^K\)`、`Copy \(\^C\)`、`Paste \(\^V\)`/);
+assert.match(specJa, /`Ctrl\+Shift\+K` が前景 PTY process group に `SIGKILL` を送ります/);
+assert.match(specJa, /Windowsではterminal shellの子孫processを深い順に強制終了/);
 assert.match(specJa, /diagnostics \/ log panel の textarea/);
-assert.match(specJa, /terminal paste は OS clipboard/);
+assert.match(specJa, /terminal paste は、user gesture中のWebView clipboard APIを先に読み/);
 assert.match(specJa, /selection がない場合は paste/);
 assert.match(specJa, /pane 単位の log は tmux/);
 
@@ -1058,6 +1138,7 @@ assert.match(sampleConfig, /titlebarColor = "#1565c0"/);
 assert.match(sampleConfig, /backgroundOpacity = 0\.8/);
 assert.match(sampleConfig, /lineHeight = 1\.12/);
 assert.match(sampleConfig, /termName = "xterm-256color"/);
+
 
 const syncConfig = read('examples/config/sync-folder.toml');
 assert.match(syncConfig, /\[sync\]/);
@@ -1204,6 +1285,14 @@ assert.match(defaultConfig, /rescaleOverlappingGlyphs = true/);
 assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.80\)"/);
 assert.match(defaultConfig, /foreground = "#e8edf2"/);
 assert.match(defaultConfig, /cursor = "#f5d76e"/);
+assert.match(defaultConfig, /\[keybindings\]/);
+assert.match(defaultConfig, /prefix = "Mod\+Shift"/);
+assert.match(defaultConfig, /newWindow = "N"/);
+
+const minimalConfig = read('examples/config/minimal.toml');
+assert.match(minimalConfig, /\[keybindings\]/);
+assert.match(minimalConfig, /prefix = "Mod\+Shift"/);
+assert.match(minimalConfig, /tile = "T"/);
 
 const defaultApplyScript = read('examples/apply-default-appearance.sh');
 assert.match(defaultApplyScript, /default-appearance\.toml/);
@@ -1239,17 +1328,22 @@ assert.match(renderer, /resolveCloseAllWindows/);
 assert.match(renderer, /Close all running fpasoterm windows/);
 assert.match(renderer, /isCloseAllShortcut/);
 assert.match(renderer, /isNewWindowShortcut/);
-assert.match(renderer, /event\.ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 'n'/);
+assert.match(renderer, /matchesKeybinding\(event, 'newWindow'\)/);
 assert.match(renderer, /getAvailableScreenBounds/);
-assert.match(renderer, /event\.ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 't'/);
+assert.match(renderer, /matchesKeybinding\(event, 'tile'\)/);
 assert.match(renderer, /setWindowMenuOpen/);
 assert.match(renderer, /showKeyboardShortcutsHelp/);
+assert.match(renderer, /Config: \$\{activeConfigPath/);
+assert.match(renderer, /activeConfigPath = String\(runtimeConfig\.configPath/);
 assert.match(renderer, /getAppVersion: \(\) => invoke\('app_version'\)/);
 assert.match(renderer, /`fpasoterm \$\{version\}`/);
-assert.match(renderer, /key === 'm'/);
-assert.match(renderer, /key === 'h'/);
-assert.match(renderer, /Ctrl\+Shift\+M  Open or close the window menu/);
-assert.match(renderer, /Ctrl\+Shift\+H  Show this keyboard shortcut list/);
+assert.match(renderer, /function matchesKeybinding/);
+assert.match(renderer, /function applyKeybindingLabels/);
+assert.match(renderer, /function isValidKeybindingPrefix/);
+assert.match(renderer, /function isValidFullKeybinding/);
+assert.match(renderer, /Invalid prefix/);
+assert.match(renderer, /Ctrl\+Alt\+KeyN/);
+assert.match(renderer, /keybindingLabel\('menu'\)/);
 assert.match(renderer, /terminalLogStatusElement\.hidden = !status\.active/);
 assert.doesNotMatch(renderer, /logMenuToggleButton/);
 assert.match(renderer, /startWindowResize/);
@@ -1286,12 +1380,19 @@ assert.match(renderer, /pasteClipboardToTerminal/);
 assert.match(renderer, /writeClipboardText/);
 assert.match(renderer, /writeBrowserClipboardText/);
 assert.match(renderer, /copyTerminalSelection/);
+assert.match(renderer, /terminalKillButton/);
+assert.match(renderer, /killTerminal: \(\) => invoke\('terminal_kill'\)/);
+assert.match(renderer, /keybindingLabel\('kill'\)/);
+assert.match(renderer, /Kill the running terminal command and keep its shell open/);
+assert.match(rustMain, /process_group_leader/);
+assert.match(rustMain, /libc::SIGKILL/);
+assert.match(rustMain, /kill_windows_shell_descendants/);
 assert.match(renderer, /terminalCopyButton/);
 assert.match(renderer, /terminalPasteButton/);
 assert.match(renderer, /selectedTerminalText/);
 assert.match(renderer, /selectedDiagnosticsClipboardText/);
 assert.match(renderer, /selectedClipboardText/);
-assert.match(renderer, /requestTerminalCopyEvent/);
+assert.match(renderer, /copyTerminalSelection\(\)\.catch/);
 assert.doesNotMatch(renderer, /focusLogMenuItem/);
 assert.match(renderer, /focusWindowMenuItem/);
 assert.match(renderer, /diagnosticsPanelFocusItems/);
@@ -1328,10 +1429,10 @@ assert.match(renderer, /event\.shiftKey \? -1 : 1/);
 assert.match(renderer, /event\.key !== 'Enter'/);
 assert.match(renderer, /key\.toLowerCase\(\) === 'j'/);
 assert.match(renderer, /key\.toLowerCase\(\) === 'k'/);
-assert.match(renderer, /key === 'l'/);
-assert.match(renderer, /key === 's'/);
-assert.match(renderer, /key === 'p'/);
-assert.match(renderer, /document\.execCommand\('copy'\)/);
+assert.match(renderer, /matchesKeybinding\(event, 'logMenu'\)/);
+assert.match(renderer, /matchesKeybinding\(event, 'logToggle'\)/);
+assert.match(renderer, /matchesKeybinding\(event, 'logShow'\)/);
+assert.doesNotMatch(renderer, /document\.execCommand\('copy'\)/);
 assert.match(renderer, /event\.clipboardData\?\.setData\('text\/plain', text\)/);
 assert.match(renderer, /event\.clipboardData\?\.setData\('text', text\)/);
 assert.match(renderer, /navigator\.clipboard\.write\(\[item\]\)/);
@@ -1357,9 +1458,8 @@ assert.match(renderer, /terminal menu copy failed/);
 assert.match(renderer, /terminal menu paste failed/);
 assert.doesNotMatch(renderer, /copyDiagnosticsButton/);
 assert.doesNotMatch(renderer, /diagnostics copy failed/);
-assert.match(renderer, /ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 'v'/);
-assert.match(renderer, /ctrlKey && event\.shiftKey && event\.key\.toLowerCase\(\) === 'c'/);
-assert.match(renderer, /metaKey && event\.key\.toLowerCase\(\) === 'v'/);
+assert.match(renderer, /matchesKeybinding\(event, 'paste'\)/);
+assert.match(renderer, /matchesKeybinding\(event, 'copy'\)/);
 assert.doesNotMatch(renderer, /setPointerCapture/);
 assert.doesNotMatch(renderer, /syncStatusElement/);
 assert.match(renderer, /scheduleSyncDiagnosticsWrite/);
@@ -1432,13 +1532,38 @@ assert.match(renderer, /Clear all terminal output logs/);
 assert.match(renderer, /delete all stopped terminal-\*\.log files/);
 assert.match(renderer, /This cannot be undone/);
 assert.doesNotMatch(renderer, /window\.confirm/);
-assert.match(renderer, /Ctrl\+Shift\+S/);
-assert.match(renderer, /Ctrl\+Shift\+P/);
+assert.match(renderer, /keybindingLabel\('logToggle'\)/);
+assert.match(renderer, /keybindingLabel\('logShow'\)/);
 assert.match(renderer, /closeDiagnosticsButton/);
 assert.match(renderer, /startTerminalOutputLog/);
 assert.match(renderer, /stopTerminalOutputLog/);
 assert.match(renderer, /getSelection/);
 assert.match(renderer, /onTitleChange/);
+assert.match(renderer, /ImageAddon\.ImageAddon/);
+assert.match(renderer, /kittySupport/);
+assert.match(renderer, /kittySizeLimit/);
+assert.match(renderer, /function terminalPtySize/);
+assert.match(renderer, /pixelWidth/);
+assert.match(renderer, /pixelHeight/);
+assert.match(renderer, /onImageAdded/);
+assert.match(renderer, /interrupt fallback/);
+assert.match(renderer, /sendTerminalInput\('\\x03'/);
+assert.match(renderer, /Let the native WebView create a paste event first/);
+assert.match(renderer, /terminalPasteFallbackTimer/);
+assert.match(renderer, /isNonTerminalEditableControl/);
+assert.doesNotMatch(renderer, /materializeKittyFileTransfers/);
+assert.doesNotMatch(renderer, /readKittyImageFile/);
+assert.doesNotMatch(renderer, /transfer !== 'f' && transfer !== 't'/);
+assert.match(rustMain, /pixel_width/);
+assert.match(rustMain, /pixel_height/);
+assert.doesNotMatch(rustMain, /kitty_image_file_read/);
+assert.doesNotMatch(rustMain, /KITTY_IMAGE_FILE_LIMIT_BYTES/);
+assert.match(renderer, /terminal_broadcast/);
+assert.match(renderer, /openTerminalBroadcastDialog/);
+assert.match(renderer, /keybindingLabel\('broadcast'\)/);
+assert.match(renderer, /terminalBroadcastTargets/);
+assert.match(renderer, /renderTerminalBroadcastTargets/);
+assert.match(renderer, /targetInstanceIds/);
 assert.match(renderer, /\\x1b\\\]\(777\|52\);/);
 assert.match(renderer, /key === 'config'/);
 assert.match(renderer, /key === 'opacity'/);
@@ -1447,6 +1572,7 @@ assert.match(renderer, /titlebarColor/);
 assert.match(renderer, /--titlebar-background/);
 
 const styles = read('src/renderer/styles.css');
+assert.match(styles, /xterm-image-layer-top/);
 assert.match(styles, /#drag-region/);
 assert.doesNotMatch(styles, removedKebabHttpUiPattern);
 assert.match(styles, /--titlebar-background: #1565c0/);
@@ -1513,6 +1639,14 @@ assert.match(config, /BIZ UDGothic/);
 assert.match(config, /半角カタカナ|half-width kana/);
 assert.match(config, /termName: 'xterm-256color'/);
 assert.match(config, /shell: ''/);
+assert.match(config, /keybindings:/);
+assert.match(config, /prefix: 'Mod\+Shift'/);
+assert.match(config, /Ctrl\+Alt\+KeyN/);
+assert.match(config, /enabled: false/);
+assert.match(config, /kittySupport: false/);
+assert.match(config, /function writableConfigDefaults/);
+assert.match(config, /sixelSupport: false/);
+assert.match(config, /commandTtlSeconds: 60/);
 assert.match(config, /sync:/);
 assert.match(config, /provider: 'folder'/);
 assert.match(config, /logging:/);
@@ -1570,6 +1704,9 @@ assert.match(desktop, /^Icon=io\.github\.oyoguhito\.fpasoterm$/m);
 assert.match(desktop, /^StartupWMClass=fpasoterm$/m);
 assert.match(read('README.md'), /StartupWMClass=fpasoterm/);
 assert.match(read('INSTALL.md'), /StartupWMClass=fpasoterm/);
+assert.match(read('INSTALL.ja.md'), /StartupWMClass=fpasoterm/);
+assert.match(read('INSTALL.ja.md'), /Linux Desktop Entry/);
+assert.match(read('README.ja.md'), /docs\/config\.ja\.md/);
 
 for (const file of [
   'README.md',

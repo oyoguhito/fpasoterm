@@ -29,11 +29,23 @@ const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-c
 const windowMenu = document.getElementById('window-menu');
 const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
+const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
+const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
+const terminalBroadcastButton = document.getElementById('terminal-broadcast');
+const terminalBroadcastDialog = document.getElementById('terminal-broadcast-dialog');
+const terminalBroadcastText = document.getElementById('terminal-broadcast-text');
+const terminalBroadcastTargetList = document.getElementById('terminal-broadcast-target-list');
+const terminalBroadcastSelectAllButton = document.getElementById('terminal-broadcast-select-all');
+const terminalBroadcastSelectNoneButton = document.getElementById('terminal-broadcast-select-none');
+const terminalBroadcastSync = document.getElementById('terminal-broadcast-sync');
+const terminalBroadcastSyncLabel = document.getElementById('terminal-broadcast-sync-label');
+const terminalBroadcastSendButton = document.getElementById('terminal-broadcast-send');
+const terminalBroadcastCancelButton = document.getElementById('terminal-broadcast-cancel');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
@@ -87,6 +99,21 @@ const fallbackConfig = {
     duplicateWindowMs: 800,
     repeatedTextWindowMs: 140,
   },
+  keybindings: {
+    prefix: 'Mod+Shift',
+    logMenu: 'L',
+    logToggle: 'S',
+    logShow: 'P',
+    copy: 'C',
+    paste: 'V',
+    menu: 'M',
+    help: 'H',
+    newWindow: 'N',
+    broadcast: 'B',
+    kill: 'K',
+    tile: 'T',
+    closeAll: 'X',
+  },
   plugins: {
     enabled: [],
   },
@@ -106,9 +133,12 @@ const fallbackConfig = {
   },
 };
 let appConfig = fallbackConfig;
+let activeConfigPath = '';
 let pluginUrls = [];
 let term;
 let fitAddon;
+let imageAddon;
+let terminalBroadcastTargets = [];
 let imeDuplicateWindowMs = fallbackConfig.ime.duplicateWindowMs;
 let imeRepeatedTextWindowMs = fallbackConfig.ime.repeatedTextWindowMs;
 let imeDuplicateGuardEnabled = fallbackConfig.ime.duplicateGuard;
@@ -133,6 +163,129 @@ let terminalLogSearchState = {
 let terminalLogConfirmResolver = null;
 let terminalLogConfirmReturnFocus = null;
 
+// Resolves a configurable shortcut. A single key inherits keybindings.prefix;
+// full values such as Ctrl+Alt+KeyN override the prefix for that action.
+function keybindingSpec(name) {
+  const defaults = fallbackConfig.keybindings;
+  const settings = appConfig.keybindings || {};
+  const configured = String(settings[name] ?? defaults[name] ?? '').trim() || defaults[name];
+  const prefix = configuredKeybindingPrefix();
+  if (configured.includes('+')) {
+    return isValidFullKeybinding(configured) ? configured : `${prefix}+${defaults[name]}`;
+  }
+  return `${prefix}+${configured}`;
+}
+
+// Only modifier names may be used in the shared prefix. Key names such as
+// Escape belong to an action binding, for example "Ctrl+Alt+Escape".
+function isKeybindingModifier(token) {
+  return ['ctrl', 'control', 'alt', 'option', 'shift', 'meta', 'cmd', 'command', 'mod']
+    .includes(token.toLowerCase());
+}
+
+function keybindingTokens(value) {
+  return String(value).split('+').map((token) => token.trim()).filter(Boolean);
+}
+
+function isValidKeybindingPrefix(value) {
+  const tokens = keybindingTokens(value);
+  return tokens.length > 0 && tokens.every(isKeybindingModifier);
+}
+
+function isValidFullKeybinding(value) {
+  const tokens = keybindingTokens(value);
+  return tokens.length > 1
+    && tokens.slice(0, -1).every(isKeybindingModifier)
+    && !isKeybindingModifier(tokens[tokens.length - 1]);
+}
+
+function configuredKeybindingPrefix() {
+  const configured = String(appConfig.keybindings?.prefix ?? '').trim();
+  return isValidKeybindingPrefix(configured) ? configured : fallbackConfig.keybindings.prefix;
+}
+
+// Matches the configured shortcut by key value or a physical KeyN-style code.
+function matchesKeybinding(event, name) {
+  const tokens = keybindingSpec(name).split('+').map((token) => token.trim()).filter(Boolean);
+  const key = tokens.pop();
+  if (!key) {
+    return false;
+  }
+  const modifiers = new Set(tokens.map((token) => token.toLowerCase()));
+  const isMac = navigator.platform.toLowerCase().includes('mac');
+  const wantsCtrl = modifiers.has('ctrl') || modifiers.has('control') || (modifiers.has('mod') && !isMac);
+  const wantsMeta = modifiers.has('meta') || modifiers.has('cmd') || modifiers.has('command') || (modifiers.has('mod') && isMac);
+  const wantsAlt = modifiers.has('alt') || modifiers.has('option');
+  const wantsShift = modifiers.has('shift');
+  if (event.ctrlKey !== wantsCtrl || event.metaKey !== wantsMeta || event.altKey !== wantsAlt || event.shiftKey !== wantsShift) {
+    return false;
+  }
+  // Use event.code for layout-independent keys, including Space whose event.key
+  // is a literal whitespace character and cannot be represented cleanly in TOML.
+  const matches = /^(Key|Digit|Numpad|F\d|Arrow|Space$)/i.test(key)
+    ? event.code.toLowerCase() === key.toLowerCase()
+    : event.key.toLowerCase() === key.toLowerCase();
+  if (matches && debugKeys && event.type === 'keydown') {
+    showDebugDiagnostic(`shortcut matched action=${name} spec=${keybindingSpec(name)}`);
+  }
+  return matches;
+}
+
+// Produces the visible shortcut form used by menus and the Help panel.
+function keybindingLabel(name) {
+  return keybindingSpec(name).replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
+}
+
+// Returns the compact action-key label used in the constrained titlebar menu.
+function keybindingActionLabel(name) {
+  const key = keybindingSpec(name).split('+').map((token) => token.trim()).filter(Boolean).pop() || '';
+  const physicalLetter = /^Key([A-Z])$/i.exec(key);
+  const physicalDigit = /^Digit([0-9])$/i.exec(key);
+  return physicalLetter?.[1].toUpperCase() || physicalDigit?.[1] || key;
+}
+
+// Resolves the common prefix separately so each menu item can stay compact.
+function keybindingPrefixLabel() {
+  const prefix = configuredKeybindingPrefix();
+  return prefix.replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
+}
+
+// Keeps menu labels and accessibility metadata aligned with config.toml.
+function applyKeybindingLabels() {
+  const items = [
+    [terminalLogToggleButton, 'logToggle', 'Log Start'],
+    [terminalLogShowButton, 'logShow', 'Log Show'],
+    [terminalBroadcastButton, 'broadcast', 'Broadcast'],
+    [terminalKillButton, 'kill', 'Kill'],
+    [terminalCopyButton, 'copy', 'Copy'],
+    [terminalPasteButton, 'paste', 'Paste'],
+    [newWindowButton, 'newWindow', 'New'],
+    [arrangeWindowButton, 'tile', 'Tile'],
+    [closeAllWindowsButton, 'closeAll', 'Close All'],
+    [keyboardShortcutsHelpButton, 'help', 'Help'],
+  ];
+  for (const [element, action, label] of items) {
+    if (!element) {
+      continue;
+    }
+    const shortcut = keybindingLabel(action);
+    element.setAttribute('aria-keyshortcuts', shortcut);
+    if (element !== terminalLogToggleButton || element.dataset.active !== 'true') {
+      element.textContent = `${label} (${keybindingActionLabel(action)})`;
+    }
+  }
+  if (keybindingPrefixElement) {
+    keybindingPrefixElement.textContent = `Shortcut prefix: ${keybindingPrefixLabel()}`;
+    const configured = String(appConfig.keybindings?.prefix ?? '').trim();
+    keybindingPrefixElement.title = configured && !isValidKeybindingPrefix(configured)
+      ? `Invalid prefix \"${configured}\"; using ${keybindingPrefixLabel()}`
+      : '';
+  }
+  if (windowMenuToggleButton) {
+    windowMenuToggleButton.setAttribute('aria-keyshortcuts', `${keybindingLabel('menu')} ${keybindingLabel('logMenu')}`);
+  }
+}
+
 // Provides the renderer API shape expected by the rest of this file when the
 // backend is injected by Tauri.
 function installTauriApiAdapter() {
@@ -145,6 +298,11 @@ function installTauriApiAdapter() {
   window.fpasoterm = {
     startTerminal: (size) => invoke('terminal_start', { size }),
     writeTerminal: (data) => invoke('terminal_write', { data }),
+    killTerminal: () => invoke('terminal_kill'),
+    broadcastTerminal: (text, includeSync, targetInstanceIds) => invoke('terminal_broadcast', {
+      request: { text, includeSync, targetInstanceIds },
+    }),
+    terminalBroadcastTargets: () => invoke('terminal_broadcast_targets'),
     resizeTerminal: (size) => invoke('terminal_resize', { size }),
     startTerminalLog: (path) => invoke('terminal_log_start', { request: { path: path || null } }),
     stopTerminalLog: () => invoke('terminal_log_stop'),
@@ -209,10 +367,26 @@ function fitAndResize() {
   const beforeCols = term.cols;
   const beforeRows = term.rows;
   fitAddon.fit();
-  showDebugDiagnostic(`terminal fit cols=${beforeCols}->${term.cols} rows=${beforeRows}->${term.rows}`);
-  window.fpasoterm.resizeTerminal({ cols: term.cols, rows: term.rows }).catch((error) => {
+  const size = terminalPtySize();
+  showDebugDiagnostic(
+    `terminal fit cols=${beforeCols}->${size.cols} rows=${beforeRows}->${size.rows} ` +
+      `pixels=${size.pixelWidth}x${size.pixelHeight}`,
+  );
+  window.fpasoterm.resizeTerminal(size).catch((error) => {
     showDiagnostic(`terminal resize failed: ${error}`);
   });
+}
+
+// Reports both the xterm grid and its rendered pixel extent to the PTY.
+// Kitty-aware applications use the pixel fields from TIOCSWINSZ to size images.
+function terminalPtySize() {
+  const rect = terminalElement?.getBoundingClientRect();
+  return {
+    cols: Math.max(1, term?.cols || 80),
+    rows: Math.max(1, term?.rows || 24),
+    pixelWidth: Math.min(65535, Math.max(1, Math.round(rect?.width || 1))),
+    pixelHeight: Math.min(65535, Math.max(1, Math.round(rect?.height || 1))),
+  };
 }
 
 // Coalesces rapid webview resize events so shells do not redraw prompts repeatedly.
@@ -416,6 +590,19 @@ function normalizeJapaneseTerminalText(data) {
   return String(data || '').normalize('NFC');
 }
 
+function queueTerminalOutput(data) {
+  const normalizedData = normalizeJapaneseTerminalText(data);
+  showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
+  processRuntimeOsc(normalizedData);
+  mirrorTerminalData(normalizedData);
+  term.write(normalizedData, () => {
+    removeXtermVisualOverlays();
+    logXtermCanvasDiagnostics();
+    logXtermTextDiagnostics();
+    showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
+  });
+}
+
 // Mirrors PTY output outside xterm.js so renderer delivery can be verified.
 function mirrorTerminalData(data) {
   if (!debugKeys || !terminalMirrorElement) {
@@ -470,15 +657,32 @@ function normalizePasteText(text) {
 }
 
 // Reads the OS clipboard in a user-triggered event and sends it to the shell.
+// WebKitGTK owns the ChromeOS clipboard integration, so prefer its API before
+// shell helpers such as wl-paste. A successful helper with an empty selection
+// must not hide text that the WebView can read.
 async function pasteClipboardToTerminal() {
   let text = '';
+  const errors = [];
   try {
-    text = await window.fpasoterm.readClipboard();
-  } catch (backendError) {
-    showDiagnostic(`backend clipboard read failed: ${backendError}`);
-    text = await navigator.clipboard.readText();
+    if (navigator.clipboard?.readText) {
+      text = await navigator.clipboard.readText();
+    }
+  } catch (browserError) {
+    errors.push(`browser clipboard: ${browserError}`);
   }
+
   if (!text) {
+    try {
+      text = await window.fpasoterm.readClipboard();
+    } catch (backendError) {
+      errors.push(`backend clipboard: ${backendError}`);
+    }
+  }
+
+  if (!text) {
+    if (errors.length) {
+      showDiagnostic(`terminal paste failed: ${errors.join('; ')}`);
+    }
     showDiagnostic('terminal paste skipped: clipboard is empty');
     return;
   }
@@ -569,26 +773,103 @@ async function copyTerminalSelection() {
   return copiedLength;
 }
 
-// Asks the WebView to run a native copy event so event.clipboardData can be set.
-function requestTerminalCopyEvent() {
-  try {
-    return typeof document.execCommand === 'function' && document.execCommand('copy');
-  } catch (error) {
-    showDiagnostic(`terminal copy event request failed: ${error}`);
-    return false;
-  }
+// Returns true for editable UI controls other than xterm's hidden IME textarea.
+// The xterm textarea must be treated as terminal focus so paste reaches the PTY.
+function isNonTerminalEditableControl(element) {
+  const terminalTextarea = terminalElement.querySelector('.xterm-helper-textarea');
+  return (
+    Boolean(element) &&
+    element !== terminalTextarea &&
+    element.matches?.('input, textarea, select, button, [contenteditable="true"]')
+  );
 }
 
 // Installs explicit paste handling for desktop webviews where xterm defaults can be skipped.
 function installTerminalPasteHandlers() {
-  terminalElement.addEventListener('paste', (event) => {
+  let terminalPasteFallbackTimer = null;
+
+  // Keep Ctrl+C available when a terminal graphics layer has displaced xterm focus.
+  // Normal xterm input handles it while the helper textarea owns focus, so this
+  // capture listener only provides the otherwise-unreachable fallback path.
+  window.addEventListener('keydown', (event) => {
+    const isInterrupt =
+      event.ctrlKey &&
+      !event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      event.key.toLowerCase() === 'c';
+    if (!isInterrupt) {
+      return;
+    }
+
+    const textarea = terminalElement.querySelector('.xterm-helper-textarea');
+    if (document.activeElement === textarea) {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+    if (isNonTerminalEditableControl(activeElement)) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    sendTerminalInput('\x03', 'interrupt fallback');
+    setTimeout(focusTerminalInput, 0);
+  }, true);
+
+  // Let the native WebView create a paste event first. Its clipboardData is the
+  // only reliable ChromeOS shared-clipboard path. Some WebKitGTK builds do not
+  // dispatch it for Ctrl+Shift+V, so use the API fallback only after a short wait.
+  window.addEventListener('keydown', (event) => {
+    const isPaste = matchesKeybinding(event, 'paste');
+    if (!isPaste) {
+      return;
+    }
+    const activeElement = document.activeElement;
+    if (isNonTerminalEditableControl(activeElement)) {
+      return;
+    }
+    if (terminalPasteFallbackTimer) {
+      clearTimeout(terminalPasteFallbackTimer);
+    }
+    terminalPasteFallbackTimer = setTimeout(() => {
+      terminalPasteFallbackTimer = null;
+      pasteClipboardToTerminal().catch((error) => {
+        showDiagnostic(`terminal paste fallback failed: ${error}`);
+      });
+      focusTerminalInput();
+    }, 120);
+  }, true);
+
+  const handleTerminalPaste = (event) => {
+    if (terminalPasteFallbackTimer) {
+      clearTimeout(terminalPasteFallbackTimer);
+      terminalPasteFallbackTimer = null;
+    }
+    const activeElement = document.activeElement;
+    if (isNonTerminalEditableControl(activeElement)) {
+      return;
+    }
     const text = event.clipboardData?.getData('text/plain') || '';
     if (!text) {
+      // Some WebKitGTK clipboard events intentionally omit clipboardData.
+      // Read through the same browser-first fallback path as the keyboard shortcut.
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      pasteClipboardToTerminal().catch((error) => {
+        showDiagnostic(`terminal paste failed: ${error}`);
+      });
       return;
     }
     event.preventDefault();
+    // xterm.js also listens for paste below this capture listener. The terminal
+    // must receive the native payload exactly once through sendTerminalInput().
+    event.stopImmediatePropagation();
     sendTerminalInput(normalizePasteText(text), 'paste');
-  });
+  };
+  // Capture at the window so paste still works if a visual layer displaced focus.
+  window.addEventListener('paste', handleTerminalPaste, true);
 
   terminalElement.addEventListener('contextmenu', (event) => {
     event.preventDefault();
@@ -604,9 +885,7 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
-    const isNewWindowShortcut =
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'n') ||
-      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'n');
+    const isNewWindowShortcut = matchesKeybinding(event, 'newWindow');
     if (isNewWindowShortcut) {
       event.preventDefault();
       event.stopPropagation();
@@ -614,9 +893,7 @@ function installTerminalPasteHandlers() {
       return;
     }
 
-    const isArrangeShortcut =
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 't') ||
-      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 't');
+    const isArrangeShortcut = matchesKeybinding(event, 'tile');
     if (isArrangeShortcut) {
       event.preventDefault();
       event.stopPropagation();
@@ -626,9 +903,27 @@ function installTerminalPasteHandlers() {
       return;
     }
 
-    const isCloseAllShortcut =
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'x') ||
-      (event.metaKey && event.shiftKey && event.key.toLowerCase() === 'x');
+    const isBroadcastShortcut = matchesKeybinding(event, 'broadcast');
+    if (isBroadcastShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      openTerminalBroadcastDialog().catch((error) => showDiagnostic(`terminal broadcast dialog failed: ${error}`));
+      return;
+    }
+
+    const isKillShortcut = matchesKeybinding(event, 'kill');
+    if (isKillShortcut) {
+      event.preventDefault();
+      event.stopPropagation();
+      window.fpasoterm.killTerminal().then(() => {
+        showDiagnostic('terminal kill requested');
+      }).catch((error) => {
+        showDiagnostic(`terminal kill failed: ${error}`);
+      });
+      return;
+    }
+
+    const isCloseAllShortcut = matchesKeybinding(event, 'closeAll');
     if (isCloseAllShortcut) {
       event.preventDefault();
       event.stopPropagation();
@@ -636,30 +931,21 @@ function installTerminalPasteHandlers() {
       return;
     }
 
-    const isCopyShortcut =
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'c') ||
-      (event.metaKey && event.key.toLowerCase() === 'c');
+    const isCopyShortcut = matchesKeybinding(event, 'copy');
     if (isCopyShortcut && selectedClipboardText()) {
       event.preventDefault();
-      if (requestTerminalCopyEvent()) {
-        return;
-      }
       copyTerminalSelection().catch((error) => {
         showDiagnostic(`terminal copy failed: ${error}`);
       });
       return;
     }
 
-    const isPasteShortcut =
-      (event.ctrlKey && event.shiftKey && event.key.toLowerCase() === 'v') ||
-      (event.metaKey && event.key.toLowerCase() === 'v');
+    const isPasteShortcut = matchesKeybinding(event, 'paste');
     if (!isPasteShortcut) {
       return;
     }
-    event.preventDefault();
-    pasteClipboardToTerminal().catch((error) => {
-      showDiagnostic(`terminal paste failed: ${error}`);
-    });
+    // The capture handler schedules a fallback. Do not cancel the native paste
+    // action here or ChromeOS cannot provide event.clipboardData to the terminal.
   });
 
   window.addEventListener('copy', (event) => {
@@ -732,6 +1018,7 @@ async function loadRuntimeConfig() {
   try {
     const runtimeConfig = await window.fpasoterm.getConfig();
     appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
+    activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
     if (runtimeConfig.diagnostics?.opaqueTerminal) {
       appConfig = mergeConfig(appConfig, {
@@ -747,6 +1034,7 @@ async function loadRuntimeConfig() {
     imeRepeatedTextWindowMs =
       Number(appConfig.ime.repeatedTextWindowMs) || fallbackConfig.ime.repeatedTextWindowMs;
     imeDuplicateGuardEnabled = appConfig.ime.duplicateGuard !== false;
+    applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
     showDiagnostic(
       `renderer resolved config title=${appConfig.window?.title || ''} titlebarColor=${appConfig.window?.titlebarColor || ''} shell=${appConfig.terminal?.shell || ''}`,
@@ -850,6 +1138,8 @@ function applyTerminalAppearance() {
 // Applies a freshly loaded config to the live window and terminal.
 async function applyRuntimeConfig(runtimeConfig) {
   appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
+  activeConfigPath = String(runtimeConfig.configPath || activeConfigPath);
+  applyKeybindingLabels();
   pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
   imeDuplicateWindowMs = Number(appConfig.ime.duplicateWindowMs) || fallbackConfig.ime.duplicateWindowMs;
   imeRepeatedTextWindowMs =
@@ -1082,6 +1372,29 @@ function createTerminal() {
   }
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
+  const imageConfig = appConfig.terminal?.images || {};
+  // ImageAddon can stall the current Tauri/WebKitGTK WebView on ChromeOS.
+  // Keep the requested settings for future diagnostics, but do not load it.
+  const graphicsEnabled = false;
+  if (imageConfig.enabled === true) {
+    showDiagnostic('terminal graphics are disabled in this build because ImageAddon can block input');
+  }
+  if (graphicsEnabled && window.ImageAddon?.ImageAddon) {
+    imageAddon = new ImageAddon.ImageAddon({
+      kittySupport: imageConfig.kittySupport === true,
+      kittySizeLimit: Number(imageConfig.kittySizeLimit) || 32 * 1024 * 1024,
+      storageLimit: Number(imageConfig.storageLimit) || 64,
+      sixelSupport: imageConfig.sixelSupport === true,
+      iipSupport: imageConfig.iipSupport === true,
+    });
+    term.loadAddon(imageAddon);
+    // Image layers are added asynchronously. Keep IME and keyboard input on xterm.
+    if (typeof imageAddon.onImageAdded === 'function') {
+      imageAddon.onImageAdded(() => requestAnimationFrame(focusTerminalInput));
+    }
+  } else if (graphicsEnabled) {
+    showDiagnostic('xterm image addon is unavailable; terminal graphics are disabled');
+  }
   term.open(terminalElement);
   installXtermOverlayPruner();
   logXtermCanvasDiagnostics();
@@ -1107,6 +1420,7 @@ async function loadPlugins() {
   window.fpasotermPluginApi = Object.freeze({
     terminal: term,
     fitAddon,
+    imageAddon,
     config: appConfig,
     log: (message) => showDiagnostic(`plugin: ${message}`),
   });
@@ -1185,7 +1499,7 @@ async function refreshTerminalLogControl() {
   const status = await window.fpasoterm.terminalLogStatus();
   terminalLogToggleButton.hidden = status.enabled === false;
   terminalLogShowButton.hidden = status.enabled === false;
-  terminalLogToggleButton.textContent = status.active ? 'Log Stop (^S)' : 'Log Start (^S)';
+  terminalLogToggleButton.textContent = `${status.active ? 'Log Stop' : 'Log Start'} (${keybindingActionLabel('logToggle')})`;
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
   terminalLogStatusElement.hidden = !status.active;
 }
@@ -1441,6 +1755,103 @@ function showTerminalOutputLogFromMenu() {
   }).finally(() => setWindowMenuOpen(false));
 }
 
+// Renders checkboxes for the live local terminals that can receive broadcast input.
+function renderTerminalBroadcastTargets(targets) {
+  terminalBroadcastTargets = Array.isArray(targets) ? targets : [];
+  terminalBroadcastTargetList.replaceChildren();
+  for (const target of terminalBroadcastTargets) {
+    const label = document.createElement('label');
+    const checkbox = document.createElement('input');
+    checkbox.type = 'checkbox';
+    checkbox.checked = true;
+    checkbox.dataset.instanceId = target.id;
+    checkbox.addEventListener('change', refreshTerminalBroadcastSyncOption);
+    label.append(checkbox, document.createTextNode(`${target.title} (pid ${target.pid})`));
+    terminalBroadcastTargetList.append(label);
+  }
+  if (!terminalBroadcastTargets.length) {
+    terminalBroadcastTargetList.textContent = 'No running local windows were found.';
+  }
+  refreshTerminalBroadcastSyncOption();
+}
+
+// Returns selected local IDs. An empty list deliberately means every instance.
+function selectedTerminalBroadcastTargetIds() {
+  const selected = [...terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]:checked')]
+    .map((checkbox) => checkbox.dataset.instanceId)
+    .filter(Boolean);
+  return selected.length === terminalBroadcastTargets.length ? [] : selected;
+}
+
+// Allows sync delivery only when every local target is selected, so a local
+// subset cannot unexpectedly be interpreted as a remote target subset.
+function refreshTerminalBroadcastSyncOption() {
+  const selectedCount = terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]:checked').length;
+  const allSelected = terminalBroadcastTargets.length > 0 && selectedCount === terminalBroadcastTargets.length;
+  const canSync = syncEnabled() && allSelected;
+  terminalBroadcastSync.disabled = !canSync;
+  terminalBroadcastSyncLabel.hidden = !syncEnabled();
+  if (!canSync) {
+    terminalBroadcastSync.checked = false;
+  }
+  terminalBroadcastSyncLabel.title = allSelected
+    ? ''
+    : 'Select all local windows before including the synced channel.';
+}
+
+// Shows a focused input dialog for selecting local targets and sending one command.
+async function openTerminalBroadcastDialog() {
+  if (!terminalBroadcastDialog || !terminalBroadcastText) {
+    showDiagnostic('terminal broadcast dialog is unavailable');
+    return;
+  }
+  setWindowMenuOpen(false);
+  terminalBroadcastSync.checked = false;
+  terminalBroadcastTargetList.textContent = 'Loading local windows...';
+  terminalBroadcastDialog.hidden = false;
+  terminalBroadcastText.focus({ preventScroll: true });
+  try {
+    renderTerminalBroadcastTargets(await window.fpasoterm.terminalBroadcastTargets());
+  } catch (error) {
+    terminalBroadcastTargets = [];
+    terminalBroadcastTargetList.textContent = `Could not list local windows: ${error}`;
+    refreshTerminalBroadcastSyncOption();
+  }
+}
+
+// Hides the broadcast dialog and restores direct terminal input focus.
+function closeTerminalBroadcastDialog() {
+  if (terminalBroadcastDialog) {
+    terminalBroadcastDialog.hidden = true;
+  }
+  focusTerminalInput();
+}
+
+// Writes the dialog text to local windows and optionally the configured sync channel.
+async function sendTerminalBroadcast() {
+  const rawText = String(terminalBroadcastText?.value || '');
+  const text = rawText ? `${normalizePasteText(rawText).replace(/\r+$/, '')}\r` : '';
+  if (!text) {
+    showDiagnostic('terminal broadcast skipped: input is empty');
+    terminalBroadcastText?.focus({ preventScroll: true });
+    return;
+  }
+  const selectedCount = terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]:checked').length;
+  if (!selectedCount) {
+    showDiagnostic('terminal broadcast skipped: select at least one local window');
+    return;
+  }
+  const targetInstanceIds = selectedTerminalBroadcastTargetIds();
+  const result = await window.fpasoterm.broadcastTerminal(
+    text,
+    Boolean(terminalBroadcastSync?.checked),
+    targetInstanceIds,
+  );
+  showDiagnostic(result.message || `terminal broadcast requested bytes=${text.length}`);
+  terminalBroadcastText.value = '';
+  closeTerminalBroadcastDialog();
+}
+
 // Starts terminal output logging to the configured or requested file.
 async function startTerminalOutputLog(path = '') {
   const status = await window.fpasoterm.startTerminalLog(path);
@@ -1483,17 +1894,20 @@ async function showKeyboardShortcutsHelp() {
   diagnosticsTitleElement.textContent = 'Keyboard Shortcuts';
   diagnosticsElement.value = [
     `fpasoterm ${version}`,
+    `Config: ${activeConfigPath || 'unknown'}`,
     '',
-    'Ctrl+Shift+L  Open the window menu at Log actions',
-    'Ctrl+Shift+S  Start or stop terminal output logging',
-    'Ctrl+Shift+P  Show terminal output logs',
-    'Ctrl+Shift+C  Copy selected terminal or log text',
-    'Ctrl+Shift+V  Paste clipboard text into the terminal',
-    'Ctrl+Shift+M  Open or close the window menu',
-    'Ctrl+Shift+H  Show this keyboard shortcut list',
-    'Ctrl+Shift+N  Open a new terminal window',
-    'Ctrl+Shift+T  Tile all fpasoterm windows',
-    'Ctrl+Shift+X  Close all fpasoterm windows after confirmation',
+    `${keybindingLabel('logMenu')}  Open the window menu at Log actions`,
+    `${keybindingLabel('logToggle')}  Start or stop terminal output logging`,
+    `${keybindingLabel('logShow')}  Show terminal output logs`,
+    `${keybindingLabel('copy')}  Copy selected terminal or log text`,
+    `${keybindingLabel('paste')}  Paste clipboard text into the terminal`,
+    `${keybindingLabel('menu')}  Open or close the window menu`,
+    `${keybindingLabel('help')}  Show this keyboard shortcut list`,
+    `${keybindingLabel('newWindow')}  Open a new terminal window`,
+    `${keybindingLabel('broadcast')}  Broadcast input to local windows or the synced channel`,
+    `${keybindingLabel('kill')}  Kill the running terminal command and keep its shell open`,
+    `${keybindingLabel('tile')}  Tile all fpasoterm windows`,
+    `${keybindingLabel('closeAll')}  Close all fpasoterm windows after confirmation`,
     'Escape        Close the current menu or panel',
   ].join('\n');
   diagnosticsElement.scrollTop = 0;
@@ -1541,7 +1955,7 @@ function renderTerminalLogPreview(preview) {
     lines.push(`path: ${preview.path}`);
   }
   if (preview.bytes === 0) {
-    lines.push('No terminal output has been captured yet. Use Log Start/Stop or Ctrl+Shift+S, run commands, then use Log Show or Ctrl+Shift+P.');
+    lines.push(`No terminal output has been captured yet. Use Log Start/Stop or ${keybindingLabel('logToggle')}, run commands, then use Log Show or ${keybindingLabel('logShow')}.`);
   }
   if (preview.truncated) {
     lines.push('The log is truncated in this view; showing the latest part only.');
@@ -1715,38 +2129,81 @@ terminalPasteButton.addEventListener('click', () => {
   }).finally(() => setWindowMenuOpen(false));
 });
 
-document.addEventListener('keydown', (event) => {
-  if (!event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey) {
-    return;
-  }
+// Kills the active terminal command while preserving the interactive shell.
+terminalKillButton.addEventListener('click', () => {
+  window.fpasoterm.killTerminal().then(() => {
+    showDiagnostic('terminal kill requested');
+  }).catch((error) => {
+    showDiagnostic(`terminal kill failed: ${error}`);
+  }).finally(() => setWindowMenuOpen(false));
+});
 
-  const key = event.key.toLowerCase();
-  if (key === 'l') {
+terminalBroadcastButton.addEventListener('click', () => {
+  openTerminalBroadcastDialog().catch((error) => showDiagnostic(`terminal broadcast dialog failed: ${error}`));
+});
+
+terminalBroadcastSelectAllButton.addEventListener('click', () => {
+  terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = true;
+  });
+  refreshTerminalBroadcastSyncOption();
+});
+
+terminalBroadcastSelectNoneButton.addEventListener('click', () => {
+  terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
+    checkbox.checked = false;
+  });
+  refreshTerminalBroadcastSyncOption();
+});
+
+terminalBroadcastSendButton.addEventListener('click', () => {
+  sendTerminalBroadcast().catch((error) => {
+    showDiagnostic(`terminal broadcast failed: ${error}`);
+    terminalBroadcastText?.focus({ preventScroll: true });
+  });
+});
+
+terminalBroadcastCancelButton.addEventListener('click', () => {
+  closeTerminalBroadcastDialog();
+});
+
+terminalBroadcastDialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeTerminalBroadcastDialog();
+  } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+    event.preventDefault();
+    sendTerminalBroadcast().catch((error) => showDiagnostic(`terminal broadcast failed: ${error}`));
+  }
+});
+
+document.addEventListener('keydown', (event) => {
+  if (matchesKeybinding(event, 'logMenu')) {
     event.preventDefault();
     const open = windowMenuItems?.hidden !== false;
     setWindowMenuOpen(open, terminalLogToggleButton);
     return;
   }
 
-  if (key === 'm') {
+  if (matchesKeybinding(event, 'menu')) {
     event.preventDefault();
     setWindowMenuOpen(windowMenuItems?.hidden !== false);
     return;
   }
 
-  if (key === 'h') {
+  if (matchesKeybinding(event, 'help')) {
     event.preventDefault();
     showKeyboardShortcutsHelp().catch((error) => showDiagnostic(`help failed: ${error}`));
     return;
   }
 
-  if (key === 's') {
+  if (matchesKeybinding(event, 'logToggle')) {
     event.preventDefault();
     toggleTerminalOutputLog();
     return;
   }
 
-  if (key === 'p') {
+  if (matchesKeybinding(event, 'logShow')) {
     event.preventDefault();
     showTerminalOutputLogFromMenu();
   }
@@ -2092,16 +2549,7 @@ async function initialize() {
   });
 
   Promise.resolve(window.fpasoterm.onTerminalData((data) => {
-    const normalizedData = normalizeJapaneseTerminalText(data);
-    showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
-    processRuntimeOsc(normalizedData);
-    mirrorTerminalData(normalizedData);
-    term.write(normalizedData, () => {
-      removeXtermVisualOverlays();
-      logXtermCanvasDiagnostics();
-      logXtermTextDiagnostics();
-      showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
-    });
+    queueTerminalOutput(data);
   })).catch((error) => {
     showDiagnostic(`terminal data listener failed: ${error}`);
   });
@@ -2128,7 +2576,7 @@ async function initialize() {
       const message =
         eventName.startsWith('composition')
           ? `renderer ${eventName} data=${event.data}`
-          : `renderer ${eventName} key=${event.key} code=${event.code} composing=${event.isComposing}`;
+          : `renderer ${eventName} key=${event.key} code=${event.code} ctrl=${event.ctrlKey} alt=${event.altKey} shift=${event.shiftKey} meta=${event.metaKey} composing=${event.isComposing}`;
       showDiagnostic(message);
     });
   }
@@ -2143,7 +2591,7 @@ async function initialize() {
   await afterNextPaint();
   fitAddon.fit();
   try {
-    await window.fpasoterm.startTerminal({ cols: term.cols, rows: term.rows });
+    await window.fpasoterm.startTerminal(terminalPtySize());
     await refreshTerminalLogControl();
     await afterNextPaint();
     fitAndResize();

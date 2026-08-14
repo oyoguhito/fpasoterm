@@ -34,6 +34,14 @@ const defaultConfig = Object.freeze({
     scrollback: 1000,
     termName: 'xterm-256color',
     shell: '',
+    images: {
+      enabled: false,
+      kittySupport: false,
+      kittySizeLimit: 33554432,
+      storageLimit: 64,
+      sixelSupport: false,
+      iipSupport: false,
+    },
     theme: {
       background: 'rgba(16, 19, 23, 0.80)',
       foreground: '#e8edf2',
@@ -62,6 +70,21 @@ const defaultConfig = Object.freeze({
     duplicateWindowMs: 800,
     repeatedTextWindowMs: 140,
   },
+  keybindings: {
+    prefix: 'Mod+Shift',
+    logMenu: 'L',
+    logToggle: 'S',
+    logShow: 'P',
+    copy: 'C',
+    paste: 'V',
+    menu: 'M',
+    help: 'H',
+    newWindow: 'N',
+    broadcast: 'B',
+    kill: 'K',
+    tile: 'T',
+    closeAll: 'X',
+  },
   plugins: {
     enabled: [],
   },
@@ -72,6 +95,8 @@ const defaultConfig = Object.freeze({
     channel: 'default',
     diagnostics: true,
     maxBytes: 1048576,
+    commands: true,
+    commandTtlSeconds: 60,
   },
   logging: {
     enabled: true,
@@ -88,6 +113,14 @@ function platformDefaultConfig(platform = process.platform, architecture = proce
     return mergeConfig(defaultConfig, { terminal: { fontSize: 12 } });
   }
   return defaultConfig;
+}
+
+// Returns the settings persisted in user config files. Image protocol options
+// remain internal until their renderer support is stable.
+function writableConfigDefaults(platform = process.platform, architecture = process.arch) {
+  const defaults = mergeConfig({}, platformDefaultConfig(platform, architecture));
+  delete defaults.terminal.images;
+  return defaults;
 }
 
 // Writes the default TOML with comments so users can copy it to config.toml
@@ -139,6 +172,9 @@ termName = "xterm-256color"
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
 
+# [terminal.images] is reserved for a future stable renderer. Current builds
+# ignore it, so do not add this section to config.toml.
+
 # Terminal color palette.
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
@@ -168,6 +204,25 @@ duplicateGuard = true
 duplicateWindowMs = 800
 repeatedTextWindowMs = 140
 
+# Keybindings use Mod for Ctrl on Windows/Linux and Cmd on macOS.
+# Set prefix = "Ctrl+Alt" on Windows when Ctrl+Shift is unavailable.
+# Individual values may be a key such as "N" or a full shortcut such as
+# "Ctrl+Alt+KeyN". Use KeyN-style values for physical-key bindings.
+[keybindings]
+prefix = "Mod+Shift"
+logMenu = "L"
+logToggle = "S"
+logShow = "P"
+copy = "C"
+paste = "V"
+menu = "M"
+help = "H"
+newWindow = "N"
+broadcast = "B"
+kill = "K"
+tile = "T"
+closeAll = "X"
+
 # Plugins are relative to ~/.config/fpasoterm/User/.
 # Example: enabled = ["plugins/hello.ts", "plugins/theme.ts"]
 [plugins]
@@ -183,6 +238,10 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
+# commands enables explicitly requested broadcast input through this folder.
+commands = true
+# Command files expire quickly so they are not executed after a delayed sync.
+commandTtlSeconds = 60
 
 # Terminal output logging records readable PTY output with control sequences
 # removed when started from the titlebar or an OSC 777 command.
@@ -246,6 +305,47 @@ function mergeConfig(base, override) {
     }
   }
   return merged;
+}
+
+// Lists default leaf settings that are absent from a user configuration.
+function missingConfigKeys(defaults, config, prefix = '') {
+  const missing = [];
+  for (const [key, defaultValue] of Object.entries(defaults)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    const hasValue = isObject(config) && Object.hasOwn(config, key);
+    const configuredValue = hasValue ? config[key] : undefined;
+    if (isObject(defaultValue)) {
+      missing.push(...missingConfigKeys(defaultValue, configuredValue, path));
+    } else if (!hasValue) {
+      missing.push(path);
+    }
+  }
+  return missing;
+}
+
+// Removes settings that are not part of the current supported configuration.
+function pruneUnsupportedConfig(defaults, config, prefix = '') {
+  if (!isObject(config)) {
+    return { config, removed: [] };
+  }
+
+  const pruned = {};
+  const removed = [];
+  for (const [key, value] of Object.entries(config)) {
+    const path = prefix ? `${prefix}.${key}` : key;
+    if (!Object.hasOwn(defaults, key)) {
+      removed.push(path);
+      continue;
+    }
+    if (isObject(defaults[key]) && isObject(value)) {
+      const nested = pruneUnsupportedConfig(defaults[key], value, path);
+      pruned[key] = nested.config;
+      removed.push(...nested.removed);
+    } else {
+      pruned[key] = value;
+    }
+  }
+  return { config: pruned, removed };
 }
 
 // Drops config sections that were removed from the supported schema.
@@ -470,6 +570,10 @@ module.exports = {
   readWindowState,
   writeWindowState,
   loadConfig,
+  mergeConfig,
+  missingConfigKeys,
+  pruneUnsupportedConfig,
   platformDefaultConfig,
+  writableConfigDefaults,
   windowStatePath,
 };

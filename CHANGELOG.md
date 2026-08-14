@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.5.0
+
+- Added Kitty graphics protocol rendering through the xterm.js image addon, with bounded image size and storage settings under `[terminal.images]`.
+- Added `Broadcast (^B)` / `Ctrl+Shift+B` to select local windows by title/PID and send a command only to those terminals.
+- Added an explicit, short-lived trusted sync-folder broadcast channel for already-running remote fpasoterm instances sharing the same sync path and channel.
+- Added the titlebar title to automatic terminal output log filenames so logs from multiple windows are distinguishable.
+- Forwarded the terminal pixel dimensions to the PTY for Kitty-aware applications and kept `Ctrl+C` available as an interrupt fallback if a graphics layer displaces terminal focus.
+- Limited experimental Kitty graphics to the official xterm.js image addon's direct-transfer (`t=d`) support; local-file and animation extensions remain unsupported.
+- Disabled the experimental image addon by default after WebKitGTK image streams could block terminal input, and made `--dev` use a static-asset debug binary instead of a localhost development server.
+- Fixed terminal paste handling so xterm's hidden IME textarea is treated as terminal focus and `Ctrl+Shift+V` reads the host clipboard.
+
 ## 1.4.7
 
 - Restored the macOS CLI wrapper at `~/.local/bin/fpasoterm`, kept the config-directory shim for compatibility, and placed the conventional user bin directory first in child-shell `PATH`.

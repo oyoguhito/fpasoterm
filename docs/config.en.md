@@ -6,6 +6,9 @@ fpasoterm reads user-editable settings from:
 ~/.config/fpasoterm/User/config.toml
 ```
 
+On Windows, `~` is the current user's profile directory, so the default path is
+`%USERPROFILE%\.config\fpasoterm\User\config.toml`.
+
 On launch, fpasoterm writes or refreshes the full default example at:
 
 ```text
@@ -20,6 +23,76 @@ Use another config file for one launch:
 fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm -c ~/.config/fpasoterm/User/work.toml
 ```
+
+Open `Help` from the window menu to see the absolute path of the configuration
+file currently used by that window. This also reflects a runtime config file
+applied through `OSC 777;config=...`.
+
+## Applying changes
+
+fpasoterm reads `config.toml` when each window process starts. The launcher
+passes that resolved configuration to the native process as an in-memory JSON
+snapshot; it is not a file cache and an already-running window does not watch
+for TOML changes. Close and reopen the affected window after editing the file.
+This includes `[keybindings]`: shortcut labels and bindings are resolved at
+startup, not while the TOML file is being edited.
+
+```mermaid
+flowchart TD
+  U["User TOML<br/>~/.config/fpasoterm/User/config.toml"]
+  X["Generated example<br/>config.toml.example"]
+  S["Saved bounds<br/>window-state.json"]
+  N["Node launcher<br/>bin/fpasoterm"]
+  E["Embedded defaults<br/>src-tauri/default-config.toml"]
+  D["Direct packaged binary<br/>fpasoterm.exe / fpasoterm"]
+  J["FPASOTERM_RUNTIME_CONFIG_JSON<br/>one-process snapshot"]
+  W["Native window and renderer"]
+  T["Terminal shell runs fpasoterm"]
+
+  U --> N
+  N --> X
+  S -. saved width and height .-> N
+  N --> J --> W
+  U --> D
+  E --> D
+  S -. saved width and height .-> D
+  D --> W
+  W --> T --> D
+  J -. inherited native snapshot is ignored by child .-> D
+```
+
+`FPASOTERM_RUNTIME_CONFIG_JSON` is never written to disk and is not a cache of
+an old TOML file. On every new launch, the Node launcher reads the selected
+`config.toml` and creates a new JSON snapshot; the direct packaged binary reads
+the selected TOML itself. A missing or older partial TOML is still read and
+merged with current defaults. `config.toml.example` is refreshed separately and
+does not change the existing user `config.toml`.
+
+Reading configuration never rewrites `config.toml` or `window-state.json`.
+Remembered bounds continue to win over TOML width and height only when
+`window.rememberBounds = true`; `--reset-window-state` is the explicit command
+that removes that saved size.
+
+To apply a file to the current terminal session without closing it, write this
+OSC sequence from the terminal. Use the absolute path shown in `Help` when in
+doubt.
+
+```sh
+config_path="$HOME/.config/fpasoterm/User/config.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+In PowerShell:
+
+```powershell
+$configPath = Join-Path $HOME '.config\fpasoterm\User\config.toml'
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
+```
+
+`window.width` and `window.height` are additionally overridden by the saved
+`window-state.json` while `window.rememberBounds = true`. Run
+`fpasoterm --reset-window-state`, then open a new window, when testing a size
+change from `config.toml`.
 
 Temporarily override the configured window size:
 
@@ -74,6 +147,29 @@ launch. This command exits without opening a window. With `--config <path>`,
 only that selected config file is renamed and reset; the standard local window
 state is still cleared.
 
+Add settings introduced in a newer fpasoterm version without replacing your
+existing values:
+
+```sh
+fpasoterm --update-config
+```
+
+The command writes a complete normalized `config.toml`, preserves existing
+supported values, and creates `config.toml.backup-<timestamp>` before writing.
+It does not change `window-state.json`. Use `--config <path>` to update another
+file. The Node launcher and direct packaged binary both support this command.
+
+Remove settings that no longer belong to the supported configuration schema:
+
+```sh
+fpasoterm --prune-config
+```
+
+This also creates a backup and leaves supported values intact. It removes every
+unknown setting, including custom keys intended for third-party plugins, so use
+it only after checking the backup. Use `--update-config` afterward when both
+adding current defaults and removing retired settings is desired.
+
 Print the resolved configuration and plugin status:
 
 ```sh
@@ -121,6 +217,9 @@ scrollback = 1000
 termName = "xterm-256color"
 shell = ""
 
+# [terminal.images] is reserved for a future stable renderer.
+# Current builds ignore this section. Do not add it to config.toml.
+
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.80)"
 foreground = "#e8edf2"
@@ -143,6 +242,75 @@ brightMagenta = "#e3c3ff"
 brightCyan = "#9de9ea"
 brightWhite = "#ffffff"
 
+[keybindings]
+# Mod means Ctrl on Windows/Linux and Cmd on macOS.
+prefix = "Mod+Shift"
+# A one-letter value inherits prefix. A full value overrides it for one action.
+# Physical-key example: newWindow = "Ctrl+Alt+KeyN"
+logMenu = "L"
+logToggle = "S"
+logShow = "P"
+copy = "C"
+paste = "V"
+menu = "M"
+help = "H"
+newWindow = "N"
+broadcast = "B"
+kill = "K"
+tile = "T"
+closeAll = "X"
+
+### Key names
+
+`prefix` accepts only modifiers separated by `+`: `Ctrl` or `Control`, `Alt` or
+`Option`, `Shift`, `Meta` or `Cmd` or `Command`, and `Mod`. `Mod` means `Ctrl`
+on Windows/Linux and `Cmd` on macOS. Modifier spelling is case-insensitive.
+Action keys such as `Escape` cannot be part of `prefix`.
+
+Every action accepts one action key, which inherits `prefix`, or a complete
+shortcut such as `Ctrl+Shift+KeyN`. The following names are supported:
+
+| Type | Names | Matching |
+| --- | --- | --- |
+| Characters | `A`-`Z`, `0`-`9`, `-` | Browser key value; keyboard-layout dependent |
+| Named keys | `Tab`, `Enter`, `Escape`, `Space`, `Backspace`, `Delete`, `Insert`, `Home`, `End`, `PageUp`, `PageDown` | `Space` and physical forms use keyboard code; other names use key value |
+| Function/cursor | `F1`-`F24`, `ArrowUp`, `ArrowDown`, `ArrowLeft`, `ArrowRight` | Physical keyboard code |
+| Physical keys | `KeyA`-`KeyZ`, `Digit0`-`Digit9`, `Space`, `Numpad0`-`Numpad9`, `NumpadEnter`, `NumpadAdd`, `NumpadSubtract`, `NumpadMultiply`, `NumpadDivide`, `NumpadDecimal` | Physical keyboard code |
+| Japanese IME keys | `ZenkakuHankaku`, `KanaMode`, `KanjiMode` | Browser key value; keyboard and OS dependent |
+
+`Tab`, `Escape`, `Delete`, and `Backspace` are available. For example,
+`kill = "Escape"` inherits the configured prefix, and
+`help = "Ctrl+Shift+F1"` applies a full shortcut only to Help. `Space` is
+available through the literal name `Space`, for example `broadcast = "Space"`.
+Use `KeyN` and `Digit1` for layout-independent ordinary keys.
+
+`Fn` is not available as an action or modifier. It is normally handled by the
+keyboard firmware and does not generate an independent browser key event.
+`Fn+F1` can be configured as `F1` only when the operating system exposes it as
+an F1 event. Japanese IME keys may be intercepted by the IME or OS before
+fpasoterm receives them, so they are not recommended for application actions.
+Likewise, OS-reserved combinations such as `Alt+Tab`, `Ctrl+Alt+Tab`, and some
+function keys may not be delivered. Do not assign one full shortcut to multiple
+fpasoterm actions.
+
+`Ctrl+X` is a valid complete shortcut, for example `closeAll = "Ctrl+X"`.
+`Ctrl+X` followed by another key such as `N` is an ordered key chord, not one
+shortcut; key chords are not supported by the current configuration format.
+
+On Windows, do not use `Ctrl+N` or `Ctrl+Shift+N` to test fpasoterm: WebView or
+the IME can consume them before the renderer receives them. Use an explicit
+non-reserved test binding instead:
+
+```toml
+[keybindings]
+newWindow = "Ctrl+F2"
+```
+
+Run with `--debug-keys --console-diagnostics`. A working shortcut reports both
+`ctrl=true` on the F2 event and `shortcut matched action=newWindow spec=Ctrl+F2`.
+If it reports `ctrl=false`, the operating system did not deliver the modifier
+and this cannot be corrected from the renderer.
+
 [ime]
 duplicateGuard = true
 duplicateWindowMs = 800
@@ -158,6 +326,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
+commands = true
+commandTtlSeconds = 60
 
 [logging]
 enabled = true
@@ -169,21 +339,36 @@ maxBytes = 10485760
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` puts Japanese-capable fonts first so half-width kana and CJK characters are preferred during rendering. `minimumContrastRatio` is enabled by default so ANSI foreground colors that are too close to the dark terminal background remain readable. `rescaleOverlappingGlyphs` is enabled by default to reduce CJK glyph clipping and overlap. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` puts Japanese-capable fonts first so half-width kana and CJK characters are preferred during rendering. `minimumContrastRatio` is enabled by default so ANSI foreground colors that are too close to the dark terminal background remain readable. `rescaleOverlappingGlyphs` is enabled by default to reduce CJK glyph clipping and overlap. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+- `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Restart or apply a runtime config file to refresh the menu labels and bindings.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
-- `sync`: optional sync-folder integration for diagnostics. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. See [Sync Folder](sync.en.md).
-- `logging`: terminal output logging. The hamburger menu contains `Log Start (^S)` / `Log Stop (^S)` and `Log Show (^P)`. `Ctrl+Shift+L` opens that menu at the log actions; `Ctrl+Shift+S` toggles logging directly, and `Ctrl+Shift+P` opens a selector for captured logs. Logging writes readable terminal output with control sequences removed to a local file. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
+- `sync`: optional sync-folder integration for diagnostics and explicitly requested broadcast commands. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. `commands` permits short-lived shared commands and `commandTtlSeconds` limits their lifetime. See [Sync Folder](sync.en.md).
+- `logging`: terminal output logging. The hamburger menu contains `Log Start (^S)` / `Log Stop (^S)` and `Log Show (^P)`. `Ctrl+Shift+L` opens that menu at the log actions; `Ctrl+Shift+S` toggles logging directly, and `Ctrl+Shift+P` opens a selector for captured logs. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
-On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. On macOS, fpasoterm regenerates the conventional `~/.local/bin/fpasoterm` command for the currently running app bundle and places `~/.local/bin` first in `PATH`; it forwards every argument unchanged. The previous `~/.config/fpasoterm/bin/fpasoterm` shim is also refreshed for compatibility. This allows `fpasoterm --help`, `--list`, `--close`, and other direct-binary commands to run inside the opened terminal and preserves the command path used by earlier releases. A nested macOS GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional. Options documented as Node-launcher-only, unknown options such as `--hoge` or `-?`, and options with missing values are rejected with help by a packaged binary instead of opening an unrelated GUI window. The in-app `Help (^H)` panel displays the version compiled into the currently running binary even when terminal `--version` output cannot be inspected.
+On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. On macOS, fpasoterm regenerates the conventional `~/.local/bin/fpasoterm` command for the currently running app bundle and places `~/.local/bin` first in `PATH`; it forwards every argument unchanged. The previous `~/.config/fpasoterm/bin/fpasoterm` shim is also refreshed for compatibility. This allows `fpasoterm --help`, `--list`, `--close`, and other direct-binary commands to run inside the opened terminal and preserves the command path used by earlier releases. A nested macOS GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional. Options documented as Node-launcher-only, unknown options such as `--hoge` or `-?`, and options with missing values are rejected with help by a packaged binary instead of opening an unrelated GUI window. `--version` and the in-app `Help (^H)` panel display the package version plus the build commit, so same-version contributor and PR builds can be distinguished.
 
 macOS normally keeps an application active after its last window is closed. CLI close requests (`--close` / `-q`) and the in-app Close All action explicitly exit each matching fpasoterm process, so `fpasoterm -q all` also removes fpasoterm from the macOS menu bar.
 
 The running titlebar can be updated from inside the terminal. Standard OSC title changes update the window title, and fpasoterm-specific OSC 777 changes update titlebar appearance.
+
+## Terminal Graphics
+
+Kitty Graphics Protocol, SIXEL, and iTerm inline images are not supported by the current build. The xterm.js image addon can make the current Tauri/WebKitGTK WebView unresponsive on ChromeOS, so it is deliberately not loaded even when `[terminal.images]` is present in `config.toml`.
+
+Do not run `kitten icat`, `chafa --format kitty`, or `chafa --format sixels` in fpasoterm for graphics testing. `kitten icat` reports that graphics are unsupported because fpasoterm keeps `TERM=xterm-256color` and does not answer the Kitty graphics capability query. This is expected and avoids the previously reproduced renderer freeze.
+
+## Broadcast Input
+
+Open the hamburger menu and choose `Broadcast (^B)`, or press `Ctrl+Shift+B`. Select one or more local windows by title and PID, enter one or more commands, then choose `Send`. fpasoterm normalizes line endings and appends Enter before delivering the text only to the selected local fpasoterm windows. This is useful for starting the same tmux, herdr, or diagnostic command in several terminals without affecting unrelated windows.
+
+When every local window is selected and sync is enabled, the dialog exposes `Include synced channel`. This publishes the same short-lived command to every already-running fpasoterm instance using the same sync path and channel. Sync delivery is disabled for a local subset because remote window identities are not shared. Command files expire after `sync.commandTtlSeconds` (60 seconds by default) and an instance ignores commands created before it started.
+
+This feature deliberately has no remote server, OAuth token, or automatic command execution for later launches. A shared sync folder becomes a command channel when this option is used. Use it only with a folder and channel trusted by every participating machine.
 
 The following `printf` examples are for POSIX shells such as `bash`, `dash`, and `fish`. They do not run as-is in Windows PowerShell or cmd.exe.
 

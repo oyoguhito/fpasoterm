@@ -13,9 +13,13 @@ const {
   deleteWindowState,
   discoverPluginFiles,
   loadConfig,
+  mergeConfig,
+  missingConfigKeys,
   readUserConfig,
   resolvePluginSelector,
   platformDefaultConfig,
+  writableConfigDefaults,
+  pruneUnsupportedConfig,
   windowStatePath,
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
@@ -25,14 +29,16 @@ const helpText = `Usage: fpasoterm [options]
 
 Options:
   -h, --help                    Show this help.
-  -v, --version                 Show the fpasoterm version.
+  -v, --version                 Show the version and source commit.
   -l, --list                    List running fpasoterm windows, then exit.
   -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
-  -d, --dev                     Force Tauri dev runtime, ignoring built binaries.
+  -d, --dev                     Force a local debug-binary rebuild and launch.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --update-config           Add missing default settings and back up config.toml, then exit.
+      --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
       --self-update             Update an npm-installed fpasoterm package, then refresh desktop files on Linux.
       --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
@@ -95,6 +101,8 @@ function parseArgs(argv) {
   let setupSync = false;
   let resetWindowState = false;
   let resetConfig = false;
+  let updateConfig = false;
+  let pruneConfig = false;
   let selfUpdate = false;
   let selfUpdateCheckout = false;
   let updateDesktop = false;
@@ -156,6 +164,16 @@ function parseArgs(argv) {
 
     if (arg === '--reset-config' || arg === '-R') {
       resetConfig = true;
+      continue;
+    }
+
+    if (arg === '--update-config') {
+      updateConfig = true;
+      continue;
+    }
+
+    if (arg === '--prune-config') {
+      pruneConfig = true;
       continue;
     }
 
@@ -267,6 +285,8 @@ function parseArgs(argv) {
     setupSync,
     resetWindowState,
     resetConfig,
+    updateConfig,
+    pruneConfig,
     selfUpdate,
     selfUpdateCheckout,
     updateDesktop,
@@ -287,6 +307,8 @@ function validateArgs(argv) {
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
+    '--update-config',
+    '--prune-config',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
@@ -311,9 +333,14 @@ function validateArgs(argv) {
   }
 }
 
-// Prints the package version without starting the desktop process.
+// Prints the package version and the checkout commit without starting the desktop process.
 function printVersion() {
-  console.log(`fpasoterm ${packageJson.version}`);
+  const result = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const commit = result.status === 0 ? result.stdout.trim() : 'unknown';
+  console.log(`fpasoterm ${packageJson.version} (commit ${commit})`);
 }
 
 // Returns the runtime marker directory shared with the native application.
@@ -606,13 +633,62 @@ function resetConfig(options) {
     backupPath = `${targetPath}.backup-${Date.now()}`;
     fs.renameSync(targetPath, backupPath);
   }
-  writeUserConfig(platformDefaultConfig(), targetPath);
+  writeUserConfig(writableConfigDefaults(), targetPath);
   deleteWindowState(windowStatePath());
   console.log(`reset config ${targetPath}`);
   if (backupPath) {
     console.log(`renamed previous config ${backupPath}`);
   }
   console.log(`deleted saved window state ${windowStatePath()}`);
+}
+
+// Adds newly introduced defaults while retaining every existing user value.
+function updateConfig(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const userConfig = readUserConfig(targetPath);
+  const defaults = writableConfigDefaults();
+  const missing = missingConfigKeys(defaults, userConfig);
+  if (missing.length === 0) {
+    console.log(`config already includes all defaults: ${targetPath}`);
+    return;
+  }
+
+  let backupPath = '';
+  if (fs.existsSync(targetPath)) {
+    backupPath = `${targetPath}.backup-${Date.now()}`;
+    fs.copyFileSync(targetPath, backupPath);
+  }
+  writeUserConfig(mergeConfig(defaults, userConfig), targetPath);
+  console.log(`updated ${targetPath}`);
+  console.log(`added ${missing.length} default setting(s)`);
+  if (backupPath) {
+    console.log(`backed up previous config ${backupPath}`);
+  }
+}
+
+// Removes obsolete configuration keys while retaining every supported value.
+function pruneConfigFile(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  if (!fs.existsSync(targetPath)) {
+    console.log(`config does not exist: ${targetPath}`);
+    return;
+  }
+
+  const userConfig = readUserConfig(targetPath);
+  const result = pruneUnsupportedConfig(writableConfigDefaults(), userConfig);
+  if (result.removed.length === 0) {
+    console.log(`config has no unsupported settings: ${targetPath}`);
+    return;
+  }
+
+  const backupPath = `${targetPath}.backup-${Date.now()}`;
+  fs.copyFileSync(targetPath, backupPath);
+  writeUserConfig(result.config, targetPath);
+  console.log(`pruned ${targetPath}`);
+  console.log(`removed ${result.removed.length} unsupported setting(s): ${result.removed.join(', ')}`);
+  console.log(`backed up previous config ${backupPath}`);
 }
 
 // Prints plugin entries with simple status information.
@@ -937,6 +1013,10 @@ function findStampedTauriBinary() {
 
 // Builds the debug binary used by normal source-checkout launches.
 function buildTauriBinary(options) {
+  if (options.dev) {
+    appendLauncherLog('launcher build=forced debug binary');
+    return buildLocalTauriBinary(options);
+  }
   const stampedBinary = findStampedTauriBinary();
   if (stampedBinary) {
     appendLauncherLog(`launcher build=skip stamped binary=${stampedBinary}`);
@@ -951,6 +1031,11 @@ function buildTauriBinary(options) {
   }
 
   appendLauncherLog('launcher build=cargo build');
+  return buildLocalTauriBinary(options);
+}
+
+// Builds the static-asset debug binary without starting a localhost dev server.
+function buildLocalTauriBinary(options) {
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
     env: process.env,
@@ -1019,6 +1104,10 @@ function runtimeEnv(options) {
     ...process.env,
     ...options.env,
     FPASOTERM_RUNTIME_CONFIG_JSON: JSON.stringify(runtimeConfig),
+    // Native processes replace this marker with their own PID. A command
+    // launched from a terminal shell must reload config.toml instead.
+    FPASOTERM_RUNTIME_CONFIG_SOURCE: 'launcher',
+    FPASOTERM_RUNTIME_CONFIG_OWNER_PID: '',
   };
 }
 
@@ -1048,15 +1137,13 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
-  const tauriBinary = options.dev ? undefined : await buildTauriBinary(options);
-  const command = options.dev ? process.execPath : tauriBinary;
-  const args = options.dev
-    ? [path.join(root, 'node_modules', '@tauri-apps', 'cli', 'tauri.js'), 'dev', ...options.runtimeArgs]
-    : options.runtimeArgs;
+  const tauriBinary = await buildTauriBinary(options);
+  const command = tauriBinary;
+  const args = options.runtimeArgs;
   const env = runtimeEnv(options);
   appendLauncherLog(`launcher command=${command}`);
   appendLauncherLog(`launcher args=${JSON.stringify(args)}`);
-  appendLauncherLog(`launcher mode=${options.dev ? 'tauri-dev' : 'binary'}`);
+  appendLauncherLog(`launcher mode=${options.dev ? 'debug-binary' : 'binary'}`);
   appendLauncherLog(`launcher cwd=${root}`);
 
   let logFd;
@@ -1131,6 +1218,10 @@ try {
     resetWindowState(options);
   } else if (options.resetConfig) {
     resetConfig(options);
+  } else if (options.updateConfig) {
+    updateConfig(options);
+  } else if (options.pruneConfig) {
+    pruneConfigFile(options);
   } else if (options.setupSync) {
     Promise.resolve(setupSync(options)).catch((setupError) => {
       console.error(`fpasoterm: ${setupError.message}`);

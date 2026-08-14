@@ -24,5 +24,10 @@ duplicateGuard = true
 duplicateWindowMs = 800
 repeatedTextWindowMs = 140
 
+[keybindings]
+prefix = "Mod+Shift"
+newWindow = "N"
+tile = "T"
+
 [plugins]
 enabled = []

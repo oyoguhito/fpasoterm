@@ -141,6 +141,15 @@ body {
   white-space: nowrap;
 }
 
+#keybinding-prefix {
+  padding: 1px 8px 5px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.24);
+  color: #c7d3df;
+  font-size: 11px;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
 #window-controls button[hidden] {
   display: none;
 }
@@ -169,6 +178,56 @@ body {
   color: #ffb4b4;
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   white-space: pre-wrap;
+}
+
+.terminal-broadcast-card {
+  width: min(560px, calc(100vw - 32px));
+}
+
+#terminal-broadcast-text {
+  width: 100%;
+  min-height: 140px;
+  resize: vertical;
+  border: 1px solid #5a7088;
+  border-radius: 4px;
+  background: #11151a;
+  color: #e8edf2;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  padding: 8px;
+}
+
+#terminal-broadcast-sync-label {
+  display: block;
+  margin: 10px 0;
+  color: #d8e4f0;
+  font-size: 12px;
+}
+
+#terminal-broadcast-targets {
+  margin: 10px 0 0;
+  border: 1px solid #5a7088;
+  border-radius: 4px;
+  color: #d8e4f0;
+}
+
+#terminal-broadcast-target-list {
+  display: grid;
+  gap: 4px;
+  max-height: 132px;
+  overflow: auto;
+}
+
+#terminal-broadcast-target-list label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  overflow-wrap: anywhere;
+}
+
+.terminal-broadcast-target-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
 }
 
 #terminal-mirror {
@@ -466,6 +525,12 @@ body {
 .xterm-viewport,
 .xterm-screen {
   overflow: hidden;
+}
+
+/* Kitty image canvases are visual layers; xterm's helper textarea owns input. */
+.xterm-image-layer-top,
+.xterm-image-layer-bottom {
+  pointer-events: none !important;
 }
 
 .xterm .xterm-accessibility:not(.debug),

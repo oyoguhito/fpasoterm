@@ -12,6 +12,10 @@ Before the Tauri migration, xterm.js canvas alpha backgrounds did not compose as
 
 The Tauri backend uses WebKitGTK on Linux, enables transparent windows, and sets xterm.js `allowTransparency = true` with an 80% opaque terminal background by default. ChromeOS/Baguette still needs device testing. If rendering flickers or turns black/white, launch with `--disable-dmabuf`, which sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
+## Kitty/SIXEL Graphics
+
+Rendering Kitty, SIXEL, or iTerm inline-image streams can leave the current Tauri/WebKitGTK WebView unresponsive, including to `Ctrl+C`. `[terminal.images]` is therefore disabled by default.
+
 ## macOS Gatekeeper
 
 Release builds use ad-hoc code signing so CI can verify the generated `.app` bundle and `.dmg` structure. This prevents unsigned or structurally broken artifacts from being uploaded, but it is not the same as Apple Developer ID signing and notarization.

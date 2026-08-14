@@ -147,6 +147,8 @@ path = "~/Google Drive/fpasoterm-sync"
 channel = "work"
 diagnostics = true
 maxBytes = 1048576
+commands = true
+commandTtlSeconds = 60
 ```
 
 Use the same `path` and `channel` on the other fpasoterm instance. If your Google Drive folder uses another name, set `path` to that exact local directory.
@@ -170,9 +172,12 @@ For `channel = "work"`, fpasoterm writes:
 
 ```text
 <sync path>/work/diagnostics.json
+<sync path>/work/commands/command-<source>-<timestamp>.json
 ```
 
 `diagnostics.json` contains a JSON payload with `kind`, `channel`, `sourceId`, `updatedAt`, and `text`.
+
+`commands` contains short-lived broadcast-input requests only when a user explicitly selects `Include synced channel` in the Broadcast dialog. `commandTtlSeconds` defaults to 60 and is capped at 600 seconds. Set `commands = false` to keep diagnostics/log sync while refusing remote input commands.
 
 ## Usage
 
@@ -188,6 +193,12 @@ enabled = false
 Clearing `sync.path` also disables sync because there is no destination folder. After editing `config.toml`, restart fpasoterm or apply the config from the running terminal.
 
 In short, `sync.enabled = false` is the setting for a local-only session with no sync-folder diagnostics writes.
+
+## Broadcast Input
+
+`Ctrl+Shift+B` opens the Broadcast dialog. Select the target local windows by title and PID, then use `Send` to deliver the entered command only to those windows. With every local window selected, `Include synced channel` additionally writes a temporary request under `<sync path>/<channel>/commands`. Every already-running fpasoterm using that same folder and channel receives it once and writes it to its own PTY. Partial local selection never sends to the sync channel.
+
+This is intentionally a trusted-folder feature: anyone able to write command JSON in that folder can cause a command to be typed into participating terminals. It provides no encryption, authentication, remote launch, or delayed execution. Do not enable synced commands for a shared or untrusted folder.
 
 ## Terminal Output Logs
 

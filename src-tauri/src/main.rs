@@ -2,7 +2,7 @@
 
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 #[cfg(not(target_os = "windows"))]
 use std::process::Output;
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
@@ -18,11 +19,15 @@ use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, 
 #[cfg(not(target_os = "windows"))]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "windows")]
-use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree};
+use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, INVALID_HANDLE_VALUE};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::DataExchange::{
     CloseClipboard, EmptyClipboard, GetClipboardData, IsClipboardFormatAvailable, OpenClipboard,
     SetClipboardData,
+};
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Memory::{
@@ -30,7 +35,8 @@ use windows_sys::Win32::System::Memory::{
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::System::Threading::{
-    GetExitCodeProcess, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    GetExitCodeProcess, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+    PROCESS_TERMINATE,
 };
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
@@ -61,6 +67,7 @@ struct Config {
     window: WindowConfig,
     terminal: serde_json::Value,
     ime: serde_json::Value,
+    keybindings: serde_json::Value,
     plugins: serde_json::Value,
     sync: serde_json::Value,
     logging: serde_json::Value,
@@ -100,10 +107,16 @@ struct DiagnosticsConfig {
 }
 
 #[derive(Debug, Clone, Deserialize)]
-// Current xterm.js grid size reported by the renderer.
+#[serde(rename_all = "camelCase")]
+// Current xterm.js grid and rendered pixel size reported by the renderer.
 struct TerminalSize {
     cols: u16,
     rows: u16,
+    // Older renderers only send rows and cols, so retain a safe zero default.
+    #[serde(default)]
+    pixel_width: u16,
+    #[serde(default)]
+    pixel_height: u16,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -192,6 +205,46 @@ struct SyncItem {
     text: String,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One short-lived PTY input request shared by local or synced fpasoterm instances.
+struct TerminalBroadcastItem {
+    schema_version: u8,
+    id: String,
+    source_id: String,
+    created_at: u128,
+    expires_at: u128,
+    text: String,
+    target_instance_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// Renderer request to send input to all local windows and optionally a sync channel.
+struct TerminalBroadcastRequest {
+    text: String,
+    include_sync: bool,
+    target_instance_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One live local terminal that can be selected by the broadcast dialog.
+struct TerminalBroadcastTarget {
+    id: String,
+    pid: u32,
+    title: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Result returned after one broadcast file is safely published.
+struct TerminalBroadcastStatus {
+    id: String,
+    include_sync: bool,
+    message: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
 // Optional terminal log start request from the renderer.
@@ -260,6 +313,7 @@ struct TerminalSession {
     master: Box<dyn MasterPty + Send>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
+    shell_pid: Option<u32>,
 }
 
 // Decodes PTY bytes before they are sent to xterm.js.
@@ -277,21 +331,25 @@ struct TerminalTextNormalizer {
 
 // Shared runtime state for the active PTY session and recent diagnostics.
 struct AppState {
-    terminal: Mutex<Option<TerminalSession>>,
+    terminal: Arc<Mutex<Option<TerminalSession>>>,
     diagnostics: Arc<Mutex<VecDeque<String>>>,
     terminal_log: Arc<Mutex<Option<TerminalLog>>>,
     last_terminal_log_path: Arc<Mutex<Option<String>>>,
     source_id: String,
+    started_at: u128,
+    broadcast_listener_started: AtomicBool,
 }
 
 impl Default for AppState {
     fn default() -> Self {
         Self {
-            terminal: Mutex::new(None),
+            terminal: Arc::new(Mutex::new(None)),
             diagnostics: Arc::new(Mutex::new(VecDeque::new())),
             terminal_log: Arc::new(Mutex::new(None)),
             last_terminal_log_path: Arc::new(Mutex::new(None)),
             source_id: format!("{}-{}", std::process::id(), now_millis()),
+            started_at: now_millis(),
+            broadcast_listener_started: AtomicBool::new(false),
         }
     }
 }
@@ -302,7 +360,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the fpasoterm version.\n  -d, --dev                     Force Tauri dev runtime when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Adds the instance-list command to the shared direct-binary help text.
 fn cli_help_text() -> String {
@@ -346,7 +404,7 @@ fn main() {
         return;
     }
     if cli_has_flag(&["--version", "-v"]) {
-        print_cli_text(&format!("fpasoterm {}\n", env!("CARGO_PKG_VERSION")));
+        print_cli_text(&format!("fpasoterm {}\n", app_version()));
         return;
     }
     if cli_has_flag(&["--list", "-l"]) {
@@ -375,6 +433,14 @@ fn main() {
         reset_config_cli();
         return;
     }
+    if cli_has_flag(&["--update-config"]) {
+        update_config_cli();
+        return;
+    }
+    if cli_has_flag(&["--prune-config"]) {
+        prune_config_cli();
+        return;
+    }
 
     if detach_nested_macos_launch() {
         return;
@@ -391,6 +457,7 @@ fn main() {
         .manage(AppState::default())
         .setup(|app| {
             let mut config = runtime_config();
+            refresh_config_example(&config.config_path);
             let instance_index = claim_instance_index(app.handle(), &config.config.window.title);
             apply_instance_identity(&mut config, instance_index);
             publish_runtime_config(&config);
@@ -455,6 +522,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             terminal_start,
             terminal_write,
+            terminal_kill,
+            terminal_broadcast,
+            terminal_broadcast_targets,
             terminal_resize,
             terminal_log_start,
             terminal_log_stop,
@@ -510,6 +580,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-r",
         "--reset-config",
         "-R",
+        "--update-config",
+        "--prune-config",
         "--debug-keys",
         "-k",
         "--x11",
@@ -769,8 +841,10 @@ fn claim_instance_index(app: &AppHandle, title: &str) -> usize {
     } else {
         format!("{title}-{instance_number}")
     };
+    let instance_id = app.state::<AppState>().source_id.clone();
     let marker = serde_json::json!({
         "pid": current_pid,
+        "instanceId": instance_id,
         "baseTitle": title,
         "title": display_title,
         "createdAt": now_millis()
@@ -1375,6 +1449,8 @@ fn spawn_new_instance() -> Result<(), String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     Command::new(executable)
         .env_remove("FPASOTERM_RUNTIME_CONFIG_JSON")
+        .env_remove("FPASOTERM_RUNTIME_CONFIG_SOURCE")
+        .env_remove("FPASOTERM_RUNTIME_CONFIG_OWNER_PID")
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
@@ -1535,10 +1611,16 @@ fn apply_instance_identity(config: &mut RuntimeConfig, instance_index: usize) {
 }
 
 // Re-publishes startup mutations so renderer-side config_get sees the same title
-// and titlebar color that the native window received during setup.
+// and titlebar color that the native window received during setup. The owner
+// PID prevents terminal-shell children from reusing this process snapshot.
 fn publish_runtime_config(config: &RuntimeConfig) {
     if let Ok(value) = serde_json::to_string(config) {
         env::set_var("FPASOTERM_RUNTIME_CONFIG_JSON", value);
+        env::set_var("FPASOTERM_RUNTIME_CONFIG_SOURCE", "native");
+        env::set_var(
+            "FPASOTERM_RUNTIME_CONFIG_OWNER_PID",
+            std::process::id().to_string(),
+        );
     }
 }
 
@@ -1683,12 +1765,44 @@ fn window_state_path() -> String {
     runtime_config().window_state_path
 }
 
-// Loads launcher-provided JSON config, falling back to direct binary parsing.
+// Returns whether an inherited snapshot belongs to this process. Terminal
+// shells inherit their parent's environment, so a native snapshot must only be
+// used by the process whose PID published it.
+fn should_use_runtime_config_json_values(
+    source: Option<&str>,
+    owner_pid: Option<&str>,
+    current_pid: &str,
+) -> bool {
+    if source == Some("launcher") {
+        return true;
+    }
+
+    source == Some("native") && owner_pid == Some(current_pid)
+}
+
+// Checks process ownership before consuming an inherited runtime JSON snapshot.
+fn should_use_runtime_config_json() -> bool {
+    let current_pid = std::process::id().to_string();
+    should_use_runtime_config_json_values(
+        env::var("FPASOTERM_RUNTIME_CONFIG_SOURCE").ok().as_deref(),
+        env::var("FPASOTERM_RUNTIME_CONFIG_OWNER_PID")
+            .ok()
+            .as_deref(),
+        &current_pid,
+    )
+}
+
+// Loads a valid launcher/current-process JSON config, falling back to direct
+// config.toml parsing for a packaged binary or terminal-launched child.
 fn runtime_config() -> RuntimeConfig {
-    let mut config = env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
-        .ok()
-        .and_then(|value| serde_json::from_str(&value).ok())
-        .unwrap_or_else(direct_runtime_config);
+    let mut config = if should_use_runtime_config_json() {
+        env::var("FPASOTERM_RUNTIME_CONFIG_JSON")
+            .ok()
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_else(direct_runtime_config)
+    } else {
+        direct_runtime_config()
+    };
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -1701,8 +1815,20 @@ fn direct_runtime_config() -> RuntimeConfig {
         config = merge_runtime_config_from_path(config, &config_path)
             .unwrap_or_else(|_| default_runtime_config());
     }
-    apply_direct_cli_overrides(&mut config);
+    apply_saved_window_bounds(&mut config);
     config
+}
+
+// Applies remembered bounds only after the selected TOML has set
+// window.rememberBounds and its state-file directory.
+fn apply_saved_window_bounds(runtime: &mut RuntimeConfig) {
+    if !runtime.config.window.remember_bounds {
+        return;
+    }
+    if let Some((width, height)) = read_saved_window_size(&runtime.window_state_path) {
+        runtime.config.window.width = width;
+        runtime.config.window.height = height;
+    }
 }
 
 // Matches the Intel macOS renderer default to the host's more compact terminal metrics.
@@ -1781,7 +1907,7 @@ fn default_runtime_config() -> RuntimeConfig {
         .or_else(|| cli_option_value_any(&["--config", "-c"]))
         .unwrap_or_else(|| format!("{config_dir}/config.toml"));
     let window_state_path = format!("{config_dir}/window-state.json");
-    let mut window = WindowConfig {
+    let window = WindowConfig {
         title: env::var("FPASOTERM_WINDOW_TITLE")
             .ok()
             .or_else(|| cli_option_value_any(&["--title", "-t"]))
@@ -1803,21 +1929,6 @@ fn default_runtime_config() -> RuntimeConfig {
         frame: false,
         remember_bounds: true,
     };
-    if let Some((width, height)) = read_saved_window_size(&window_state_path) {
-        window.width = width;
-        window.height = height;
-    }
-    if let Some((width, height)) = cli_size_option() {
-        window.width = width;
-        window.height = height;
-    }
-    if let Some(width) = cli_positive_u32_option_any(&["--width", "-W"]) {
-        window.width = width;
-    }
-    if let Some(height) = cli_positive_u32_option_any(&["--height", "-H"]) {
-        window.height = height;
-    }
-
     RuntimeConfig {
         config: Config {
             window,
@@ -1831,6 +1942,14 @@ fn default_runtime_config() -> RuntimeConfig {
                 "rescaleOverlappingGlyphs": true,
                 "scrollback": 1000,
                 "shell": read_configured_shell(&config_path).unwrap_or_default(),
+                "images": {
+                    "enabled": false,
+                    "kittySupport": false,
+                    "kittySizeLimit": 33554432,
+                    "storageLimit": 64,
+                    "sixelSupport": false,
+                    "iipSupport": false
+                },
                 "theme": {
                     "background": "rgba(16, 19, 23, 0.80)",
                     "foreground": "#e8edf2",
@@ -1843,6 +1962,21 @@ fn default_runtime_config() -> RuntimeConfig {
                 "duplicateWindowMs": 800,
                 "repeatedTextWindowMs": 140
             }),
+            keybindings: serde_json::json!({
+                "prefix": "Mod+Shift",
+                "logMenu": "L",
+                "logToggle": "S",
+                "logShow": "P",
+                "copy": "C",
+                "paste": "V",
+                "menu": "M",
+                "help": "H",
+                "newWindow": "N",
+                "broadcast": "B",
+                "kill": "K",
+                "tile": "T",
+                "closeAll": "X"
+            }),
             plugins: serde_json::json!({ "enabled": [] }),
             sync: serde_json::json!({
                 "enabled": false,
@@ -1850,7 +1984,9 @@ fn default_runtime_config() -> RuntimeConfig {
                 "path": "",
                 "channel": "default",
                 "diagnostics": true,
-                "maxBytes": 1048576
+                "maxBytes": 1048576,
+                "commands": true,
+                "commandTtlSeconds": 60
             }),
             logging: serde_json::json!({
                 "enabled": true,
@@ -2082,6 +2218,207 @@ fn reset_config_cli() {
         Err(error) => {
             print_cli_error(&format!("fpasoterm: {error}\n"));
             std::process::exit(2);
+        }
+    }
+}
+
+// Adds defaults introduced by newer releases while keeping existing values.
+fn update_config_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    let result = (|| -> Result<(usize, Option<String>), String> {
+        let defaults: toml::Value = toml::from_str(&embedded_default_config_toml())
+            .map_err(|error| format!("failed to read default config: {error}"))?;
+        let existing = read_toml_config_or_empty(&path)?;
+        let missing = missing_toml_keys(&defaults, Some(&existing), "");
+        if missing.is_empty() {
+            return Ok((0, None));
+        }
+        let backup_path = backup_config_file(&path)?;
+        let mut merged = defaults;
+        merge_toml_value(&mut merged, existing);
+        write_toml_config(&path, &merged)?;
+        Ok((missing.len(), backup_path))
+    })();
+
+    match result {
+        Ok((0, _)) => print_cli_text(&format!("config already includes all defaults: {path}\n")),
+        Ok((count, backup)) => {
+            print_cli_text(&format!(
+                "updated {path}\nadded {count} default setting(s)\n"
+            ));
+            if let Some(backup) = backup {
+                print_cli_text(&format!("backed up previous config {backup}\n"));
+            }
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Removes configuration keys that are absent from the current default schema.
+fn prune_config_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    if !Path::new(&path).exists() {
+        print_cli_text(&format!("config does not exist: {path}\n"));
+        return;
+    }
+    let result = (|| -> Result<(Vec<String>, String), String> {
+        let defaults: toml::Value = toml::from_str(&embedded_default_config_toml())
+            .map_err(|error| format!("failed to read default config: {error}"))?;
+        let mut existing = read_toml_config_or_empty(&path)?;
+        let mut removed = Vec::new();
+        prune_toml_value(&defaults, &mut existing, "", &mut removed);
+        if removed.is_empty() {
+            return Ok((removed, String::new()));
+        }
+        let backup = backup_config_file(&path)?.unwrap_or_default();
+        write_toml_config(&path, &existing)?;
+        Ok((removed, backup))
+    })();
+
+    match result {
+        Ok((removed, _)) if removed.is_empty() => {
+            print_cli_text(&format!("config has no unsupported settings: {path}\n"));
+        }
+        Ok((removed, backup)) => {
+            print_cli_text(&format!(
+                "pruned {path}\nremoved {} unsupported setting(s): {}\nbacked up previous config {backup}\n",
+                removed.len(),
+                removed.join(", ")
+            ));
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Refreshes the complete example when the direct packaged binary is launched.
+fn refresh_config_example(config_path: &str) {
+    let example_path = format!("{config_path}.example");
+    let default_text = embedded_default_config_toml();
+    let needs_update = fs::read_to_string(&example_path)
+        .map(|existing| existing != default_text)
+        .unwrap_or(true);
+    if !needs_update {
+        return;
+    }
+    if let Some(parent) = Path::new(&example_path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(example_path, default_text);
+}
+
+// Reads absent configurations as an empty table so --update-config can create one.
+fn read_toml_config_or_empty(path: &str) -> Result<toml::Value, String> {
+    if !Path::new(path).exists() {
+        return Ok(toml::Value::Table(toml::map::Map::new()));
+    }
+    let text =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    toml::from_str(&text).map_err(|error| format!("failed to parse {path}: {error}"))
+}
+
+// Creates a same-directory backup before a configuration rewrite.
+fn backup_config_file(path: &str) -> Result<Option<String>, String> {
+    let path_ref = Path::new(path);
+    if let Some(parent) = path_ref.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    if !path_ref.exists() {
+        return Ok(None);
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup = format!("{path}.backup-{timestamp}");
+    fs::copy(path_ref, &backup).map_err(|error| format!("failed to back up {path}: {error}"))?;
+    Ok(Some(backup))
+}
+
+// Writes normalized TOML with the standard fpasoterm file header.
+fn write_toml_config(path: &str, value: &toml::Value) -> Result<(), String> {
+    let text =
+        toml::to_string(value).map_err(|error| format!("failed to serialize config: {error}"))?;
+    fs::write(path, format!("# fpasoterm user configuration.\n{text}"))
+        .map_err(|error| format!("failed to write {path}: {error}"))
+}
+
+// Recursively overlays TOML scalar/array values and preserves nested tables.
+fn merge_toml_value(base: &mut toml::Value, override_value: toml::Value) {
+    match (base, override_value) {
+        (toml::Value::Table(base_table), toml::Value::Table(override_table)) => {
+            for (key, value) in override_table {
+                match base_table.get_mut(&key) {
+                    Some(base_value) => merge_toml_value(base_value, value),
+                    None => {
+                        base_table.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base_value, value) => *base_value = value,
+    }
+}
+
+// Counts missing default leaf values for --update-config output.
+fn missing_toml_keys(
+    defaults: &toml::Value,
+    existing: Option<&toml::Value>,
+    prefix: &str,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    if let toml::Value::Table(default_table) = defaults {
+        let existing_table = existing.and_then(toml::Value::as_table);
+        for (key, default_value) in default_table {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            let configured = existing_table.and_then(|table| table.get(key));
+            if default_value.is_table() {
+                missing.extend(missing_toml_keys(default_value, configured, &path));
+            } else if configured.is_none() {
+                missing.push(path);
+            }
+        }
+    }
+    missing
+}
+
+// Prunes unsupported TOML table entries while retaining supported values.
+fn prune_toml_value(
+    defaults: &toml::Value,
+    config: &mut toml::Value,
+    prefix: &str,
+    removed: &mut Vec<String>,
+) {
+    let (toml::Value::Table(default_table), toml::Value::Table(config_table)) = (defaults, config)
+    else {
+        return;
+    };
+    let keys = config_table.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let Some(default_value) = default_table.get(&key) else {
+            config_table.remove(&key);
+            removed.push(path);
+            continue;
+        };
+        if let Some(config_value) = config_table.get_mut(&key) {
+            prune_toml_value(default_value, config_value, &path, removed);
         }
     }
 }
@@ -2740,8 +3077,8 @@ fn terminal_start(
         .openpty(PtySize {
             rows: size.rows.max(1),
             cols: size.cols.max(1),
-            pixel_width: 0,
-            pixel_height: 0,
+            pixel_width: size.pixel_width,
+            pixel_height: size.pixel_height,
         })
         .map_err(|error| error.to_string())?;
 
@@ -2750,8 +3087,8 @@ fn terminal_start(
     append_diagnostic(
         &app,
         &format!(
-            "terminal_start shell={} cols={} rows={}",
-            shell, size.cols, size.rows
+            "terminal_start shell={} cols={} rows={} pixel_width={} pixel_height={}",
+            shell, size.cols, size.rows, size.pixel_width, size.pixel_height
         ),
     );
     let mut command = CommandBuilder::new(shell);
@@ -2773,6 +3110,7 @@ fn terminal_start(
         .slave
         .spawn_command(command)
         .map_err(|error| error.to_string())?;
+    let shell_pid = child.process_id();
     let killer = Arc::new(Mutex::new(child.clone_killer()));
     let mut reader = pair
         .master
@@ -2850,14 +3188,138 @@ fn terminal_start(
         master: pair.master,
         writer: writer_for_state,
         killer,
+        shell_pid,
     });
+    drop(terminal);
+    start_terminal_broadcast_listener(app, state.inner());
     Ok(())
 }
 
 #[tauri::command]
 // Writes renderer keyboard/input data into the active PTY.
 fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
-    let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
+    write_terminal_input(&state.terminal, &data)
+}
+
+#[tauri::command]
+// Terminates the foreground terminal job while preserving the interactive shell.
+fn terminal_kill(state: State<AppState>) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
+        let session = terminal
+            .as_ref()
+            .ok_or_else(|| "terminal is not running".to_string())?;
+        let foreground_group = session
+            .master
+            .process_group_leader()
+            .ok_or_else(|| "could not identify the foreground terminal process".to_string())?;
+        if session.shell_pid == Some(foreground_group as u32) {
+            return Err(
+                "no foreground command is running; use the window close button to exit the shell"
+                    .to_string(),
+            );
+        }
+        // Negative PID signals every process in the foreground job's process group.
+        let result = unsafe { libc::kill(-foreground_group, libc::SIGKILL) };
+        if result == 0 {
+            return Ok(());
+        }
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
+        let session = terminal
+            .as_ref()
+            .ok_or_else(|| "terminal is not running".to_string())?;
+        let shell_pid = session
+            .shell_pid
+            .ok_or_else(|| "could not identify the terminal shell process".to_string())?;
+        return kill_windows_shell_descendants(shell_pid);
+    }
+
+    #[cfg(all(not(unix), not(target_os = "windows")))]
+    {
+        let _ = state;
+        Err("Kill is not available on this platform; use Ctrl+C or close the window".to_string())
+    }
+}
+
+#[cfg(target_os = "windows")]
+// Terminates all descendants of the terminal shell while leaving the shell alive.
+fn kill_windows_shell_descendants(shell_pid: u32) -> Result<(), String> {
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) };
+    if snapshot == INVALID_HANDLE_VALUE {
+        return Err(std::io::Error::last_os_error().to_string());
+    }
+
+    let mut parent_pairs = Vec::new();
+    let mut entry = PROCESSENTRY32W {
+        dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+        ..Default::default()
+    };
+    unsafe {
+        if Process32FirstW(snapshot, &mut entry) != 0 {
+            loop {
+                parent_pairs.push((entry.th32ParentProcessID, entry.th32ProcessID));
+                entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+                if Process32NextW(snapshot, &mut entry) == 0 {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
+    }
+
+    let mut descendants = Vec::new();
+    let mut known = HashSet::from([shell_pid]);
+    loop {
+        let mut found = false;
+        for (parent_pid, process_pid) in &parent_pairs {
+            if known.contains(parent_pid) && known.insert(*process_pid) {
+                descendants.push(*process_pid);
+                found = true;
+            }
+        }
+        if !found {
+            break;
+        }
+    }
+    if descendants.is_empty() {
+        return Err("no command process is running under the terminal shell".to_string());
+    }
+
+    let mut terminated = 0;
+    for process_pid in descendants.iter().rev() {
+        unsafe {
+            let process = OpenProcess(
+                PROCESS_TERMINATE | PROCESS_QUERY_LIMITED_INFORMATION,
+                0,
+                *process_pid,
+            );
+            if process == ptr::null_mut() {
+                continue;
+            }
+            if TerminateProcess(process, 1) != 0 {
+                terminated += 1;
+            }
+            let _ = CloseHandle(process);
+        }
+    }
+    if terminated == 0 {
+        return Err("could not terminate the active terminal command".to_string());
+    }
+    Ok(())
+}
+
+// Writes one input sequence to a local PTY without applying renderer IME filtering.
+fn write_terminal_input(
+    terminal_state: &Arc<Mutex<Option<TerminalSession>>>,
+    data: &str,
+) -> Result<(), String> {
+    let terminal = terminal_state.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
         let mut writer = session.writer.lock().map_err(|error| error.to_string())?;
         if env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1") {
@@ -2872,20 +3334,249 @@ fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Broadcasts one input sequence to every currently running local terminal and,
+// when requested, to active terminals using the configured sync folder/channel.
+fn terminal_broadcast(
+    app: AppHandle,
+    state: State<AppState>,
+    request: TerminalBroadcastRequest,
+) -> Result<TerminalBroadcastStatus, String> {
+    let text = request.text;
+    if text.is_empty() {
+        return Err("broadcast text is empty".to_string());
+    }
+    let max_bytes = sync_max_bytes();
+    if text.len() > max_bytes {
+        return Err(format!(
+            "broadcast payload is too large: {} bytes > {max_bytes} bytes",
+            text.len()
+        ));
+    }
+
+    let created_at = now_millis();
+    let item = TerminalBroadcastItem {
+        schema_version: 1,
+        id: format!("{}-{created_at}", state.source_id),
+        source_id: state.source_id.clone(),
+        created_at,
+        expires_at: created_at.saturating_add(sync_command_ttl_millis()),
+        text,
+        target_instance_ids: request.target_instance_ids,
+    };
+    write_terminal_broadcast_item(&local_broadcast_directory(), &item)?;
+    if request.include_sync {
+        let directory = sync_command_directory()?;
+        write_terminal_broadcast_item(&directory, &item)?;
+    }
+    append_diagnostic(
+        &app,
+        &format!(
+            "terminal broadcast requested id={} bytes={} synced={}",
+            item.id,
+            item.text.len(),
+            request.include_sync
+        ),
+    );
+    Ok(TerminalBroadcastStatus {
+        id: item.id,
+        include_sync: request.include_sync,
+        message: if request.include_sync {
+            "broadcast input sent to local windows and synced channel".to_string()
+        } else {
+            "broadcast input sent to local windows".to_string()
+        },
+    })
+}
+
+#[tauri::command]
+// Lists live local terminal instances for the broadcast target selector.
+fn terminal_broadcast_targets() -> Vec<TerminalBroadcastTarget> {
+    live_terminal_broadcast_targets()
+}
+
+// Starts one lightweight watcher per application process after its PTY is ready.
+fn start_terminal_broadcast_listener(app: AppHandle, state: &AppState) {
+    if state
+        .broadcast_listener_started
+        .swap(true, Ordering::SeqCst)
+    {
+        return;
+    }
+    let terminal = Arc::clone(&state.terminal);
+    let instance_id = state.source_id.clone();
+    let started_at = state.started_at;
+    std::thread::spawn(move || {
+        let mut seen = HashSet::new();
+        loop {
+            let mut directories = vec![local_broadcast_directory()];
+            if let Ok(directory) = sync_command_directory() {
+                directories.push(directory);
+            }
+            for directory in directories {
+                for item in read_terminal_broadcast_items(&directory, started_at) {
+                    if !seen.insert(item.id.clone()) {
+                        continue;
+                    }
+                    if !item.target_instance_ids.is_empty()
+                        && !item
+                            .target_instance_ids
+                            .iter()
+                            .any(|target| target == &instance_id)
+                    {
+                        continue;
+                    }
+                    match write_terminal_input(&terminal, &item.text) {
+                        Ok(()) => append_diagnostic(
+                            &app,
+                            &format!(
+                                "terminal broadcast received id={} bytes={} source={}",
+                                item.id,
+                                item.text.len(),
+                                item.source_id
+                            ),
+                        ),
+                        Err(error) => append_diagnostic(
+                            &app,
+                            &format!("terminal broadcast write failed id={}: {error}", item.id),
+                        ),
+                    }
+                }
+            }
+            if seen.len() > 512 {
+                seen.clear();
+            }
+            std::thread::sleep(Duration::from_millis(350));
+        }
+    });
+}
+
+// Collects live marker records with the IDs used for precise local broadcast delivery.
+fn live_terminal_broadcast_targets() -> Vec<TerminalBroadcastTarget> {
+    let directory = cache_dir_path().join("instances");
+    let mut targets = Vec::new();
+    if let Ok(entries) = fs::read_dir(&directory) {
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|value| value.to_str()) != Some("pid") {
+                continue;
+            }
+            let Some(pid) = path
+                .file_stem()
+                .and_then(|value| value.to_str())
+                .and_then(|value| value.parse::<u32>().ok())
+            else {
+                continue;
+            };
+            if !instance_marker_is_live(pid, &path) {
+                let _ = fs::remove_file(path);
+                continue;
+            }
+            let value: serde_json::Value = fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str(&text).ok())
+                .unwrap_or_default();
+            let Some(id) = value
+                .get("instanceId")
+                .and_then(serde_json::Value::as_str)
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+            else {
+                continue;
+            };
+            let title = value
+                .get("title")
+                .or_else(|| value.get("baseTitle"))
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("fpasoterm")
+                .to_string();
+            targets.push(TerminalBroadcastTarget { id, pid, title });
+        }
+    }
+    targets.sort_by_key(|target| target.pid);
+    targets
+}
+
+// Stores local broadcast requests outside sync folders so same-host windows work offline.
+fn local_broadcast_directory() -> PathBuf {
+    cache_dir_path().join("broadcast").join("commands")
+}
+
+// Uses a short expiry because input commands must never execute after a delayed restart.
+fn sync_command_ttl_millis() -> u128 {
+    sync_config()
+        .get("commandTtlSeconds")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(60)
+        .min(600) as u128
+        * 1_000
+}
+
+// Atomically publishes a command file so readers never observe partial JSON.
+fn write_terminal_broadcast_item(
+    directory: &Path,
+    item: &TerminalBroadcastItem,
+) -> Result<(), String> {
+    fs::create_dir_all(directory).map_err(|error| error.to_string())?;
+    let path = directory.join(format!("command-{}.json", item.id));
+    let temporary = directory.join(format!("command-{}.tmp", item.id));
+    let text = serde_json::to_string(item).map_err(|error| error.to_string())?;
+    fs::write(&temporary, text).map_err(|error| error.to_string())?;
+    fs::rename(&temporary, &path).map_err(|error| error.to_string())
+}
+
+// Loads unexpired requests created after this instance started and removes expired files.
+fn read_terminal_broadcast_items(directory: &Path, started_at: u128) -> Vec<TerminalBroadcastItem> {
+    let Ok(entries) = fs::read_dir(directory) else {
+        return Vec::new();
+    };
+    let now = now_millis();
+    let mut items = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("");
+        if !name.starts_with("command-") || !name.ends_with(".json") {
+            continue;
+        }
+        let Ok(text) = fs::read_to_string(&path) else {
+            continue;
+        };
+        let Ok(item) = serde_json::from_str::<TerminalBroadcastItem>(&text) else {
+            continue;
+        };
+        if item.expires_at <= now {
+            let _ = fs::remove_file(path);
+            continue;
+        }
+        if item.schema_version == 1 && item.created_at >= started_at && !item.text.is_empty() {
+            items.push(item);
+        }
+    }
+    items.sort_by_key(|item| item.created_at);
+    items
+}
+
+#[tauri::command]
 // Resizes the active PTY to match the xterm.js grid.
 fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), String> {
     let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
         if console_diagnostics_enabled() {
-            eprintln!("terminal_resize cols={} rows={}", size.cols, size.rows);
+            eprintln!(
+                "terminal_resize cols={} rows={} pixel_width={} pixel_height={}",
+                size.cols, size.rows, size.pixel_width, size.pixel_height
+            );
         }
         session
             .master
             .resize(PtySize {
                 rows: size.rows.max(1),
                 cols: size.cols.max(1),
-                pixel_width: 0,
-                pixel_height: 0,
+                pixel_width: size.pixel_width,
+                pixel_height: size.pixel_height,
             })
             .map_err(|error| error.to_string())?;
     }
@@ -2933,7 +3624,35 @@ fn terminal_log_directory() -> PathBuf {
 
 // Builds a timestamped default terminal output log path.
 fn default_terminal_log_path() -> PathBuf {
-    terminal_log_directory().join(format!("terminal-{}.log", now_millis()))
+    let title = runtime_config().config.window.title;
+    terminal_log_directory().join(format!(
+        "terminal-{}-{}.log",
+        log_file_component(&title),
+        now_millis()
+    ))
+}
+
+// Converts a window title into a portable, visible log-file component.
+fn log_file_component(title: &str) -> String {
+    let value = title
+        .chars()
+        .map(|character| {
+            if character.is_alphanumeric() || matches!(character, '-' | '_' | '.') {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>()
+        .trim_matches('_')
+        .chars()
+        .take(80)
+        .collect::<String>();
+    if value.is_empty() {
+        "fpasoterm".to_string()
+    } else {
+        value
+    }
 }
 
 // Resolves an optional requested log path against the configured log directory.
@@ -3886,9 +4605,11 @@ fn config_get() -> RuntimeConfig {
 }
 
 #[tauri::command]
-// Returns the version compiled into the running application binary.
-fn app_version() -> &'static str {
-    env!("CARGO_PKG_VERSION")
+// Returns the package version with the build commit embedded by build.rs.
+fn app_version() -> String {
+    let commit = option_env!("FPASOTERM_BUILD_COMMIT").unwrap_or("unknown");
+    let short_commit = commit.get(..12).unwrap_or(commit);
+    format!("{} (commit {})", env!("CARGO_PKG_VERSION"), short_commit)
 }
 
 #[tauri::command]
@@ -3908,6 +4629,7 @@ struct SyncFolderPaths {
     root: std::path::PathBuf,
     channel: String,
     diagnostics: std::path::PathBuf,
+    commands: std::path::PathBuf,
 }
 
 // Returns the current sync section as a JSON object for tolerant access.
@@ -4053,6 +4775,9 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
     if kind == "diagnostics" && !sync_bool("diagnostics", true) {
         return Err("sync diagnostics is disabled; set sync.diagnostics = true".to_string());
     }
+    if kind == "commands" && !sync_bool("commands", true) {
+        return Err("sync commands are disabled; set sync.commands = true".to_string());
+    }
 
     let root_text = sync_string("path", "");
     if root_text.is_empty() {
@@ -4070,12 +4795,17 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
     let root = expand_sync_path(&root_text);
     let channel_dir = root.join(&channel);
     fs::create_dir_all(&channel_dir).map_err(|error| error.to_string())?;
+    let commands = channel_dir.join("commands");
+    if kind == "commands" {
+        fs::create_dir_all(&commands).map_err(|error| error.to_string())?;
+    }
 
     Ok(SyncFolderPaths {
         provider,
         root,
         channel,
         diagnostics: channel_dir.join("diagnostics.json"),
+        commands,
     })
 }
 
@@ -4086,6 +4816,11 @@ fn sync_item_path(kind: &str) -> Result<std::path::PathBuf, String> {
         "diagnostics" => Ok(paths.diagnostics),
         _ => Err(format!("unsupported sync item kind: {kind}")),
     }
+}
+
+// Resolves the shared directory used for short-lived terminal input commands.
+fn sync_command_directory() -> Result<PathBuf, String> {
+    Ok(sync_folder_paths("commands")?.commands)
 }
 
 // Returns the current UNIX timestamp in milliseconds.
@@ -4402,6 +5137,13 @@ mod tests {
     }
 
     #[test]
+    fn terminal_log_file_component_keeps_titles_portable() {
+        assert_eq!(log_file_component("work window"), "work_window");
+        assert_eq!(log_file_component("  "), "fpasoterm");
+        assert_eq!(log_file_component("開発-2"), "開発-2");
+    }
+
+    #[test]
     fn intel_macos_uses_compact_default_font_size() {
         assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
@@ -4414,8 +5156,32 @@ mod tests {
         let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
         assert_eq!(config["window"]["width"].as_integer(), Some(1000));
         assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
+        assert!(config["terminal"].get("images").is_none());
+        assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
+        assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("N"));
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
+        assert_eq!(config["sync"]["commands"].as_bool(), Some(true));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn runtime_snapshot_only_applies_to_launcher_or_owner_process() {
+        assert!(should_use_runtime_config_json_values(
+            Some("launcher"),
+            None,
+            "200"
+        ));
+        assert!(should_use_runtime_config_json_values(
+            Some("native"),
+            Some("200"),
+            "200"
+        ));
+        assert!(!should_use_runtime_config_json_values(
+            Some("native"),
+            Some("100"),
+            "200"
+        ));
+        assert!(!should_use_runtime_config_json_values(None, None, "200"));
     }
 
     #[test]

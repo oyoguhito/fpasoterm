@@ -26,6 +26,57 @@ npm install
 npm run check
 ```
 
+`git fetch` only downloads remote references; it does not change the current
+working tree. Always run `git switch` or `git checkout` before building.
+
+## Windows MSI Review
+
+For PR #41, use `release-v1.5.0` as the branch name below. Replace it with the
+PR head branch for later reviews. Run these commands from PowerShell in the
+repository root:
+
+```powershell
+git fetch origin release-v1.5.0
+git switch --detach origin/release-v1.5.0
+git status --short
+git log -1 --oneline
+npm ci
+npm run check
+npm run build:artifacts -- --bundles-only
+```
+
+The empty `git status --short` and the final `git log` line confirm the exact
+revision that is being packaged. `git fetch` alone leaves the current branch
+unchanged and must not be used as the build step.
+
+First test the built executable directly, which cannot accidentally launch an
+older Start menu, pinned, or Path entry:
+
+```powershell
+.\src-tauri\target\release\fpasoterm.exe --version
+.\src-tauri\target\release\fpasoterm.exe
+```
+
+Then open `Help` in the application and verify that `Config:` names the file
+being edited, and that the expected PR UI is present.
+
+An unreleased PR commonly has the same package version as an installed build.
+Close every fpasoterm process before installing its MSI, then force Windows
+Installer to reinstall the package rather than retaining its same-version
+installation:
+
+```powershell
+Get-Process fpasoterm -ErrorAction SilentlyContinue | Stop-Process -Force
+$msi = Get-ChildItem .\artifacts\*.msi | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+& msiexec.exe /i $msi.FullName REINSTALL=ALL REINSTALLMODE=vomus
+if ($LASTEXITCODE -notin 0, 3010) { throw "MSI install failed: $LASTEXITCODE" }
+```
+
+Exit code `3010` means Windows requires a restart. Launch the installed app
+from its updated Start menu shortcut after this step. When only functional
+review is needed, prefer the direct release executable above; it is the most
+reliable way to prove the PR branch is running.
+
 ## Windows Direct Binary Review
 
 For changes that affect direct `fpasoterm.exe` behavior, build and run the
