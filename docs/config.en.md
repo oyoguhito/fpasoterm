@@ -21,6 +21,10 @@ fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm -c ~/.config/fpasoterm/User/work.toml
 ```
 
+Open `Help` from the window menu to see the absolute path of the configuration
+file currently used by that window. This also reflects a runtime config file
+applied through `OSC 777;config=...`.
+
 Temporarily override the configured window size:
 
 ```sh

@@ -133,6 +133,7 @@ const fallbackConfig = {
   },
 };
 let appConfig = fallbackConfig;
+let activeConfigPath = '';
 let pluginUrls = [];
 let term;
 let fitAddon;
@@ -1011,6 +1012,7 @@ async function loadRuntimeConfig() {
   try {
     const runtimeConfig = await window.fpasoterm.getConfig();
     appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
+    activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
     if (runtimeConfig.diagnostics?.opaqueTerminal) {
       appConfig = mergeConfig(appConfig, {
@@ -1130,6 +1132,7 @@ function applyTerminalAppearance() {
 // Applies a freshly loaded config to the live window and terminal.
 async function applyRuntimeConfig(runtimeConfig) {
   appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
+  activeConfigPath = String(runtimeConfig.configPath || activeConfigPath);
   applyKeybindingLabels();
   pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
   imeDuplicateWindowMs = Number(appConfig.ime.duplicateWindowMs) || fallbackConfig.ime.duplicateWindowMs;
@@ -1885,6 +1888,7 @@ async function showKeyboardShortcutsHelp() {
   diagnosticsTitleElement.textContent = 'Keyboard Shortcuts';
   diagnosticsElement.value = [
     `fpasoterm ${version}`,
+    `Config: ${activeConfigPath || 'unknown'}`,
     '',
     `${keybindingLabel('logMenu')}  Open the window menu at Log actions`,
     `${keybindingLabel('logToggle')}  Start or stop terminal output logging`,

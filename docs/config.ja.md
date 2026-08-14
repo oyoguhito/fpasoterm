@@ -21,6 +21,9 @@ fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm -c ~/.config/fpasoterm/User/work.toml
 ```
 
+window menu の `Help` には、そのwindowが現在使用している設定ファイルの絶対pathを表示します。
+`OSC 777;config=...` で runtime config file を適用した場合も、適用後のpathを表示します。
+
 設定済みウィンドウサイズを一時的に上書きする場合:
 
 ```sh
