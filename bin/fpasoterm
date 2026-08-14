@@ -25,7 +25,7 @@ const helpText = `Usage: fpasoterm [options]
 
 Options:
   -h, --help                    Show this help.
-  -v, --version                 Show the fpasoterm version.
+  -v, --version                 Show the version and source commit.
   -l, --list                    List running fpasoterm windows, then exit.
   -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
   -d, --dev                     Force a local debug-binary rebuild and launch.
@@ -311,9 +311,14 @@ function validateArgs(argv) {
   }
 }
 
-// Prints the package version without starting the desktop process.
+// Prints the package version and the checkout commit without starting the desktop process.
 function printVersion() {
-  console.log(`fpasoterm ${packageJson.version}`);
+  const result = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  const commit = result.status === 0 ? result.stdout.trim() : 'unknown';
+  console.log(`fpasoterm ${packageJson.version} (commit ${commit})`);
 }
 
 // Returns the runtime marker directory shared with the native application.

@@ -111,6 +111,7 @@ for (const file of [
   'src/renderer/vendor/addon-image/addon-image.js',
   'src/renderer/vendor/addon-image/LICENSE',
   'src-tauri/Cargo.toml',
+  'src-tauri/build.rs',
   'src-tauri/default-config.toml',
   'src-tauri/capabilities/default.json',
   'src-tauri/tauri.conf.json',
@@ -219,11 +220,15 @@ const runCli = (...args) => spawnSync(
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-assert.equal(versionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+const sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+  encoding: 'utf8',
+});
+const expectedVersion = `fpasoterm ${packageJson.version} (commit ${sourceCommit.stdout.trim() || 'unknown'})`;
+assert.equal(versionResult.stdout.trim(), expectedVersion);
 
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
-assert.equal(shortVersionResult.stdout.trim(), `fpasoterm ${packageJson.version}`);
+assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
 
 const listCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-list-cli-'));
 const listMarkerDir = path.join(listCacheDir, 'fpasoterm', 'instances');
@@ -495,6 +500,10 @@ assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
 assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
+const rustBuild = read('src-tauri/build.rs');
+assert.match(rustBuild, /FPASOTERM_BUILD_COMMIT/);
+assert.match(rustBuild, /rev-parse.*HEAD/);
+assert.match(rustBuild, /rerun-if-changed/);
 assert.match(rustMain, /windows_subsystem = "windows"/);
 assert.match(rustMain, /HELP_TEXT/);
 assert.match(rustMain, /apply_direct_cli_env_overrides/);
@@ -516,6 +525,8 @@ assert.match(rustMain, /cli_option_value_any\(&\["--close", "-q"\]\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-config", "-R"\]\)/);
 assert.match(rustMain, /fn reset_config_cli/);
 assert.match(rustMain, /fn app_version/);
+assert.match(rustMain, /FPASOTERM_BUILD_COMMIT/);
+assert.match(rustMain, /commit \{\}/);
 assert.match(rustMain, /fn exit_requested_app_instance/);
 assert.match(rustMain, /app\.exit\(0\)/);
 assert.match(rustMain, /stdout\.flush/);

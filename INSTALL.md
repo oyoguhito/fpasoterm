@@ -12,7 +12,7 @@ fpasoterm
 ```
 
 If your network makes npm's automatic audit request noisy, use `--no-audit` for local installs. CI still runs the explicit security checks in this repository.
-Check which version is on the command path:
+Check which version and build commit are on the command path:
 
 ```sh
 fpasoterm --version

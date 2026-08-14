@@ -11,7 +11,7 @@ npm install -g fpasoterm
 fpasoterm
 ```
 
-npm の自動 audit request がネットワーク上で問題になる場合、local install には `--no-audit` を使用できます。CI では repository 内の明示的な security check を継続して実行します。window を開かずに command path 上の version を確認するには次を実行します。
+npm の自動 audit request がネットワーク上で問題になる場合、local install には `--no-audit` を使用できます。CI では repository 内の明示的な security check を継続して実行します。window を開かずに command path 上の version と build commit を確認するには次を実行します。
 
 ```sh
 fpasoterm --version
