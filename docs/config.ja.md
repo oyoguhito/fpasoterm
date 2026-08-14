@@ -84,8 +84,8 @@ fpasoterm --update-config
 
 このcommandは既存の対応済みvalueを維持した完全な正規化済み`config.toml`を書き出し、
 書換前に`config.toml.backup-<timestamp>`を作成します。`window-state.json`は変更しません。
-`--config <path>`で別fileも更新できます。このcommandはNode launcher用で、配布済みの
-direct binaryでは使用できません。
+`--config <path>`で別fileも更新できます。Node launcherと配布済みdirect binaryの両方で
+使用できます。
 
 現在の対応設定schemaに含まれない項目を削除する場合:
 

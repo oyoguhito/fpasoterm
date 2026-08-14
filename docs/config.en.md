@@ -88,8 +88,7 @@ fpasoterm --update-config
 The command writes a complete normalized `config.toml`, preserves existing
 supported values, and creates `config.toml.backup-<timestamp>` before writing.
 It does not change `window-state.json`. Use `--config <path>` to update another
-file. This command is provided by the Node launcher, not a direct packaged
-binary.
+file. The Node launcher and direct packaged binary both support this command.
 
 Remove settings that no longer belong to the supported configuration schema:
 

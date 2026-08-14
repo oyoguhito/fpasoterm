@@ -18,6 +18,7 @@ const {
   readUserConfig,
   resolvePluginSelector,
   platformDefaultConfig,
+  writableConfigDefaults,
   pruneUnsupportedConfig,
   windowStatePath,
   writeUserConfig,
@@ -632,7 +633,7 @@ function resetConfig(options) {
     backupPath = `${targetPath}.backup-${Date.now()}`;
     fs.renameSync(targetPath, backupPath);
   }
-  writeUserConfig(platformDefaultConfig(), targetPath);
+  writeUserConfig(writableConfigDefaults(), targetPath);
   deleteWindowState(windowStatePath());
   console.log(`reset config ${targetPath}`);
   if (backupPath) {
@@ -646,7 +647,7 @@ function updateConfig(options) {
   applyEnv(options.env);
   const targetPath = configPath();
   const userConfig = readUserConfig(targetPath);
-  const defaults = platformDefaultConfig();
+  const defaults = writableConfigDefaults();
   const missing = missingConfigKeys(defaults, userConfig);
   if (missing.length === 0) {
     console.log(`config already includes all defaults: ${targetPath}`);
@@ -676,7 +677,7 @@ function pruneConfigFile(options) {
   }
 
   const userConfig = readUserConfig(targetPath);
-  const result = pruneUnsupportedConfig(platformDefaultConfig(), userConfig);
+  const result = pruneUnsupportedConfig(writableConfigDefaults(), userConfig);
   if (result.removed.length === 0) {
     console.log(`config has no unsupported settings: ${targetPath}`);
     return;

@@ -115,6 +115,14 @@ function platformDefaultConfig(platform = process.platform, architecture = proce
   return defaultConfig;
 }
 
+// Returns the settings persisted in user config files. Image protocol options
+// remain internal until their renderer support is stable.
+function writableConfigDefaults(platform = process.platform, architecture = process.arch) {
+  const defaults = mergeConfig({}, platformDefaultConfig(platform, architecture));
+  delete defaults.terminal.images;
+  return defaults;
+}
+
 // Writes the default TOML with comments so users can copy it to config.toml
 // and understand what each section controls.
 function defaultConfigExample(platform = process.platform, architecture = process.arch) {
@@ -164,16 +172,8 @@ termName = "xterm-256color"
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
 
-# Reserved inline image protocol options. Current Tauri/WebKitGTK builds keep
-# ImageAddon disabled because graphics streams can block the terminal WebView.
-[terminal.images]
-enabled = false
-kittySupport = false
-kittySizeLimit = 33554432
-storageLimit = 64
-# Enable these only when the terminal program explicitly needs them.
-sixelSupport = false
-iipSupport = false
+# [terminal.images] is reserved for a future stable renderer. Current builds
+# ignore it, so do not add this section to config.toml.
 
 # Terminal color palette.
 [terminal.theme]
@@ -574,5 +574,6 @@ module.exports = {
   missingConfigKeys,
   pruneUnsupportedConfig,
   platformDefaultConfig,
+  writableConfigDefaults,
   windowStatePath,
 };

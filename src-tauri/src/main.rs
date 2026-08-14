@@ -360,7 +360,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Adds the instance-list command to the shared direct-binary help text.
 fn cli_help_text() -> String {
@@ -433,6 +433,14 @@ fn main() {
         reset_config_cli();
         return;
     }
+    if cli_has_flag(&["--update-config"]) {
+        update_config_cli();
+        return;
+    }
+    if cli_has_flag(&["--prune-config"]) {
+        prune_config_cli();
+        return;
+    }
 
     if detach_nested_macos_launch() {
         return;
@@ -449,6 +457,7 @@ fn main() {
         .manage(AppState::default())
         .setup(|app| {
             let mut config = runtime_config();
+            refresh_config_example(&config.config_path);
             let instance_index = claim_instance_index(app.handle(), &config.config.window.title);
             apply_instance_identity(&mut config, instance_index);
             publish_runtime_config(&config);
@@ -571,6 +580,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-r",
         "--reset-config",
         "-R",
+        "--update-config",
+        "--prune-config",
         "--debug-keys",
         "-k",
         "--x11",
@@ -2170,6 +2181,207 @@ fn reset_config_cli() {
         Err(error) => {
             print_cli_error(&format!("fpasoterm: {error}\n"));
             std::process::exit(2);
+        }
+    }
+}
+
+// Adds defaults introduced by newer releases while keeping existing values.
+fn update_config_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    let result = (|| -> Result<(usize, Option<String>), String> {
+        let defaults: toml::Value = toml::from_str(&embedded_default_config_toml())
+            .map_err(|error| format!("failed to read default config: {error}"))?;
+        let existing = read_toml_config_or_empty(&path)?;
+        let missing = missing_toml_keys(&defaults, Some(&existing), "");
+        if missing.is_empty() {
+            return Ok((0, None));
+        }
+        let backup_path = backup_config_file(&path)?;
+        let mut merged = defaults;
+        merge_toml_value(&mut merged, existing);
+        write_toml_config(&path, &merged)?;
+        Ok((missing.len(), backup_path))
+    })();
+
+    match result {
+        Ok((0, _)) => print_cli_text(&format!("config already includes all defaults: {path}\n")),
+        Ok((count, backup)) => {
+            print_cli_text(&format!(
+                "updated {path}\nadded {count} default setting(s)\n"
+            ));
+            if let Some(backup) = backup {
+                print_cli_text(&format!("backed up previous config {backup}\n"));
+            }
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Removes configuration keys that are absent from the current default schema.
+fn prune_config_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    if !Path::new(&path).exists() {
+        print_cli_text(&format!("config does not exist: {path}\n"));
+        return;
+    }
+    let result = (|| -> Result<(Vec<String>, String), String> {
+        let defaults: toml::Value = toml::from_str(&embedded_default_config_toml())
+            .map_err(|error| format!("failed to read default config: {error}"))?;
+        let mut existing = read_toml_config_or_empty(&path)?;
+        let mut removed = Vec::new();
+        prune_toml_value(&defaults, &mut existing, "", &mut removed);
+        if removed.is_empty() {
+            return Ok((removed, String::new()));
+        }
+        let backup = backup_config_file(&path)?.unwrap_or_default();
+        write_toml_config(&path, &existing)?;
+        Ok((removed, backup))
+    })();
+
+    match result {
+        Ok((removed, _)) if removed.is_empty() => {
+            print_cli_text(&format!("config has no unsupported settings: {path}\n"));
+        }
+        Ok((removed, backup)) => {
+            print_cli_text(&format!(
+                "pruned {path}\nremoved {} unsupported setting(s): {}\nbacked up previous config {backup}\n",
+                removed.len(),
+                removed.join(", ")
+            ));
+        }
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Refreshes the complete example when the direct packaged binary is launched.
+fn refresh_config_example(config_path: &str) {
+    let example_path = format!("{config_path}.example");
+    let default_text = embedded_default_config_toml();
+    let needs_update = fs::read_to_string(&example_path)
+        .map(|existing| existing != default_text)
+        .unwrap_or(true);
+    if !needs_update {
+        return;
+    }
+    if let Some(parent) = Path::new(&example_path).parent() {
+        let _ = fs::create_dir_all(parent);
+    }
+    let _ = fs::write(example_path, default_text);
+}
+
+// Reads absent configurations as an empty table so --update-config can create one.
+fn read_toml_config_or_empty(path: &str) -> Result<toml::Value, String> {
+    if !Path::new(path).exists() {
+        return Ok(toml::Value::Table(toml::map::Map::new()));
+    }
+    let text =
+        fs::read_to_string(path).map_err(|error| format!("failed to read {path}: {error}"))?;
+    toml::from_str(&text).map_err(|error| format!("failed to parse {path}: {error}"))
+}
+
+// Creates a same-directory backup before a configuration rewrite.
+fn backup_config_file(path: &str) -> Result<Option<String>, String> {
+    let path_ref = Path::new(path);
+    if let Some(parent) = path_ref.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("failed to create {}: {error}", parent.display()))?;
+    }
+    if !path_ref.exists() {
+        return Ok(None);
+    }
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+    let backup = format!("{path}.backup-{timestamp}");
+    fs::copy(path_ref, &backup).map_err(|error| format!("failed to back up {path}: {error}"))?;
+    Ok(Some(backup))
+}
+
+// Writes normalized TOML with the standard fpasoterm file header.
+fn write_toml_config(path: &str, value: &toml::Value) -> Result<(), String> {
+    let text =
+        toml::to_string(value).map_err(|error| format!("failed to serialize config: {error}"))?;
+    fs::write(path, format!("# fpasoterm user configuration.\n{text}"))
+        .map_err(|error| format!("failed to write {path}: {error}"))
+}
+
+// Recursively overlays TOML scalar/array values and preserves nested tables.
+fn merge_toml_value(base: &mut toml::Value, override_value: toml::Value) {
+    match (base, override_value) {
+        (toml::Value::Table(base_table), toml::Value::Table(override_table)) => {
+            for (key, value) in override_table {
+                match base_table.get_mut(&key) {
+                    Some(base_value) => merge_toml_value(base_value, value),
+                    None => {
+                        base_table.insert(key, value);
+                    }
+                }
+            }
+        }
+        (base_value, value) => *base_value = value,
+    }
+}
+
+// Counts missing default leaf values for --update-config output.
+fn missing_toml_keys(
+    defaults: &toml::Value,
+    existing: Option<&toml::Value>,
+    prefix: &str,
+) -> Vec<String> {
+    let mut missing = Vec::new();
+    if let toml::Value::Table(default_table) = defaults {
+        let existing_table = existing.and_then(toml::Value::as_table);
+        for (key, default_value) in default_table {
+            let path = if prefix.is_empty() {
+                key.clone()
+            } else {
+                format!("{prefix}.{key}")
+            };
+            let configured = existing_table.and_then(|table| table.get(key));
+            if default_value.is_table() {
+                missing.extend(missing_toml_keys(default_value, configured, &path));
+            } else if configured.is_none() {
+                missing.push(path);
+            }
+        }
+    }
+    missing
+}
+
+// Prunes unsupported TOML table entries while retaining supported values.
+fn prune_toml_value(
+    defaults: &toml::Value,
+    config: &mut toml::Value,
+    prefix: &str,
+    removed: &mut Vec<String>,
+) {
+    let (toml::Value::Table(default_table), toml::Value::Table(config_table)) = (defaults, config)
+    else {
+        return;
+    };
+    let keys = config_table.keys().cloned().collect::<Vec<_>>();
+    for key in keys {
+        let path = if prefix.is_empty() {
+            key.clone()
+        } else {
+            format!("{prefix}.{key}")
+        };
+        let Some(default_value) = default_table.get(&key) else {
+            config_table.remove(&key);
+            removed.push(path);
+            continue;
+        };
+        if let Some(config_value) = config_table.get_mut(&key) {
+            prune_toml_value(default_value, config_value, &path, removed);
         }
     }
 }
@@ -4907,14 +5119,9 @@ mod tests {
         let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
         assert_eq!(config["window"]["width"].as_integer(), Some(1000));
         assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
-        assert_eq!(
-            config["terminal"]["images"]["kittySupport"].as_bool(),
-            Some(false)
-        );
-        assert_eq!(
-            config["terminal"]["images"]["sixelSupport"].as_bool(),
-            Some(false)
-        );
+        assert!(config["terminal"].get("images").is_none());
+        assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
+        assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("N"));
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commands"].as_bool(), Some(true));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));

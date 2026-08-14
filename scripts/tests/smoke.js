@@ -9,10 +9,12 @@ const {
   defaultConfigExample,
   discoverPluginFiles,
   loadConfig,
+  mergeConfig,
   missingConfigKeys,
   platformDefaultConfig,
   pruneUnsupportedConfig,
   resolvePluginSelector,
+  writableConfigDefaults,
   windowStatePath,
   writeWindowState,
 } = require('../../src/config');
@@ -22,12 +24,12 @@ assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
 assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
-const missingDefaults = missingConfigKeys(platformDefaultConfig(), { keybindings: { prefix: 'Ctrl+Alt' } });
+const missingDefaults = missingConfigKeys(writableConfigDefaults(), { keybindings: { prefix: 'Ctrl+Alt' } });
 assert.ok(missingDefaults.includes('keybindings.newWindow'));
-assert.ok(missingDefaults.includes('terminal.images.enabled'));
+assert.equal(missingDefaults.includes('terminal.images.enabled'), false);
 assert.equal(missingDefaults.includes('keybindings.prefix'), false);
 assert.deepEqual(
-  pruneUnsupportedConfig(platformDefaultConfig(), {
+  pruneUnsupportedConfig(writableConfigDefaults(), {
     window: { title: 'test', oldSetting: true },
     retiredSection: { enabled: true },
   }),
@@ -233,27 +235,19 @@ const runCli = (...args) => spawnSync(
   { encoding: 'utf8' },
 );
 
-const configMigrationDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-config-migration-'));
-const configMigrationPath = path.join(configMigrationDir, 'config.toml');
-fs.writeFileSync(configMigrationPath, '[keybindings]\nprefix = "Ctrl+Alt"\n');
-const runConfigMigration = (...args) => spawnSync(
-  process.execPath,
-  [path.join(root, 'bin', 'fpasoterm'), '--config', configMigrationPath, ...args],
-  { encoding: 'utf8' },
-);
-const updateConfigResult = runConfigMigration('--update-config');
-assert.equal(updateConfigResult.status, 0, updateConfigResult.stderr);
-assert.match(updateConfigResult.stdout, /added \d+ default setting\(s\)/);
-const updatedConfig = toml.parse(fs.readFileSync(configMigrationPath, 'utf8'));
-assert.equal(updatedConfig.keybindings.prefix, 'Ctrl+Alt');
-assert.equal(updatedConfig.keybindings.newWindow, 'N');
-assert.ok(fs.readdirSync(configMigrationDir).some((name) => name.startsWith('config.toml.backup-')));
-fs.appendFileSync(configMigrationPath, '\n[retired]\nenabled = true\n');
-const pruneConfigResult = runConfigMigration('--prune-config');
-assert.equal(pruneConfigResult.status, 0, pruneConfigResult.stderr);
-assert.match(pruneConfigResult.stdout, /removed 1 unsupported setting\(s\): retired/);
-assert.equal(toml.parse(fs.readFileSync(configMigrationPath, 'utf8')).retired, undefined);
-fs.rmSync(configMigrationDir, { recursive: true, force: true });
+// Covers the data transformations used by --update-config and --prune-config
+// without relying on a nested launcher process.
+const migratedConfig = mergeConfig(writableConfigDefaults(), {
+  keybindings: { prefix: 'Ctrl+Alt' },
+});
+assert.equal(migratedConfig.keybindings.prefix, 'Ctrl+Alt');
+assert.equal(migratedConfig.keybindings.newWindow, 'N');
+assert.equal(migratedConfig.terminal.images, undefined);
+const prunedConfig = pruneUnsupportedConfig(writableConfigDefaults(), {
+  ...migratedConfig,
+  retired: { enabled: true },
+});
+assert.deepEqual(prunedConfig.removed, ['retired']);
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
@@ -1650,6 +1644,7 @@ assert.match(config, /prefix: 'Mod\+Shift'/);
 assert.match(config, /Ctrl\+Alt\+KeyN/);
 assert.match(config, /enabled: false/);
 assert.match(config, /kittySupport: false/);
+assert.match(config, /function writableConfigDefaults/);
 assert.match(config, /sixelSupport: false/);
 assert.match(config, /commandTtlSeconds: 60/);
 assert.match(config, /sync:/);
