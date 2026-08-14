@@ -6,6 +6,9 @@ fpasoterm reads user-editable settings from:
 ~/.config/fpasoterm/User/config.toml
 ```
 
+On Windows, `~` is the current user's profile directory, so the default path is
+`%USERPROFILE%\.config\fpasoterm\User\config.toml`.
+
 On launch, fpasoterm writes or refreshes the full default example at:
 
 ```text
@@ -24,6 +27,34 @@ fpasoterm -c ~/.config/fpasoterm/User/work.toml
 Open `Help` from the window menu to see the absolute path of the configuration
 file currently used by that window. This also reflects a runtime config file
 applied through `OSC 777;config=...`.
+
+## Applying changes
+
+fpasoterm reads `config.toml` when each window process starts. The launcher
+passes that resolved configuration to the native process as an in-memory JSON
+snapshot; it is not a file cache and an already-running window does not watch
+for TOML changes. Close and reopen the affected window after editing the file.
+
+To apply a file to the current terminal session without closing it, write this
+OSC sequence from the terminal. Use the absolute path shown in `Help` when in
+doubt.
+
+```sh
+config_path="$HOME/.config/fpasoterm/User/config.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+In PowerShell:
+
+```powershell
+$configPath = Join-Path $HOME '.config\fpasoterm\User\config.toml'
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
+```
+
+`window.width` and `window.height` are additionally overridden by the saved
+`window-state.json` while `window.rememberBounds = true`. Run
+`fpasoterm --reset-window-state`, then open a new window, when testing a size
+change from `config.toml`.
 
 Temporarily override the configured window size:
 

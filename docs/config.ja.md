@@ -6,6 +6,9 @@ fpasoterm はユーザー編集用の設定を以下から読み込みます。
 ~/.config/fpasoterm/User/config.toml
 ```
 
+Windows の `~` は現在の user profile を表すため、既定 path は
+`%USERPROFILE%\.config\fpasoterm\User\config.toml` です。
+
 起動時に、全デフォルト項目を含む example を以下へ書き出し、古い場合は更新します。
 
 ```text
@@ -23,6 +26,31 @@ fpasoterm -c ~/.config/fpasoterm/User/work.toml
 
 window menu の `Help` には、そのwindowが現在使用している設定ファイルの絶対pathを表示します。
 `OSC 777;config=...` で runtime config file を適用した場合も、適用後のpathを表示します。
+
+## 変更の反映タイミング
+
+fpasoterm は各 window process の起動時に `config.toml` を読みます。launcher は解決済み設定を
+in-memory JSON snapshot として native process へ渡します。これは file cache ではなく、起動済み
+window は TOML file の変更を監視しません。編集後は対象 window を閉じて再度起動してください。
+
+window を閉じずに現在の terminal session へ適用する場合は、terminal から次の OSC sequence を
+出力します。不明な場合は `Help` に表示される絶対pathを使用してください。
+
+```sh
+config_path="$HOME/.config/fpasoterm/User/config.toml"
+printf '\033]777;config=%s\a\r\n' "$config_path"
+```
+
+PowerShell の場合:
+
+```powershell
+$configPath = Join-Path $HOME '.config\fpasoterm\User\config.toml'
+[Console]::Write("$([char]27)]777;config=$configPath$([char]7)`r`n")
+```
+
+`window.rememberBounds = true` の場合、`window.width` と `window.height` は保存済み
+`window-state.json` により追加で上書きされます。`config.toml` で size を試す場合は、
+`fpasoterm --reset-window-state` を実行してから新しい window を開いてください。
 
 設定済みウィンドウサイズを一時的に上書きする場合:
 
