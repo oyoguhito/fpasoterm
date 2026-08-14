@@ -32,6 +32,26 @@ window menu の `Help` には、そのwindowが現在使用している設定フ
 fpasoterm は各 window process の起動時に `config.toml` を読みます。launcher は解決済み設定を
 in-memory JSON snapshot として native process へ渡します。これは file cache ではなく、起動済み
 window は TOML file の変更を監視しません。編集後は対象 window を閉じて再度起動してください。
+`[keybindings]` も同じです。shortcut label と binding は起動時に解決されるため、TOML を編集した
+だけでは既存 window に反映されません。
+
+```mermaid
+flowchart TD
+  A[config.toml を編集] --> B{起動中 window へ直ちに適用するか}
+  B -->|しない| C[対象 fpasoterm window を閉じる]
+  C --> D[fpasoterm を起動]
+  D --> E{起動経路}
+  E -->|Node launcher| F[TOML を読み既定値と merge]
+  E -->|配布済み direct binary| G[TOML を読み embedded default と merge]
+  F --> H[解決済み config を in-memory JSON で渡す]
+  G --> H
+  H --> I[native window と renderer を生成]
+  I --> J[theme terminal option keybinding plugin を適用]
+  B -->|する| K[terminal から OSC 777 config path を出力]
+  K --> L[指定 TOML を現在の renderer へ読み込み適用]
+  L --> J
+  M[window-state.json] -. 保存済み size は width height を上書き .-> I
+```
 
 window を閉じずに現在の terminal session へ適用する場合は、terminal から次の OSC sequence を
 出力します。不明な場合は `Help` に表示される絶対pathを使用してください。

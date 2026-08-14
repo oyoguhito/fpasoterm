@@ -34,6 +34,26 @@ fpasoterm reads `config.toml` when each window process starts. The launcher
 passes that resolved configuration to the native process as an in-memory JSON
 snapshot; it is not a file cache and an already-running window does not watch
 for TOML changes. Close and reopen the affected window after editing the file.
+This includes `[keybindings]`: shortcut labels and bindings are resolved at
+startup, not while the TOML file is being edited.
+
+```mermaid
+flowchart TD
+  A[Edit config.toml] --> B{Apply to an existing window now?}
+  B -->|No| C[Close the affected fpasoterm window]
+  C --> D[Start fpasoterm]
+  D --> E{Launch path}
+  E -->|Node launcher| F[Read TOML and merge defaults]
+  E -->|Direct packaged binary| G[Read TOML and merge embedded defaults]
+  F --> H[Pass resolved config as in-memory JSON]
+  G --> H
+  H --> I[Create native window and renderer]
+  I --> J[Apply theme, terminal options, keybindings, and plugins]
+  B -->|Yes| K[Print OSC 777 config path from the terminal]
+  K --> L[Load and apply the specified TOML to this renderer]
+  L --> J
+  M[window-state.json] -. saved size overrides width and height .-> I
+```
 
 To apply a file to the current terminal session without closing it, write this
 OSC sequence from the terminal. Use the absolute path shown in `Help` when in
