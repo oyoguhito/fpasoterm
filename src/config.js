@@ -5,6 +5,9 @@ const { pathToFileURL } = require('node:url');
 const toml = require('smol-toml');
 const ts = require('typescript');
 
+const defaultTerminalFontFamily = '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+const macosTerminalFontFamily = '"SF Mono", Menlo, ui-monospace, SFMono-Regular, "Hiragino Sans", "Hiragino Kaku Gothic ProN", monospace';
+
 // The complete set of supported user settings. This object is also used to
 // fill missing keys when a user provides a partial config.toml.
 const defaultConfig = Object.freeze({
@@ -25,7 +28,7 @@ const defaultConfig = Object.freeze({
     allowTransparency: true,
     cursorBlink: true,
     cursorStyle: 'block',
-    fontFamily: '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontFamily: defaultTerminalFontFamily,
     fontSize: 14,
     lineHeight: 1.12,
     minimumContrastRatio: 4.5,
@@ -106,13 +109,26 @@ const defaultConfig = Object.freeze({
   },
 });
 
-// Uses a slightly smaller default on Intel macOS, whose WebKit font metrics
-// otherwise make the terminal noticeably larger than other supported hosts.
+// Uses macOS-native monospace fonts before CJK fallbacks. Hiragino Sans is
+// proportional, so using it as the first available font makes xterm cells look spaced out.
 function platformDefaultConfig(platform = process.platform, architecture = process.arch) {
-  if (platform === 'darwin' && architecture === 'x64') {
-    return mergeConfig(defaultConfig, { terminal: { fontSize: 12 } });
+  if (platform === 'darwin') {
+    return mergeConfig(defaultConfig, {
+      terminal: {
+        fontFamily: macosTerminalFontFamily,
+        fontSize: architecture === 'x64' ? 12 : 14,
+      },
+    });
   }
   return defaultConfig;
+}
+
+// Safely migrates only the old shipped default, preserving custom font choices.
+function migrateLegacyMacosFontFamily(config, platform = process.platform) {
+  if (platform !== 'darwin' || config?.terminal?.fontFamily !== defaultTerminalFontFamily) {
+    return config;
+  }
+  return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
 }
 
 // Returns the settings persisted in user config files. Image protocol options
@@ -126,7 +142,7 @@ function writableConfigDefaults(platform = process.platform, architecture = proc
 // Writes the default TOML with comments so users can copy it to config.toml
 // and understand what each section controls.
 function defaultConfigExample(platform = process.platform, architecture = process.arch) {
-  const defaultFontSize = platformDefaultConfig(platform, architecture).terminal.fontSize;
+  const terminalDefaults = platformDefaultConfig(platform, architecture).terminal;
   return `# fpasoterm user configuration.
 # Copy this file to config.toml and edit the values you want to change.
 
@@ -154,8 +170,8 @@ rememberBounds = true
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "\\"Noto Sans Mono CJK JP\\", \\"Noto Sans CJK JP\\", \\"BIZ UDGothic\\", \\"Hiragino Sans\\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
-fontSize = ${defaultFontSize}
+fontFamily = ${JSON.stringify(terminalDefaults.fontFamily)}
+fontSize = ${terminalDefaults.fontSize}
 # lineHeight leaves enough vertical room for underscores and descenders.
 lineHeight = 1.12
 # minimumContrastRatio raises foreground colors that are too close to the terminal background.
@@ -538,7 +554,8 @@ function loadConfig() {
   writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
-  const config = removeUnsupportedConfigSections(mergeConfig(platformDefaultConfig(), userConfig));
+  let config = removeUnsupportedConfigSections(mergeConfig(platformDefaultConfig(), userConfig));
+  config = migrateLegacyMacosFontFamily(config);
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {
@@ -570,6 +587,7 @@ module.exports = {
   readWindowState,
   writeWindowState,
   loadConfig,
+  migrateLegacyMacosFontFamily,
   mergeConfig,
   missingConfigKeys,
   pruneUnsupportedConfig,
