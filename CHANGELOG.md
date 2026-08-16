@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.2
+
+- Fixed macOS Apple Silicon terminal cell metrics by prioritizing the native `SF Mono` and `Menlo` monospace fonts before proportional Hiragino fallbacks.
+- Migrated only the previous shipped macOS font default in memory, preserving user-selected custom font families.
+
 ## 1.5.1
 
 - Restricted the npm source package to tracked Tauri source and configuration files, excluding generated build outputs.

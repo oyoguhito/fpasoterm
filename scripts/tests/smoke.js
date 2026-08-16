@@ -22,8 +22,11 @@ const {
 assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 12);
 assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
+assert.match(platformDefaultConfig('darwin', 'arm64').terminal.fontFamily, /^"SF Mono", Menlo/);
+assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /^"Noto Sans Mono CJK JP"/);
 assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
+assert.match(defaultConfigExample('darwin', 'arm64'), /fontFamily = "\\"SF Mono\\", Menlo/);
 const missingDefaults = missingConfigKeys(writableConfigDefaults(), { keybindings: { prefix: 'Ctrl+Alt' } });
 assert.ok(missingDefaults.includes('keybindings.newWindow'));
 assert.equal(missingDefaults.includes('terminal.images.enabled'), false);

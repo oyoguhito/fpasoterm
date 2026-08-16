@@ -1803,6 +1803,7 @@ fn runtime_config() -> RuntimeConfig {
     } else {
         direct_runtime_config()
     };
+    migrate_legacy_macos_font_family(&mut config);
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -1831,9 +1832,45 @@ fn apply_saved_window_bounds(runtime: &mut RuntimeConfig) {
     }
 }
 
+const DEFAULT_TERMINAL_FONT_FAMILY: &str = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const MACOS_TERMINAL_FONT_FAMILY: &str = "\"SF Mono\", Menlo, ui-monospace, SFMono-Regular, \"Hiragino Sans\", \"Hiragino Kaku Gothic ProN\", monospace";
+
 // Matches the Intel macOS renderer default to the host's more compact terminal metrics.
 fn default_terminal_font_size() -> u32 {
     terminal_font_size_for(env::consts::OS, env::consts::ARCH)
+}
+
+// Uses installed macOS monospace fonts before proportional Japanese fallbacks.
+fn default_terminal_font_family() -> &'static str {
+    terminal_font_family_for(env::consts::OS)
+}
+
+// Keeps the platform font order testable from non-macOS CI hosts.
+fn terminal_font_family_for(platform: &str) -> &'static str {
+    if platform == "macos" {
+        MACOS_TERMINAL_FONT_FAMILY
+    } else {
+        DEFAULT_TERMINAL_FONT_FAMILY
+    }
+}
+
+// Replaces only the old shipped default after parsing a user config file.
+fn migrate_legacy_macos_font_family(runtime: &mut RuntimeConfig) {
+    if env::consts::OS != "macos" {
+        return;
+    }
+    let Some(font_family) = runtime
+        .config
+        .terminal
+        .get("fontFamily")
+        .and_then(|value| value.as_str())
+    else {
+        return;
+    };
+    if font_family == DEFAULT_TERMINAL_FONT_FAMILY {
+        runtime.config.terminal["fontFamily"] =
+            serde_json::Value::String(MACOS_TERMINAL_FONT_FAMILY.to_string());
+    }
 }
 
 // Keeps the platform rule testable from non-macOS CI hosts.
@@ -1870,6 +1907,7 @@ fn merge_runtime_config_from_path(
         serde_json::to_value(&config.config).map_err(|error| error.to_string())?;
     merge_json_value(&mut config_value, override_value);
     config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
+    migrate_legacy_macos_font_family(&mut config);
     config.config_path = absolute_path.to_string_lossy().to_string();
     config.config_dir = absolute_path
         .parent()
@@ -1936,7 +1974,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 "allowTransparency": true,
                 "cursorBlink": true,
                 "cursorStyle": "block",
-                "fontFamily": "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace",
+                "fontFamily": default_terminal_font_family(),
                 "fontSize": default_terminal_font_size(),
                 "minimumContrastRatio": 4.5,
                 "rescaleOverlappingGlyphs": true,
@@ -2423,18 +2461,40 @@ fn prune_toml_value(
     }
 }
 
-// Returns the packaged default TOML with the platform-specific font size.
+// Returns the packaged default TOML with platform-specific terminal font defaults.
 fn embedded_default_config_toml() -> String {
-    default_config_toml_for_font_size(default_terminal_font_size())
+    default_config_toml_for_terminal_defaults(
+        default_terminal_font_size(),
+        default_terminal_font_family(),
+    )
 }
 
 // Produces deterministic default TOML for runtime use and unit tests.
-fn default_config_toml_for_font_size(font_size: u32) -> String {
-    include_str!("../default-config.toml").replacen(
+fn default_config_toml_for_terminal_defaults(font_size: u32, font_family: &str) -> String {
+    let text = include_str!("../default-config.toml").replacen(
         "fontSize = 14",
         &format!("fontSize = {font_size}"),
         1,
-    )
+    );
+    let font_family_line = format!(
+        "fontFamily = {}",
+        toml::Value::String(font_family.to_string())
+    );
+    let mut replaced_font_family = false;
+    let mut result = text
+        .lines()
+        .map(|line| {
+            if !replaced_font_family && line.starts_with("fontFamily = ") {
+                replaced_font_family = true;
+                font_family_line.clone()
+            } else {
+                line.to_string()
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    result.push('\n');
+    result
 }
 
 // Writes CLI errors through the same console-aware path used for normal output.
@@ -5151,11 +5211,28 @@ mod tests {
     }
 
     #[test]
+    fn macos_uses_native_monospace_font_before_hiragino() {
+        assert_eq!(
+            terminal_font_family_for("macos"),
+            MACOS_TERMINAL_FONT_FAMILY
+        );
+        assert!(terminal_font_family_for("macos").starts_with("\"SF Mono\""));
+        assert_eq!(
+            terminal_font_family_for("linux"),
+            DEFAULT_TERMINAL_FONT_FAMILY
+        );
+    }
+
+    #[test]
     fn embedded_default_config_is_complete_toml() {
-        let text = default_config_toml_for_font_size(12);
+        let text = default_config_toml_for_terminal_defaults(12, MACOS_TERMINAL_FONT_FAMILY);
         let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
         assert_eq!(config["window"]["width"].as_integer(), Some(1000));
         assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
+        assert_eq!(
+            config["terminal"]["fontFamily"].as_str(),
+            Some(MACOS_TERMINAL_FONT_FAMILY)
+        );
         assert!(config["terminal"].get("images").is_none());
         assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
         assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("N"));
