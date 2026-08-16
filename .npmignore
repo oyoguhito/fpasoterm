@@ -1,0 +1,11 @@
+# Exclude local and generated files while npm packages the source distribution.
+node_modules/
+dist/
+out/
+artifacts/
+diagnostics/
+src-tauri/gen/
+src-tauri/target/
+SESSION.md
+*.log
+.DS_Store

@@ -55,9 +55,12 @@ function assertFile(relativePath) {
 }
 
 const packageJson = JSON.parse(read('package.json'));
+const packageLock = JSON.parse(read('package-lock.json'));
 
 assert.equal(packageJson.name, 'fpasoterm');
-assert.equal(packageJson.version, '1.5.0');
+assert.match(packageJson.version, /^\d+\.\d+\.\d+$/);
+assert.equal(packageLock.version, packageJson.version);
+assert.equal(packageLock.packages[''].version, packageJson.version);
 assert.equal(packageJson.bin.fpasoterm, 'bin/fpasoterm');
 assert.equal(packageJson.license, 'MIT');
 assert.equal(packageJson.repository.url, 'git+https://github.com/oyoguhito/fpasoterm.git');
@@ -517,6 +520,7 @@ assert.match(tauriConfig, /"backgroundColor": "#00000000"/);
 assert.match(tauriConfig, /"decorations": false/);
 
 const cargoToml = read('src-tauri/Cargo.toml');
+assert.match(cargoToml, new RegExp(`version = "${packageJson.version}"`));
 assert.match(cargoToml, /tauri =/);
 assert.match(cargoToml, /macos-private-api/);
 assert.match(cargoToml, /image-png/);
