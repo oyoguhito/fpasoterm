@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.1
+
+- Restricted the npm source package to tracked Tauri source and configuration files, excluding generated build outputs.
+- Added npm ignore rules so local build, cache, diagnostic, and session files cannot be published.
+
 ## 1.5.0
 
 - Added Kitty graphics protocol rendering through the xterm.js image addon, with bounded image size and storage settings under `[terminal.images]`.
