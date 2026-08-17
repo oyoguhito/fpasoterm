@@ -88,14 +88,25 @@ clean な non-jj git checkout では、次で自動化できます。
 fpasoterm --self-update-checkout
 ```
 
-local command、launcher entry、icon、ユーザー設定、runtime cache、Tauri/WebKit app data を完全に削除する場合:
+npm global install で入れた npm 管理下の `fpasoterm` command を削除する場合:
+
+```sh
+npm uninstall -g fpasoterm
+```
+
+この操作では source checkout の desktop launcher、ユーザー設定、cache、app data は削除されません。実行後も `type -a fpasoterm` で command が表示される場合は、source checkout launcher など別の install が残っています。
+
+Windows では PowerShell または Command Prompt で同じ command を実行できます。実行後は新しい terminal を開き、`where.exe fpasoterm` または `Get-Command fpasoterm -All` で別の command が残っていないか確認してください。
+
+source checkout から導入した local command、desktop launcher entry、icon、ユーザー設定、runtime cache、Tauri/WebKit app data を削除する場合:
 
 ```sh
 npm run uninstall:desktop
 ```
 
-Windows では、local testing で追加した fpasoterm 関連 directory を current user
-の `Path` から削除します。共有 npm directory は残します。
+Windows の `npm run uninstall:desktop` は、local testing で追加した fpasoterm 関連 directory を current user の `Path` から削除するだけです。global npm package、source checkout、ユーザー設定、cache、app data は削除しません。共有 npm directory は残します。
+
+両方を削除する場合は、source checkout 内で先に `npm run uninstall:desktop` を実行し、その後 `npm uninstall -g fpasoterm` を実行してください。
 
 ChromeOS/Baguette で透過検証中に黒、白、ちらつきが出る場合:
 

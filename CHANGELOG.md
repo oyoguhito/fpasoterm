@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.4
+
+- Kept first-run local Cargo builds attached to the CLI and displayed preparation, compiler progress, build completion, and native window startup phases before returning the prompt.
+- Appended detached Cargo build output and failure exit details to the persistent launcher log for diagnosis when a window cannot start.
+- Documented the distinct cleanup scopes of `npm uninstall -g fpasoterm` and `npm run uninstall:desktop`, including the Windows `Path`-only source-uninstaller behavior.
+
 ## 1.5.3
 
 - Detached normal CLI launches before a possible local Cargo build so the invoking terminal prompt returns immediately on macOS, Linux, and Windows.
