@@ -36,13 +36,13 @@ shell で `exit` を実行すると fpasoterm のウィンドウも閉じます�
 
 ## コマンドラインオプション
 
-通常起動ではコンソールから切り離して起動し、すぐに shell prompt が戻ります。
+cached runtime を使用する通常起動ではコンソールから切り離して起動し、すぐに shell prompt が戻ります。
 
 ```sh
 fpasoterm
 ```
 
-launcherはcached runtimeを使うのかlocal Cargo buildを開始するのかをCLIへ表示してから、実作業の前に切り離します。そのためsource checkoutまたはnpm packageの初回起動でもpromptが戻ります。runtime解決、Cargo build開始・完了、desktop spawnの経過時間はLinux/macOSでは`~/.cache/fpasoterm/launcher.log`、Windowsでは`%LOCALAPPDATA%\\fpasoterm\\launcher.log`へ記録します。呼び出し元consoleでdesktop processの終了を待つ必要がある場合だけ、`--foreground --console-diagnostics`を使ってください。
+source checkoutまたはnpm packageの初回起動でlocal Cargo buildが必要な場合は、CLIを接続したまま`phase 1/3`の準備、`phase 2/3`のcompiler progress、`phase 3/3`のnative window起動を表示します。Cargo errorもこのterminalへ表示し、window process起動後にpromptが戻ります。runtime解決、Cargo build、desktop spawnの経過時間とcompiler outputはLinux/macOSでは`~/.cache/fpasoterm/launcher.log`、Windowsでは`%LOCALAPPDATA%\\fpasoterm\\launcher.log`にも記録します。desktop processの終了まで待機したい場合だけ、`--foreground --console-diagnostics`を使ってください。
 
 オプション一覧:
 

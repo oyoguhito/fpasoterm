@@ -80,16 +80,35 @@ fpasoterm --self-update-checkout
 
 Run `npm run update:desktop` after changing the checkout path, launcher icon, or installed command wrapper. It is not required for `./bin/fpasoterm --dev ...`.
 
-Remove the local command, launcher entry, installed launcher icons, user config,
-runtime cache, and Tauri/WebKit app data:
+To remove an npm global installation, including its npm-managed `fpasoterm`
+command, run:
+
+```sh
+npm uninstall -g fpasoterm
+```
+
+This does not remove a source-checkout desktop launcher, user config, cache, or
+app data. If `type -a fpasoterm` still shows a command afterward, it is another
+installation such as a source-checkout launcher.
+
+On Windows, run the same command in PowerShell or Command Prompt. Open a new
+terminal afterward, then use `where.exe fpasoterm` or
+`Get-Command fpasoterm -All` to check for another remaining command.
+
+From a source checkout, remove its local command, desktop launcher entry,
+installed launcher icons, user config, runtime cache, and Tauri/WebKit app data:
 
 ```sh
 npm run uninstall:desktop
 ```
 
-On Windows, this also removes fpasoterm-specific directories from the current
-user's `Path` if they were added during local testing. Shared npm directories
-are left untouched.
+On Windows, `npm run uninstall:desktop` only removes fpasoterm-specific
+directories from the current user's `Path` if they were added during local
+testing. It does not remove the global npm package, source checkout, user
+config, cache, or app data. Shared npm directories are left untouched.
+
+To remove both installation types, run `npm run uninstall:desktop` from the
+source checkout first, then run `npm uninstall -g fpasoterm`.
 
 To expose the local command during development:
 

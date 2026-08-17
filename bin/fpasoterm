@@ -1034,6 +1034,11 @@ function startupPreparationStatus(options) {
   return 'building local runtime with cargo (first launch can take several minutes)';
 }
 
+// Detects the only startup path that needs visible work before a window exists.
+function requiresLocalRuntimeBuild(options) {
+  return options.dev || (!findStampedTauriBinary() && !findTauriBinary());
+}
+
 // Builds the debug binary used by normal source-checkout launches.
 function buildTauriBinary(options) {
   if (options.dev) {
@@ -1060,23 +1065,44 @@ function buildTauriBinary(options) {
 // Builds the static-asset debug binary without starting a localhost dev server.
 function buildLocalTauriBinary(options) {
   appendLaunchPhase('cargo-build-start');
+  let logFd;
+  let stdio = options.foreground ? 'inherit' : 'ignore';
+  if (!options.foreground) {
+    try {
+      logFd = fs.openSync(launcherLogPath, 'a');
+      // A detached first launch cannot write to the invoking terminal. Keep the
+      // compiler diagnostics in launcher.log so a missing toolchain or native
+      // dependency can be diagnosed without rerunning in the foreground.
+      stdio = ['ignore', logFd, logFd];
+    } catch (error) {
+      appendLauncherLog(`launcher cargo log fd error=${error.message}`);
+    }
+  }
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
     env: process.env,
-    stdio: options.foreground ? 'inherit' : 'ignore',
+    stdio,
     windowsHide: !options.foreground,
   });
 
   return new Promise((resolve, reject) => {
     result.on('error', (error) => {
+      if (logFd !== undefined) {
+        fs.closeSync(logFd);
+      }
       reject(new Error(`failed to start cargo build: ${error.message}`));
     });
     result.on('exit', (code, signal) => {
+      if (logFd !== undefined) {
+        fs.closeSync(logFd);
+      }
       if (signal) {
+        appendLauncherLog(`launcher cargo build exit signal=${signal}`);
         reject(new Error(`cargo build exited with signal ${signal}`));
         return;
       }
       if (code !== 0) {
+        appendLauncherLog(`launcher cargo build exit code=${code}`);
         reject(new Error(`cargo build failed with exit code ${code}`));
         return;
       }
@@ -1162,31 +1188,46 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
+  let preparedBinary;
   // Re-exec before a possible cargo build so normal launches return the caller
   // prompt consistently on macOS, Linux, and Windows.
   if (!options.foreground && process.env.FPASOTERM_LAUNCHER_DETACHED !== '1') {
     const preparation = startupPreparationStatus(options);
-    const child = spawn(process.execPath, [__filename, ...process.argv.slice(2)], {
-      detached: true,
-      env: {
-        ...process.env,
-        FPASOTERM_LAUNCHER_DETACHED: '1',
-        FPASOTERM_LAUNCH_STARTED_AT: String(launcherStartedAt),
-      },
-      stdio: 'ignore',
-      windowsHide: true,
-    });
-    child.on('error', (error) => appendLauncherLog(`launcher detach error=${error.message}`));
-    child.unref();
-    if (process.stdout.isTTY) {
-      process.stdout.write(`fpasoterm: ${preparation}; starting in background (pid ${child.pid ?? 'unknown'}).\n`);
+    if (requiresLocalRuntimeBuild(options)) {
+      // First-run compilation can take minutes. Keep this process attached so
+      // the caller sees what is loading and the actual compiler error, then
+      // detach only after a native runtime is ready to open its window.
+      process.stdout.write(`fpasoterm: ${preparation}.\n`);
+      process.stdout.write('fpasoterm: phase 1/3 - preparing the local Rust runtime.\n');
+      process.stdout.write('fpasoterm: phase 2/3 - cargo build started; compiler progress follows.\n');
+      appendLaunchPhase('visible-cargo-build-start');
+      preparedBinary = await buildTauriBinary({ ...options, foreground: true });
+      appendLaunchPhase('visible-cargo-build-complete');
+      process.stdout.write('fpasoterm: phase 2/3 - cargo build completed.\n');
+      process.stdout.write('fpasoterm: phase 3/3 - opening the native window in the background.\n');
+    } else {
+      const child = spawn(process.execPath, [__filename, ...process.argv.slice(2)], {
+        detached: true,
+        env: {
+          ...process.env,
+          FPASOTERM_LAUNCHER_DETACHED: '1',
+          FPASOTERM_LAUNCH_STARTED_AT: String(launcherStartedAt),
+        },
+        stdio: 'ignore',
+        windowsHide: true,
+      });
+      child.on('error', (error) => appendLauncherLog(`launcher detach error=${error.message}`));
+      child.unref();
+      if (process.stdout.isTTY) {
+        process.stdout.write(`fpasoterm: ${preparation}; starting in background (pid ${child.pid ?? 'unknown'}).\n`);
+      }
+      appendLaunchPhase(`detached pid=${child.pid ?? 'unknown'}`);
+      return;
     }
-    appendLaunchPhase(`detached pid=${child.pid ?? 'unknown'}`);
-    return;
   }
 
   appendLaunchPhase('resolving-runtime');
-  const tauriBinary = await buildTauriBinary(options);
+  const tauriBinary = preparedBinary || await buildTauriBinary(options);
   appendLaunchPhase('runtime-ready');
   const command = tauriBinary;
   const args = options.runtimeArgs;
@@ -1224,6 +1265,9 @@ async function launch(options) {
   });
 
   if (!options.foreground) {
+    if (preparedBinary && process.stdout.isTTY) {
+      process.stdout.write(`fpasoterm: startup complete; window process pid ${child.pid ?? 'unknown'}.\n`);
+    }
     child.on('exit', (code, signal) => {
       appendLauncherLog(`launcher child exit code=${code ?? ''} signal=${signal ?? ''}`);
       if (logFd !== undefined) {

@@ -136,20 +136,21 @@ When the shell exits, for example by running `exit`, fpasoterm closes the applic
 
 ## Command-line Options
 
-Normal launches detach from the console and return the shell prompt immediately:
+Normal launches using a cached runtime detach from the console and return the
+shell prompt immediately:
 
 ```sh
 fpasoterm
 ```
 
-The launcher prints whether it is using a cached runtime or starting a local
-Cargo build, then detaches before that work begins. The prompt therefore also
-returns during a first source or npm-package launch. Timing for runtime
-resolution, Cargo build start/finish, and desktop spawn is appended to the
-launcher diagnostics log: `~/.cache/fpasoterm/launcher.log` on Linux/macOS,
+When a first source or npm-package launch needs a local Cargo build, the CLI
+stays attached and prints phase 1/3 preparation, phase 2/3 compiler progress,
+and phase 3/3 native window startup. Cargo errors are shown in that terminal;
+the prompt returns after the window process is started. Timing and compiler
+output are also appended to `~/.cache/fpasoterm/launcher.log` on Linux/macOS,
 or `%LOCALAPPDATA%\\fpasoterm\\launcher.log` on Windows. Use
-`--foreground --console-diagnostics` only when the caller must wait for the
-desktop process.
+`--foreground --console-diagnostics` only when the caller must also wait for
+the desktop process to exit.
 
 Show available options:
 
