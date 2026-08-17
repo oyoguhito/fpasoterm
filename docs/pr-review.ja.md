@@ -20,8 +20,8 @@ npm run check
 GitHub CLI が無い場合:
 
 ```sh
-git fetch origin <branch-name>
-git switch -c review-<number> origin/<branch-name>
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
 npm install
 npm run check
 ```
@@ -29,14 +29,19 @@ npm run check
 `git fetch` は remote reference を取得するだけで、現在の working tree は変更しません。
 build前には必ず `git switch` または `git checkout` を実行してください。
 
+Node.js 22+、Rust stable、対象OSのnative build toolが必要です。macOSではXcode
+Command Line Tools、WindowsではVisual Studio Build Toolsの**Desktop development with
+C++**とMicrosoft Edge WebView2 Runtimeを導入してください。local checkoutが無い場合は
+`git clone https://github.com/oyoguhito/fpasoterm.git`後に`cd fpasoterm`を実行します。
+
 ## Windows MSI の確認
 
-PR #41では下記のbranch名に `release-v1.5.0` を使います。以後のPRでは、そのPRの
-head branch名へ置き換えてください。repository rootでPowerShellから実行します。
+repository rootでPowerShellから実行します。PRのhead branch名を推測せず、PR numberから
+取得するrefを使います。
 
 ```powershell
-git fetch origin release-v1.5.0
-git switch --detach origin/release-v1.5.0
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
 git status --short
 git log -1 --oneline
 npm ci
@@ -55,6 +60,17 @@ direct binaryを確認します。
 .\src-tauri\target\release\fpasoterm.exe --version
 .\src-tauri\target\release\fpasoterm.exe
 ```
+
+CLI startupを変更するPRでは、実際のNode launcherも確認します。status lineを表示し、
+windowを待たずPowerShell promptが戻ることを確認してください。
+
+```powershell
+node .\bin\fpasoterm
+Get-Content "$env:LOCALAPPDATA\fpasoterm\launcher.log" -Tail 40
+```
+
+local buildが必要な場合だけlogに`cargo-build-start` / `cargo-build-complete`が出て、
+その後に`desktop-spawned`とelapsed timeが記録されます。
 
 application内の `Help` を開き、`Config:` が編集対象のfileを指すことと、PRのUI変更が
 表示されることを確認してください。
@@ -100,6 +116,38 @@ npm run build
 - `--size` は起動時の window size を変更する。
 - `--title` は custom titlebar の文字を変更する。
 - `--titlebar-color` は custom titlebar の色を変更する。
+
+## macOS App Bundle の確認
+
+repository rootのTerminalで実行します。reviewする実機でnative buildします。Apple Silicon
+ではarm64、Intel Macではx64が生成されます。
+
+```sh
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
+git status --short
+git log -1 --oneline
+npm ci
+npm run check
+npm run build:artifacts -- --bundles-only
+./src-tauri/target/release/fpasoterm --version
+node ./bin/fpasoterm
+tail -40 ~/.cache/fpasoterm/launcher.log
+```
+
+CLI launcherの挙動確認には`node ./bin/fpasoterm`を使います。cached runtimeまたはCargo
+buildのstatusを表示し、windowが開く前にTerminal promptが戻ることを確認してください。
+compilerまたはapplication outputを待つ必要がある場合だけ、`--foreground --console-diagnostics`
+を追加します。
+
+iconやFinder/App bundleの確認は、local buildしたapp bundleを別に開きます。
+
+```sh
+open -n ./src-tauri/target/release/bundle/macos/fpasoterm.app
+```
+
+unsigned local buildをmacOSがblockした場合はFinderの**開く**を実行し、Privacy & Security
+で許可します。PR branchの代わりに古いtagのDMGを使わないでください。
 
 ## Artifact が無い場合
 

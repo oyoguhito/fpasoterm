@@ -20,8 +20,8 @@ npm run check
 Without GitHub CLI:
 
 ```sh
-git fetch origin <branch-name>
-git switch -c review-<number> origin/<branch-name>
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
 npm install
 npm run check
 ```
@@ -29,15 +29,20 @@ npm run check
 `git fetch` only downloads remote references; it does not change the current
 working tree. Always run `git switch` or `git checkout` before building.
 
+Prerequisites are Node.js 22+, Rust stable, and the native target tools: Xcode
+Command Line Tools on macOS, or Visual Studio Build Tools with **Desktop
+development with C++** plus the Edge WebView2 Runtime on Windows. If no local
+checkout exists yet, clone first with
+`git clone https://github.com/oyoguhito/fpasoterm.git` and `cd fpasoterm`.
+
 ## Windows MSI Review
 
-For PR #41, use `release-v1.5.0` as the branch name below. Replace it with the
-PR head branch for later reviews. Run these commands from PowerShell in the
-repository root:
+Run these commands from PowerShell in the repository root. The PR-number ref
+avoids guessing the head branch name:
 
 ```powershell
-git fetch origin release-v1.5.0
-git switch --detach origin/release-v1.5.0
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
 git status --short
 git log -1 --oneline
 npm ci
@@ -56,6 +61,18 @@ older Start menu, pinned, or Path entry:
 .\src-tauri\target\release\fpasoterm.exe --version
 .\src-tauri\target\release\fpasoterm.exe
 ```
+
+Then test the actual Node launcher behavior required by PRs that change CLI
+startup. It must print a status line and return the PowerShell prompt without
+waiting for the window:
+
+```powershell
+node .\bin\fpasoterm
+Get-Content "$env:LOCALAPPDATA\fpasoterm\launcher.log" -Tail 40
+```
+
+The log should contain `cargo-build-start` / `cargo-build-complete` only when a
+local build was required, followed by `desktop-spawned` and elapsed times.
 
 Then open `Help` in the application and verify that `Config:` names the file
 being edited, and that the expected PR UI is present.
@@ -103,6 +120,41 @@ Expected behavior:
 - `--size` changes the initial window size.
 - `--title` changes the custom titlebar text.
 - `--titlebar-color` changes the custom titlebar color.
+
+## macOS App Bundle Review
+
+Run these commands in Terminal from the repository root. Build natively on the
+architecture being reviewed: Apple Silicon builds arm64, while an Intel Mac
+builds x64.
+
+```sh
+git fetch origin pull/<number>/head:review-pr-<number>
+git switch review-pr-<number>
+git status --short
+git log -1 --oneline
+npm ci
+npm run check
+npm run build:artifacts -- --bundles-only
+./src-tauri/target/release/fpasoterm --version
+node ./bin/fpasoterm
+tail -40 ~/.cache/fpasoterm/launcher.log
+```
+
+`node ./bin/fpasoterm` is the command to use when reviewing launcher behavior:
+it must print a cached-runtime or Cargo-build status and return the Terminal
+prompt before the window appears. Use `--foreground --console-diagnostics` only
+to intentionally wait for compiler and application output.
+
+Open the locally built app bundle separately to review the icon and Finder/App
+bundle behavior:
+
+```sh
+open -n ./src-tauri/target/release/bundle/macos/fpasoterm.app
+```
+
+If macOS blocks an unsigned local build, use Finder's **Open** action and
+approve it in Privacy & Security. Do not substitute an older tagged DMG for the
+PR branch build.
 
 ## If There Is No Artifact
 

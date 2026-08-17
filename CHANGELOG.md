@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.5.3
+
+- Detached normal CLI launches before a possible local Cargo build so the invoking terminal prompt returns immediately on macOS, Linux, and Windows.
+- Added CLI startup status for cached-runtime reuse or local Cargo builds, plus elapsed launcher phases in the persistent launcher log.
+
 ## 1.5.2
 
 - Fixed macOS Apple Silicon terminal cell metrics by prioritizing the native `SF Mono` and `Menlo` monospace fonts before proportional Hiragino fallbacks.

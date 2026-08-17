@@ -24,6 +24,14 @@ const {
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
 const packageJson = require(path.join(root, 'package.json'));
+const launcherStartedAt = Number(process.env.FPASOTERM_LAUNCH_STARTED_AT) || Date.now();
+const launcherLogPath = process.env.FPASOTERM_LAUNCHER_LOG || path.join(
+  process.platform === 'win32'
+    ? (process.env.LOCALAPPDATA || path.join(os.homedir(), 'AppData', 'Local'))
+    : (process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache')),
+  'fpasoterm',
+  'launcher.log',
+);
 
 const helpText = `Usage: fpasoterm [options]
 
@@ -66,16 +74,17 @@ Use --foreground when you want the command to wait for the app process.
 
 // Appends diagnostics for launcher/icon starts where stdout and stderr are hidden.
 function appendLauncherLog(message) {
-  const logPath = process.env.FPASOTERM_LAUNCHER_LOG;
-  if (!logPath) {
-    return;
-  }
   try {
-    fs.mkdirSync(path.dirname(logPath), { recursive: true });
-    fs.appendFileSync(logPath, `${message}\n`);
+    fs.mkdirSync(path.dirname(launcherLogPath), { recursive: true });
+    fs.appendFileSync(launcherLogPath, `${message}\n`);
   } catch {
     // Launcher diagnostics must never prevent the app from starting.
   }
+}
+
+// Records elapsed launcher time without keeping the invoking shell attached.
+function appendLaunchPhase(phase) {
+  appendLauncherLog(`launcher phase=${phase} elapsed_ms=${Date.now() - launcherStartedAt}`);
 }
 
 // Converts CLI options into environment variables consumed by the main process.
@@ -1011,6 +1020,20 @@ function findStampedTauriBinary() {
   return binary;
 }
 
+// Describes the work the detached launcher will perform before a window exists.
+function startupPreparationStatus(options) {
+  if (options.dev) {
+    return 'building local runtime with cargo';
+  }
+  if (findStampedTauriBinary()) {
+    return 'using cached local runtime';
+  }
+  if (findTauriBinary()) {
+    return 'using local runtime';
+  }
+  return 'building local runtime with cargo (first launch can take several minutes)';
+}
+
 // Builds the debug binary used by normal source-checkout launches.
 function buildTauriBinary(options) {
   if (options.dev) {
@@ -1036,6 +1059,7 @@ function buildTauriBinary(options) {
 
 // Builds the static-asset debug binary without starting a localhost dev server.
 function buildLocalTauriBinary(options) {
+  appendLaunchPhase('cargo-build-start');
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
     env: process.env,
@@ -1056,6 +1080,7 @@ function buildLocalTauriBinary(options) {
         reject(new Error(`cargo build failed with exit code ${code}`));
         return;
       }
+      appendLaunchPhase('cargo-build-complete');
       const binary = findTauriBinary();
       if (!binary) {
         reject(new Error('cargo build finished but no current fpasoterm binary was found'));
@@ -1137,7 +1162,32 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
+  // Re-exec before a possible cargo build so normal launches return the caller
+  // prompt consistently on macOS, Linux, and Windows.
+  if (!options.foreground && process.env.FPASOTERM_LAUNCHER_DETACHED !== '1') {
+    const preparation = startupPreparationStatus(options);
+    const child = spawn(process.execPath, [__filename, ...process.argv.slice(2)], {
+      detached: true,
+      env: {
+        ...process.env,
+        FPASOTERM_LAUNCHER_DETACHED: '1',
+        FPASOTERM_LAUNCH_STARTED_AT: String(launcherStartedAt),
+      },
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    child.on('error', (error) => appendLauncherLog(`launcher detach error=${error.message}`));
+    child.unref();
+    if (process.stdout.isTTY) {
+      process.stdout.write(`fpasoterm: ${preparation}; starting in background (pid ${child.pid ?? 'unknown'}).\n`);
+    }
+    appendLaunchPhase(`detached pid=${child.pid ?? 'unknown'}`);
+    return;
+  }
+
+  appendLaunchPhase('resolving-runtime');
   const tauriBinary = await buildTauriBinary(options);
+  appendLaunchPhase('runtime-ready');
   const command = tauriBinary;
   const args = options.runtimeArgs;
   const env = runtimeEnv(options);
@@ -1148,9 +1198,9 @@ async function launch(options) {
 
   let logFd;
   let stdio = options.foreground ? 'inherit' : 'ignore';
-  if (!options.foreground && process.env.FPASOTERM_LAUNCHER_LOG) {
+  if (!options.foreground) {
     try {
-      logFd = fs.openSync(process.env.FPASOTERM_LAUNCHER_LOG, 'a');
+      logFd = fs.openSync(launcherLogPath, 'a');
       stdio = ['ignore', logFd, logFd];
     } catch (error) {
       appendLauncherLog(`launcher log fd error=${error.message}`);
@@ -1165,6 +1215,7 @@ async function launch(options) {
   });
 
   appendLauncherLog(`launcher child pid=${child.pid ?? 'unknown'}`);
+  appendLaunchPhase('desktop-spawned');
   child.on('error', (error) => {
     appendLauncherLog(`launcher child error=${error.message}`);
     if (logFd !== undefined) {
