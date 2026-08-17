@@ -142,6 +142,15 @@ Normal launches detach from the console and return the shell prompt immediately:
 fpasoterm
 ```
 
+The launcher prints whether it is using a cached runtime or starting a local
+Cargo build, then detaches before that work begins. The prompt therefore also
+returns during a first source or npm-package launch. Timing for runtime
+resolution, Cargo build start/finish, and desktop spawn is appended to the
+launcher diagnostics log: `~/.cache/fpasoterm/launcher.log` on Linux/macOS,
+or `%LOCALAPPDATA%\\fpasoterm\\launcher.log` on Windows. Use
+`--foreground --console-diagnostics` only when the caller must wait for the
+desktop process.
+
 Show available options:
 
 ```sh
