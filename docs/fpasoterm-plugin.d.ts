@@ -1,4 +1,5 @@
-type fpasotermPluginApi = {
+type FpasotermPluginApi = {
+  version: string;
   terminal: {
     options: Record<string, unknown>;
     write: (data: string) => void;
@@ -28,11 +29,17 @@ type fpasotermPluginApi = {
     };
   };
   log: (message: string) => void;
+  onReady: (callback: () => void) => void;
+  registerCommand: (
+    id: string,
+    title: string,
+    handler: () => void | Promise<void>,
+  ) => void;
 };
 
 declare global {
   interface Window {
-    fpasotermPluginApi: fpasotermPluginApi;
+    fpasotermPluginApi: FpasotermPluginApi;
   }
 }
 

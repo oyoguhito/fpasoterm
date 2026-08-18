@@ -1,0 +1,113 @@
+# プラグイン
+
+fpasoterm のプラグインは、terminal の準備後に renderer で動作するローカルの JavaScript または TypeScript file です。起動時メッセージ、terminal option の調整、diagnostics 連携など、個人用の小さな挙動変更に使えます。
+
+プラグインは高度なローカルカスタマイズ機能です。sandbox 化された extension 形式ではなく、fpasoterm がネットワークから plugin を取得することもありません。
+
+## セキュリティ
+
+plugin は terminal UI と同じ renderer context で実行されます。内容を確認して信頼できるローカル file だけを有効にしてください。出所不明の plugin は有効にせず、password、access token、private path、その他の秘密情報を plugin file に書かないでください。
+
+## plugin directory
+
+active な `config.toml` と同じ場所にある `plugins` directory 配下へ、`.js` または `.ts` file を配置します。
+
+```text
+~/.config/fpasoterm/User/
+├── config.toml
+└── plugins/
+    ├── welcome-banner.ts
+    └── status-banner.ts
+```
+
+subdirectory も使えます。設定に書く plugin path は常に `User` directory からの相対 path です。たとえば `plugins/team/banner.ts` のように指定します。
+
+TypeScript plugin は起動時に変換され、次の directory に cache されます。
+
+```text
+~/.config/fpasoterm/User/cache/plugins/
+```
+
+この cache の生成 file は編集せず、`User/plugins` 配下にある元の `.ts` file を編集してください。
+
+## plugin の有効化
+
+directory を作成し、この repository にある公開 sample を一つまたは両方コピーします。
+
+```sh
+mkdir -p ~/.config/fpasoterm/User/plugins
+cp examples/plugins/welcome-banner.ts ~/.config/fpasoterm/User/plugins/
+cp examples/plugins/status-banner.ts ~/.config/fpasoterm/User/plugins/
+```
+
+`~/.config/fpasoterm/User/config.toml` で有効にします。
+
+```toml
+[plugins]
+enabled = [
+  "plugins/welcome-banner.ts",
+  "plugins/status-banner.ts",
+]
+```
+
+plugin list または plugin source を変更した後は fpasoterm を再起動してください。`enabled` に書かれた順番で読み込まれます。
+
+Node launcher では file name を指定して list を更新することもできます。
+
+```sh
+fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
+fpasoterm --disable-plugin status-banner.ts
+fpasoterm --show-config
+```
+
+Node launcher では plugin 管理用の明示的な表記も使えます。
+
+```sh
+fpasoterm --plugin-path
+fpasoterm --plugin-list
+fpasoterm --plugin-info welcome-banner.ts
+fpasoterm --plugin-enable welcome-banner.ts
+fpasoterm --plugin-disable welcome-banner.ts
+fpasoterm --plugin-enable-all
+fpasoterm --plugin-disable-all
+```
+
+`--plugin-list` は検出した file と `enabled` の両方を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
+`--plugin-info <file>` は window を起動せずに、source path、有効状態、先頭のsource comment、load status、renderer URL を表示します。`welcome-banner.ts` のように `.js` または `.ts` の拡張子を含めて指定します。拡張子なしのnameはselectorとして無効です。
+`--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
+
+subdirectory に同名 file がある場合は、`team/status-banner.ts` のように `plugins` からの相対 path を指定してください。
+
+起動時は、trusted な `User/plugins` source または生成されたTypeScript cacheをTauriのlocal asset protocol経由で読み込みます。標準の`User` directoryが対象です。pluginを有効化または編集した後は、対象のfpasoterm windowを閉じて再起動してください。読み込みerrorを調べる場合は、`fpasoterm --foreground --console-diagnostics`で起動し、`plugin loaded` または `failed to load plugin` を確認します。
+
+各pluginは個別のfunction scopeで評価します。そのため、複数のpluginがそれぞれtop-levelで`const`や`let`を使用しても衝突しません。共有APIには`window.fpasotermPluginApi`を使用してください。
+
+## plugin API
+
+対応 API は [`docs/fpasoterm-plugin.d.ts`](fpasoterm-plugin.d.ts) に定義されています。この repository 内で TypeScript plugin を作成する場合は、先頭に次を追加します。
+
+```ts
+/// <reference path="../../docs/fpasoterm-plugin.d.ts" />
+```
+
+install 後の plugin では declaration file をローカルへコピーし、reference path を調整できます。API は `window.fpasotermPluginApi` として利用でき、次を提供します。
+
+- `terminal`: text の出力、terminal の focus、対応する terminal option の変更。
+- `fitAddon`: layout 関連 option を変更した後の `fit()` 実行。
+- `config`: `plugins.enabled` を含む解決済み runtime config の参照。
+- `log(message)`: plugin prefix 付き diagnostics の出力。
+- `version`: 実行中の fpasoterm version と build identifier の参照。
+- `onReady(callback)`: terminal backend の起動成功後に一度だけ code を実行。
+- `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` section に action を追加。
+
+plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
+
+登録した command は既存 menu の Tab / 矢印キー操作で選択できます。`Ctrl+Shift+P` は `Log Show` に割り当て済みのため維持します。将来 command palette を追加する場合も、同じ command registry を plugin source の変更なしに利用できます。
+
+## sample
+
+- [`examples/plugins/welcome-banner.ts`](../examples/plugins/welcome-banner.ts): 短い起動 banner を表示し、diagnostic を記録します。
+- [`examples/plugins/status-banner.ts`](../examples/plugins/status-banner.ts): `Plugins` menu section に `Show Plugin Status` を追加します。
+- [`examples/plugins/theme.ts`](../examples/plugins/theme.ts): 見分けやすい青緑のterminal paletteを適用し、起動後に確認messageを表示します。
+
+`config.toml` の全設定は [設定](config.ja.md) を参照してください。

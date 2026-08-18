@@ -54,11 +54,15 @@ npm run install:desktop
 fpasoterm
 ```
 
-checkout path、launcher icon、installed command wrapper を更新した場合:
+checkout path、launcher icon、installed command wrapper、Rust source、renderer asset を更新した場合:
 
 ```sh
 npm run update:desktop
 ```
+
+この command は desktop launcher を上書きし、local runtime を再buildします。次の icon または command 起動では、更新後の checkout が使われます。
+
+`npm run update:desktop` は Linux / ChromeOS の desktop integration 用です。Windows では desktop を変更せず終了します。Windows 版は最新の `.msi` または `.exe` artifact を install して更新してください。
 
 npm でインストールした package を terminal から更新する場合:
 

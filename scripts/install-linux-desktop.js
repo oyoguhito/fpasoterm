@@ -3,6 +3,13 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// This script installs a Linux desktop entry and icon theme assets. Windows
+// packages own their shortcuts, so do not create an unusable Unix wrapper.
+if (process.platform === 'win32') {
+  console.log('update:desktop is only needed for Linux/ChromeOS desktop integration; use the Windows MSI or EXE instead.');
+  process.exit(0);
+}
+
 const root = path.resolve(__dirname, '..');
 const dataHome = process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share');
 const binHome = process.env.XDG_BIN_HOME || path.join(os.homedir(), '.local', 'bin');
@@ -17,6 +24,24 @@ function buildLocalBinary() {
   if (process.env.FPASOTERM_SKIP_DESKTOP_BUILD === '1') {
     console.log('skipping local Tauri build because FPASOTERM_SKIP_DESKTOP_BUILD=1');
     return;
+  }
+
+  // Tauri's frontend assets are embedded at compile time. Cleaning only this
+  // crate makes update:desktop rebuild renderer-only changes as well.
+  const cleanResult = childProcess.spawnSync(
+    'cargo',
+    ['clean', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'), '-p', 'fpasoterm'],
+    { stdio: 'inherit' },
+  );
+  if (cleanResult.error && cleanResult.error.code === 'ENOENT') {
+    console.warn('cargo is not available; launcher may fall back to an older local binary');
+    return;
+  }
+  if (cleanResult.error) {
+    throw cleanResult.error;
+  }
+  if (cleanResult.status !== 0) {
+    throw new Error(`cargo clean failed with exit code ${cleanResult.status}`);
   }
 
   const result = childProcess.spawnSync(
@@ -42,11 +67,31 @@ function latestRuntimeSourceMtime() {
   return [
     'src-tauri/src/main.rs',
     'src-tauri/Cargo.toml',
+    'src-tauri/Cargo.lock',
+    'src-tauri/build.rs',
+    'src-tauri/default-config.toml',
     'src-tauri/tauri.conf.json',
+    'src-tauri/capabilities',
+    'src/renderer',
+    'extra/logo/fpasoterm.png',
+    'package.json',
   ]
     .map((relativePath) => path.join(root, relativePath))
-    .filter((sourcePath) => fs.existsSync(sourcePath))
-    .reduce((latest, sourcePath) => Math.max(latest, fs.statSync(sourcePath).mtimeMs), 0);
+    .reduce((latest, sourcePath) => Math.max(latest, latestPathMtime(sourcePath)), 0);
+}
+
+// Returns the newest mtime in a file or source directory recursively.
+function latestPathMtime(sourcePath) {
+  try {
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isDirectory()) {
+      return stat.mtimeMs;
+    }
+    return fs.readdirSync(sourcePath, { withFileTypes: true })
+      .reduce((latest, entry) => Math.max(latest, latestPathMtime(path.join(sourcePath, entry.name))), stat.mtimeMs);
+  } catch {
+    return 0;
+  }
 }
 
 // Writes the same normal-build stamp used by bin/fpasoterm to skip rebuilds.

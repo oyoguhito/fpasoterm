@@ -513,12 +513,14 @@ function resolvePluginUrls(config, rootDir) {
       return [];
     }
 
+    const relativeName = path.relative(pluginsDir, pluginPath);
+    const compiledPath = path.join(cacheDir, relativeName.replace(/\.ts$/, '.js'));
+    const source = fs.readFileSync(pluginPath, 'utf8');
+    let output = source;
+
     // TypeScript plugins are transpiled to JavaScript because the renderer can
     // only load script files directly.
     if (extension === '.ts') {
-      const relativeName = path.relative(pluginsDir, pluginPath);
-      const compiledPath = path.join(cacheDir, relativeName.replace(/\.ts$/, '.js'));
-      const source = fs.readFileSync(pluginPath, 'utf8');
       const compiled = ts.transpileModule(source, {
         compilerOptions: {
           module: ts.ModuleKind.None,
@@ -528,21 +530,20 @@ function resolvePluginUrls(config, rootDir) {
         },
         fileName: pluginPath,
       });
-      fs.mkdirSync(path.dirname(compiledPath), { recursive: true });
-      fs.writeFileSync(
-        compiledPath,
-        `${compiled.outputText}\n//# sourceURL=${pathToFileURL(pluginPath).toString()}\n`,
-      );
-
-      return [{
-        name: path.relative(rootDir, pluginPath),
-        url: pathToFileURL(compiledPath).toString(),
-      }];
+      output = compiled.outputText;
     }
+
+    // Each plugin is a classic script. Isolate its top-level declarations so
+    // two trusted plugins can independently use names such as `const api`.
+    fs.mkdirSync(path.dirname(compiledPath), { recursive: true });
+    fs.writeFileSync(
+      compiledPath,
+      `(() => {\n${output}\n})();\n//# sourceURL=${pathToFileURL(pluginPath).toString()}\n`,
+    );
 
     return [{
       name: path.relative(rootDir, pluginPath),
-      url: pathToFileURL(pluginPath).toString(),
+      url: pathToFileURL(compiledPath).toString(),
     }];
   });
 }

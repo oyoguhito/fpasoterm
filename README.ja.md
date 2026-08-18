@@ -229,7 +229,9 @@ repeatedTextWindowMs = 140
 enabled = ["plugins/example.ts"]
 ```
 
-プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。
+プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。plugin は renderer context で動作するため、内容を確認した信頼できるローカル file だけを有効にしてください。
+
+plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` section に action を追加できます。`fpasoterm --plugin-list` で検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`fpasoterm --plugin-info welcome-banner.ts`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
 
 最小の TypeScript plugin:
 
@@ -243,7 +245,7 @@ api.terminal.options.cursorBlink = true;
 
 二重入力が残る環境では、`config.toml` の `ime.duplicateWindowMs` または `ime.repeatedTextWindowMs` を少し大きくしてください。
 
-全デフォルト設定と plugin 設定は [設定](docs/config.ja.md) にまとめています。設定サンプルは [examples/config](examples/config)、TypeScript plugin のサンプルは [examples/plugins](examples/plugins) にあります。
+全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin の設定方法、security 上の注意、CLI 管理、対応 API の declaration は [プラグイン](docs/plugins.ja.md) と [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、公開 plugin sample は [examples/plugins](examples/plugins) にあります。
 
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+B` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。

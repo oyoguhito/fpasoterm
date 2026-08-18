@@ -15,6 +15,13 @@
     "enableGTKAppId": false,
     "macOSPrivateApi": true,
     "security": {
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/.config/fpasoterm/User/plugins/**/*",
+          "$HOME/.config/fpasoterm/User/cache/plugins/**/*"
+        ]
+      },
       "csp": "default-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' asset: http://asset.localhost"
     },
     "windows": [

@@ -123,8 +123,13 @@ body {
   z-index: 10020;
   display: grid;
   min-width: 128px;
+  max-width: calc(100vw - 12px);
+  max-height: calc(100vh - var(--titlebar-height) - 8px);
   gap: 4px;
   padding: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   border: 1px solid rgba(255, 255, 255, 0.34);
   border-radius: 6px;
   background: rgba(17, 21, 26, 0.96);
@@ -139,6 +144,25 @@ body {
   padding: 0 8px;
   text-align: left;
   white-space: nowrap;
+}
+
+#plugin-command-items {
+  display: grid;
+  gap: 4px;
+  padding: 4px 0;
+  border-top: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+#plugin-command-items[hidden] {
+  display: none;
+}
+
+#plugin-command-items::before {
+  content: "Plugins";
+  padding: 0 8px;
+  color: #c7d3df;
+  font-size: 11px;
+  line-height: 16px;
 }
 
 #keybinding-prefix {
