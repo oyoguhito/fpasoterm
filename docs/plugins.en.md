@@ -40,6 +40,21 @@ TypeScript plugins are transpiled at launch and cached below:
 Do not edit generated files in that cache; edit the original `.ts` file in
 `User/plugins` instead.
 
+## Plugin version metadata
+
+Plugins may declare their own version and description in source comments. No
+manifest or extra directory is required:
+
+```ts
+// @fpasoterm-plugin version: 1.0.0
+// @fpasoterm-plugin description: Displays a concise startup message.
+```
+
+`version` is an arbitrary local release identifier; use semantic versions such
+as `1.0.0` for consistency. It is distinct from `api.version`, which is the
+running fpasoterm application version. Omit the header for older plugins; the
+CLI reports their version as `(not declared)`.
+
 ## Enable plugins
 
 Create the directory and copy one or both public samples from this repository:
@@ -63,7 +78,8 @@ enabled = [
 Restart fpasoterm after changing the plugin list or plugin source. Plugins are
 loaded in the order written in `enabled`.
 
-The Node launcher can also update the list by plugin filename:
+The CLI, including packaged Windows/macOS/Linux binaries, can update the list
+by plugin filename:
 
 ```sh
 fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
@@ -71,8 +87,7 @@ fpasoterm --disable-plugin status-banner.ts
 fpasoterm --show-config
 ```
 
-The explicit plugin-management spellings are also available from the Node
-launcher:
+The explicit plugin-management spellings are also available from every CLI:
 
 ```sh
 fpasoterm --plugin-path
@@ -84,19 +99,36 @@ fpasoterm --plugin-enable-all
 fpasoterm --plugin-disable-all
 ```
 
-`--plugin-list` prints both discovered files and the `enabled` entries. The
+`--plugin-list` prints discovered files with their declared versions and the `enabled` entries. The
 `--plugin-enable` and `--plugin-disable` options are aliases for the existing
 `--enable-plugin` and `--disable-plugin` options.
-`--plugin-info <file>` prints the resolved source path, enabled state, leading
-source comment, load status, and renderer URL without opening a window. Pass a
+`--plugin-info <file>` prints the resolved source path, enabled state, declared
+version, description, load status, and renderer URL without opening a window. Pass a
 `.js` or `.ts` filename such as `welcome-banner.ts`; an extensionless name is
 not a valid selector.
-`--plugin-enable-all` enables every discovered `.js`/`.ts` file.
+`--plugin-enable-all` enables every discovered `.js`/`.ts` file. It reports an
+error when `User/plugins` contains no plugin source; it never silently creates
+or enables an empty list.
 `--plugin-disable-all` clears only `plugins.enabled`; it does not delete any
 plugin source or cache file.
 
 When duplicate filenames exist in different subdirectories, use a path
 relative to `plugins`, such as `team/status-banner.ts`.
+
+### Windows packaged binary
+
+The MSI/EXE does not copy public samples into your writable `User/plugins`
+directory. Obtain a sample from a source checkout or source archive, then use
+PowerShell to find the exact directory used by the installed binary and copy
+the reviewed source before enabling it:
+
+```powershell
+$pluginDir = & fpasoterm.exe --plugin-path
+New-Item -ItemType Directory -Force -Path $pluginDir
+Copy-Item .\examples\plugins\welcome-banner.ts $pluginDir
+fpasoterm.exe --plugin-enable-all
+fpasoterm.exe --plugin-list
+```
 
 At startup, plugin scripts are loaded from the trusted `User/plugins` source or
 the generated TypeScript cache using Tauri's local asset protocol. The default
@@ -142,6 +174,9 @@ same command registry in a future release without changing plugin source.
 
 ## Samples
 
+- [`examples/plugins/hello.ts`](../examples/plugins/hello.ts)
+  demonstrates the smallest startup-output plugin. It waits for `onReady()` so
+  the shell's startup control sequences cannot clear its message.
 - [`examples/plugins/welcome-banner.ts`](../examples/plugins/welcome-banner.ts)
   prints a short startup banner and records a diagnostic message.
 - [`examples/plugins/status-banner.ts`](../examples/plugins/status-banner.ts)

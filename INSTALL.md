@@ -21,6 +21,17 @@ fpasoterm -v
 
 On Windows, run `fpasoterm --version` after installing a newer `.exe` or `.msi`. If it still prints the old version, the old executable is still being launched from `Path`, the Start menu, or a pinned shortcut. Close running fpasoterm windows, install the newer package again, then start fpasoterm from the updated shortcut.
 
+Windows builds place `fpasoterm.cmd` beside the release executable. Use this
+console wrapper for `--version`, `--plugin-path`, `--plugin-info`, and other
+CLI-only operations; it waits for the GUI-subsystem executable to exit so
+PowerShell immediately redraws its prompt. Normal launches remain detached:
+
+```powershell
+.\src-tauri\target\release\fpasoterm.cmd --version
+.\src-tauri\target\release\fpasoterm.cmd --plugin-path
+.\src-tauri\target\release\fpasoterm.cmd
+```
+
 ## Development Build
 
 Linux development requires the Tauri/WebKitGTK system packages:
@@ -147,7 +158,7 @@ Tagged GitHub Releases build the broader release set in GitHub Actions:
 - Linux arm64 `.deb` / `.rpm` for ChromeOS/Baguette and other arm64 Linux environments
 - macOS x64 bundle
 - macOS arm64 bundle
-- Windows x64 bundle
+- Windows x64 bundle and `fpasoterm-<version>-windows-cli.cmd` console wrapper
 
 Install the Debian package locally:
 

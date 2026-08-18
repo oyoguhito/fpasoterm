@@ -146,6 +146,20 @@ fpasoterm --show-config
 fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 ```
 
+windowを開かずに設定を検証し、Issue向けMarkdown reportを作成する場合:
+
+```sh
+fpasoterm --config-check
+fpasoterm --diagnostics
+fpasoterm --copy-diagnostics
+fpasoterm --open-log-dir
+```
+
+出力内容、exit status、clipboard要件は[設定と診断](docs/diagnostics.ja.md)を参照してください。
+
+名前付きの表示・shell profileを一回の起動だけ使う場合は
+`fpasoterm --profile <name>`を使用します。詳細は[Profile](docs/config.ja.md#profile)を参照してください。
+
 起動中のwindowを新しいwindowを開かずに一覧表示:
 
 ```sh

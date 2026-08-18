@@ -54,10 +54,11 @@ revisionを確認できます。`git fetch` だけではcurrent branchは変わ�
 手順としては不十分です。
 
 まずは古いStart menu、pinned shortcut、Path上のexecutableを起動しない、生成済みの
-direct binaryを確認します。
+direct binaryを確認します。CLI出力はPowerShellがGUI-subsystem executableの終了を待つよう、
+生成された`.cmd` wrapperを使用します。
 
 ```powershell
-.\src-tauri\target\release\fpasoterm.exe --version
+.\src-tauri\target\release\fpasoterm.cmd --version
 .\src-tauri\target\release\fpasoterm.exe
 ```
 

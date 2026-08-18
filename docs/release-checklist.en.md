@@ -5,7 +5,8 @@
 ```sh
 npm ci
 npm run check
-npm run scan:secrets
+npm run security
+cargo fmt --check --manifest-path src-tauri/Cargo.toml
 desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 npm pack --dry-run
@@ -22,6 +23,11 @@ git push origin v1.3.0
 ```
 
 The `Release` workflow validates that the tag version matches `package.json`, builds `artifacts/`, and attaches the generated files to the GitHub Release.
+
+Before creating the tag, confirm the PR template's verification checklist is
+complete and that the required `Check` and `Security` workflows are green. The
+workflows run `npm run check`, production dependency audit, secret scanning,
+and the release workflow builds source plus Linux, macOS, and Windows artifacts.
 
 To rebuild assets for an existing tag, run the `Release` workflow manually and pass the tag name. The workflow uploads release assets with clobber enabled.
 

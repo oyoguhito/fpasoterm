@@ -11,6 +11,10 @@ on:
         required: true
         type: string
 
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
 permissions:
   contents: write
 
@@ -63,14 +67,14 @@ jobs:
       - name: Run checks
         run: npm run check
 
-      - name: Scan for credentials
-        run: npm run scan:secrets
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
 
       - name: Validate desktop file
         run: desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 
-      - name: Audit production dependencies
-        run: npm run audit:prod
+      - name: Run security checks
+        run: npm run security
 
       - name: Build source artifacts
         run: npm run build:artifacts -- --source-only

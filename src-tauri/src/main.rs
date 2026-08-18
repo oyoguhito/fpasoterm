@@ -58,6 +58,8 @@ struct RuntimeConfig {
     config_path: String,
     plugin_urls: Vec<PluginUrl>,
     window_state_path: String,
+    #[serde(default)]
+    active_profile: String,
     diagnostics: Option<DiagnosticsConfig>,
 }
 
@@ -360,11 +362,16 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --self-update             Update an npm-installed package when using the Node launcher.\n      --self-update-checkout    Update a clean git checkout when using the Node launcher.\n      --update-desktop          Reinstall Linux desktop integration when using the Node launcher.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n      --enable-plugin <names>   Enable plugins when using the Node launcher.\n      --disable-plugin <names>  Disable plugins when using the Node launcher.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 // Adds the instance-list command to the shared direct-binary help text.
 fn cli_help_text() -> String {
     HELP_TEXT
+        .replacen(
+            "  -c, --config <path>           Use a specific config.toml for this launch.",
+            "  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List available and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.",
+            1,
+        )
         .replacen(
         "  -d, --dev",
         "  -l, --list                    List running fpasoterm windows, then exit.\n  -d, --dev",
@@ -378,6 +385,11 @@ fn cli_help_text() -> String {
         .replacen(
             "  -R, --reset-config            Back up config.toml and restore all defaults, then exit.",
             "  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.",
+            1,
+        )
+        .replacen(
+            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.",
+            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nProfile usage:\n  1. Find config: fpasoterm --config-path\n  2. Add to config.toml:\n       [profiles.large-font.terminal]\n       fontSize = 18\n  3. Launch: fpasoterm --profile large-font\n  List names: fpasoterm --profile-list\n  Sample file: --config examples/config/profiles.toml --profile large-font\n  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile",
             1,
         )
 }
@@ -425,6 +437,48 @@ fn main() {
         print_show_config();
         return;
     }
+    if cli_has_flag(&["--profile-list"]) {
+        print_profile_list_cli();
+        return;
+    }
+    if let Err(error) = validate_selected_profile_cli() {
+        print_cli_error(&format!("fpasoterm: {error}\n"));
+        std::process::exit(2);
+    }
+    if cli_has_flag(&["--config-check"]) {
+        config_check_cli();
+        return;
+    }
+    if cli_has_flag(&["--config-path"]) {
+        print_cli_text(&format!("{}\n", default_runtime_config().config_path));
+        return;
+    }
+    if plugin_cli_requested() {
+        plugin_cli();
+        return;
+    }
+    if cli_has_flag(&["--config-example"]) {
+        print_cli_text(&embedded_default_config_toml());
+        return;
+    }
+    if cli_has_flag(&["--diagnostics"]) {
+        print_cli_text(&diagnostics_markdown_cli());
+        return;
+    }
+    if cli_has_flag(&["--copy-diagnostics"]) {
+        match clipboard_write(diagnostics_markdown_cli()) {
+            Ok(()) => print_cli_text("copied diagnostics to clipboard\n"),
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: could not copy diagnostics: {error}\n"));
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+    if cli_has_flag(&["--open-log-dir"]) {
+        open_log_directory_cli();
+        return;
+    }
     if cli_has_flag(&["--reset-window-state", "-r"]) {
         reset_window_state_cli();
         return;
@@ -441,7 +495,6 @@ fn main() {
         prune_config_cli();
         return;
     }
-
     if detach_nested_macos_launch() {
         return;
     }
@@ -576,6 +629,17 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--console-diagnostics",
         "-C",
         "--show-config",
+        "--profile-list",
+        "--plugin-list",
+        "--plugin-path",
+        "--plugin-enable-all",
+        "--plugin-disable-all",
+        "--config-check",
+        "--config-path",
+        "--config-example",
+        "--diagnostics",
+        "--open-log-dir",
+        "--copy-diagnostics",
         "--reset-window-state",
         "-r",
         "--reset-config",
@@ -591,6 +655,13 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
     const VALUE_OPTIONS: &[&str] = &[
         "--config",
         "-c",
+        "--profile",
+        "-p",
+        "--plugin-info",
+        "--enable-plugin",
+        "--disable-plugin",
+        "--plugin-enable",
+        "--plugin-disable",
         "--shell",
         "-s",
         "--command",
@@ -682,6 +753,7 @@ fn validate_direct_cli_value(option: &str, value: &str) -> Result<(), String> {
 // Normalizes direct binary arguments into the same environment overrides used by the Node launcher.
 fn apply_direct_cli_env_overrides() {
     set_env_from_cli("FPASOTERM_CONFIG_PATH", &["--config", "-c"]);
+    set_env_from_cli("FPASOTERM_PROFILE", &["--profile", "-p"]);
     set_env_from_cli("FPASOTERM_SHELL", &["--shell", "-s"]);
     set_env_from_cli("FPASOTERM_WINDOW_TITLE", &["--title", "-t"]);
     set_env_from_cli("FPASOTERM_TITLEBAR_COLOR", &["--titlebar-color", "-b"]);
@@ -1901,11 +1973,27 @@ fn merge_runtime_config_from_path(
             .join(path)
     };
     let text = fs::read_to_string(&absolute_path).map_err(|error| error.to_string())?;
-    let toml_value: toml::Value = toml::from_str(&text).map_err(|error| error.to_string())?;
+    let mut toml_value: toml::Value = toml::from_str(&text).map_err(|error| error.to_string())?;
+    let selected_profile = toml_value
+        .as_table_mut()
+        .and_then(|table| table.remove("profiles"))
+        .and_then(|profiles| profiles.as_table().cloned())
+        .and_then(|profiles| profiles.get(&config.active_profile).cloned());
+    if !config.active_profile.is_empty() && selected_profile.is_none() {
+        return Err(format!(
+            "profile '{}' does not exist in {}",
+            config.active_profile,
+            absolute_path.display()
+        ));
+    }
     let override_value = serde_json::to_value(toml_value).map_err(|error| error.to_string())?;
     let mut config_value =
         serde_json::to_value(&config.config).map_err(|error| error.to_string())?;
     merge_json_value(&mut config_value, override_value);
+    if let Some(profile) = selected_profile {
+        let profile_value = serde_json::to_value(profile).map_err(|error| error.to_string())?;
+        merge_json_value(&mut config_value, profile_value);
+    }
     config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
     migrate_legacy_macos_font_family(&mut config);
     config.config_path = absolute_path.to_string_lossy().to_string();
@@ -1914,7 +2002,93 @@ fn merge_runtime_config_from_path(
         .map(|parent| parent.to_string_lossy().to_string())
         .unwrap_or_else(|| ".".to_string());
     config.window_state_path = format!("{}/window-state.json", config.config_dir);
+    config.plugin_urls = resolve_direct_plugin_urls(&config.config, Path::new(&config.config_dir));
     Ok(config)
+}
+
+// Percent-encodes a filesystem path as a file URL that the renderer converts
+// to Tauri's scoped asset protocol before loading a trusted local plugin.
+fn file_url_from_path(path: &Path) -> Option<String> {
+    let path = path.canonicalize().ok()?;
+    let raw = normalize_file_url_path(&path.to_string_lossy().replace('\\', "/"));
+    let bytes = raw.as_bytes();
+    let mut encoded = String::new();
+    for byte in bytes {
+        if byte.is_ascii_alphanumeric() || matches!(*byte, b'/' | b'-' | b'_' | b'.' | b'~' | b':')
+        {
+            encoded.push(*byte as char);
+        } else {
+            encoded.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    if encoded.starts_with('/') {
+        Some(format!("file://{encoded}"))
+    } else {
+        Some(format!("file:///{encoded}"))
+    }
+}
+
+// Removes the Windows extended-length prefix emitted by canonicalize() before
+// URL encoding. Leaving `//?/` in a file URL produces `file:////%3F/C:/...`,
+// which WebView cannot convert back to a valid Windows asset path.
+fn normalize_file_url_path(path: &str) -> String {
+    path.strip_prefix("//?/").unwrap_or(path).to_string()
+}
+
+// Creates isolated cached plugin scripts for direct packaged-binary launches.
+// The sample .ts plugins are JavaScript-compatible; TypeScript-only syntax
+// still requires the Node launcher to transpile before loading.
+fn resolve_direct_plugin_urls(config: &Config, config_dir: &Path) -> Vec<PluginUrl> {
+    let enabled = config
+        .plugins
+        .get("enabled")
+        .and_then(serde_json::Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let plugin_root = config_dir.join("plugins");
+    let cache_root = config_dir.join("cache").join("plugins");
+    let canonical_root = plugin_root.canonicalize().ok();
+    let mut urls = Vec::new();
+    for entry in enabled {
+        let Some(name) = entry.as_str() else {
+            continue;
+        };
+        let source_path = config_dir.join(name);
+        let extension = source_path.extension().and_then(|value| value.to_str());
+        if !matches!(extension, Some("js" | "ts")) || !source_path.is_file() {
+            continue;
+        }
+        let Ok(canonical_source) = source_path.canonicalize() else {
+            continue;
+        };
+        if !canonical_root
+            .as_ref()
+            .is_some_and(|root| canonical_source.starts_with(root))
+        {
+            continue;
+        }
+        let Ok(relative) =
+            canonical_source.strip_prefix(canonical_root.as_ref().expect("plugin root"))
+        else {
+            continue;
+        };
+        let cache_path = cache_root.join(relative).with_extension("js");
+        let Ok(source) = fs::read_to_string(&canonical_source) else {
+            continue;
+        };
+        if fs::create_dir_all(cache_path.parent().unwrap_or(&cache_root)).is_err()
+            || fs::write(&cache_path, format!("(() => {{\n{source}\n}})();\n")).is_err()
+        {
+            continue;
+        }
+        if let Some(url) = file_url_from_path(&cache_path) {
+            urls.push(PluginUrl {
+                name: name.replace('\\', "/"),
+                url,
+            });
+        }
+    }
+    urls
 }
 
 // Recursively overlays object keys while replacing scalar and array values.
@@ -2037,6 +2211,10 @@ fn default_runtime_config() -> RuntimeConfig {
         config_path,
         plugin_urls: Vec::new(),
         window_state_path,
+        active_profile: env::var("FPASOTERM_PROFILE")
+            .ok()
+            .or_else(|| cli_option_value_any(&["--profile", "-p"]))
+            .unwrap_or_default(),
         diagnostics: Some(DiagnosticsConfig {
             debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1")
                 || cli_has_flag(&["--debug-keys", "-k"]),
@@ -2193,6 +2371,596 @@ fn print_show_config() {
         Ok(config) => print_cli_text(&(config + "\n")),
         Err(error) => {
             print_cli_error(&format!("fpasoterm: failed to serialize config: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Lists profile tables from the selected TOML without starting the desktop app.
+fn print_profile_list_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    let config = match read_toml_config_or_empty(&path) {
+        Ok(config) => config,
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: failed to parse {path}: {error}\n"));
+            std::process::exit(2);
+        }
+    };
+    let mut names = config
+        .get("profiles")
+        .and_then(toml::Value::as_table)
+        .map(|profiles| profiles.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    names.sort();
+    print_cli_text("Available profiles:\n");
+    if names.is_empty() {
+        print_cli_text("  (none found)\n");
+        return;
+    }
+    for name in names {
+        let selected = if name == runtime.active_profile {
+            " [selected]"
+        } else {
+            ""
+        };
+        print_cli_text(&format!("  {name}{selected}\n"));
+    }
+}
+
+// Prevents an unknown or malformed selected profile from silently using defaults.
+fn validate_selected_profile_cli() -> Result<(), String> {
+    let runtime = default_runtime_config();
+    if runtime.active_profile.is_empty() {
+        return Ok(());
+    }
+    let config = read_toml_config_or_empty(&runtime.config_path)?;
+    match config
+        .get("profiles")
+        .and_then(toml::Value::as_table)
+        .and_then(|profiles| profiles.get(&runtime.active_profile))
+    {
+        Some(profile) if profile.is_table() => Ok(()),
+        Some(_) => Err(format!(
+            "profile '{}' in {} must be a TOML table",
+            runtime.active_profile, runtime.config_path
+        )),
+        None => Err(format!(
+            "profile '{}' does not exist in {}",
+            runtime.active_profile, runtime.config_path
+        )),
+    }
+}
+
+// Validates the selected TOML file without changing it or creating a window.
+fn config_check_cli() {
+    let runtime = default_runtime_config();
+    let path = runtime.config_path;
+    let config = match read_toml_config_or_empty(&path) {
+        Ok(config) => config,
+        Err(error) => {
+            print_cli_text(&format!(
+                "config: {path}\nstatus: error\n\nerrors:\n- {error}\n"
+            ));
+            std::process::exit(1);
+        }
+    };
+    let mut warnings = Vec::new();
+    for key in [
+        "terminal.fontSize",
+        "window.width",
+        "window.height",
+        "window.minWidth",
+        "window.minHeight",
+        "terminal.lineHeight",
+        "terminal.scrollback",
+        "logging.maxBytes",
+    ] {
+        if let Some(value) = toml_value_at(&config, key) {
+            let positive = value
+                .as_integer()
+                .map(|number| number > 0)
+                .or_else(|| value.as_float().map(|number| number > 0.0))
+                .unwrap_or(false);
+            if !positive {
+                warnings.push(format!("{key} should be a positive number"));
+            }
+        }
+    }
+    if let Some(enabled) = toml_value_at(&config, "plugins.enabled") {
+        match enabled.as_array() {
+            Some(plugins) => {
+                let root = Path::new(&path).parent().unwrap_or_else(|| Path::new("."));
+                let plugin_root = root.join("plugins");
+                for plugin in plugins {
+                    let Some(name) = plugin.as_str() else {
+                        warnings
+                            .push("plugins.enabled should contain .js/.ts file names".to_string());
+                        continue;
+                    };
+                    let candidate = root.join(name);
+                    let valid_path = candidate.starts_with(&plugin_root)
+                        && matches!(
+                            candidate
+                                .extension()
+                                .and_then(|extension| extension.to_str()),
+                            Some("js" | "ts")
+                        );
+                    if !valid_path {
+                        warnings.push(format!("plugins.enabled includes invalid entry {name}"));
+                    } else if !candidate.exists() {
+                        warnings.push(format!(
+                            "plugins.enabled includes {name} but file does not exist"
+                        ));
+                    }
+                }
+            }
+            None => warnings
+                .push("plugins.enabled should be an array of .js/.ts file names".to_string()),
+        }
+    }
+    if let Ok(defaults) = toml::from_str::<toml::Value>(&embedded_default_config_toml()) {
+        let mut configured = config.clone();
+        let mut unsupported = Vec::new();
+        prune_toml_value(&defaults, &mut configured, "", &mut unsupported);
+        warnings.extend(
+            unsupported
+                .into_iter()
+                .map(|key| format!("{key} is not a supported configuration key")),
+        );
+    }
+    print_cli_text(&format!("config: {path}\nstatus: ok\n"));
+    if !warnings.is_empty() {
+        print_cli_text("\nwarnings:\n");
+        for warning in warnings {
+            print_cli_text(&format!("- {warning}\n"));
+        }
+    }
+}
+
+// Returns all CLI values for repeatable direct-binary options, including --flag=value.
+fn cli_option_values_any(flags: &[&str]) -> Vec<String> {
+    let args = env::args().skip(1).collect::<Vec<_>>();
+    let mut values = Vec::new();
+    let mut index = 0;
+    while index < args.len() {
+        for flag in flags {
+            if args[index] == *flag {
+                if let Some(value) = args.get(index + 1) {
+                    let value = sanitize_cli_value(value);
+                    if !value.is_empty() {
+                        values.push(value);
+                    }
+                }
+                index += 1;
+                break;
+            }
+            if let Some(value) = args[index].strip_prefix(&format!("{flag}=")) {
+                let value = sanitize_cli_value(value);
+                if !value.is_empty() {
+                    values.push(value);
+                }
+                break;
+            }
+        }
+        index += 1;
+    }
+    values
+}
+
+// Resolves User/plugins beside the selected config.toml without creating it.
+fn plugin_directory(config_path: &str) -> PathBuf {
+    Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join("plugins")
+}
+
+// Finds JavaScript and TypeScript source files below User/plugins.
+fn discover_plugin_files(config_path: &str) -> Vec<String> {
+    fn visit(root: &Path, directory: &Path, discovered: &mut Vec<String>) {
+        let Ok(entries) = fs::read_dir(directory) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                visit(root, &path, discovered);
+            } else if path.is_file()
+                && matches!(
+                    path.extension().and_then(|value| value.to_str()),
+                    Some("js" | "ts")
+                )
+            {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    discovered.push(format!(
+                        "plugins/{}",
+                        relative.to_string_lossy().replace('\\', "/")
+                    ));
+                }
+            }
+        }
+    }
+
+    let root = plugin_directory(config_path);
+    let mut discovered = Vec::new();
+    visit(&root, &root, &mut discovered);
+    discovered.sort();
+    discovered
+}
+
+// Holds optional metadata declared in a single .js/.ts plugin source file.
+#[derive(Debug, PartialEq, Eq)]
+struct PluginMetadata {
+    version: String,
+    description: String,
+}
+
+// Parses `// @fpasoterm-plugin version: ...` and description headers while
+// preserving a normal leading comment as a backwards-compatible description.
+fn plugin_metadata(source: &str) -> PluginMetadata {
+    let mut version = None;
+    let mut description = None;
+    let mut fallback_description = None;
+    for line in source.lines() {
+        let trimmed = line.trim();
+        if let Some(header) = trimmed.strip_prefix("// @fpasoterm-plugin ") {
+            if let Some((key, value)) = header.split_once(':') {
+                let value = value.trim();
+                if !value.is_empty() {
+                    match key.trim().to_ascii_lowercase().as_str() {
+                        "version" => version = Some(value.to_string()),
+                        "description" => description = Some(value.to_string()),
+                        _ => {}
+                    }
+                }
+            }
+            continue;
+        }
+        if fallback_description.is_none()
+            && trimmed.starts_with("//")
+            && !trimmed.starts_with("///")
+        {
+            fallback_description = Some(trimmed.trim_start_matches('/').trim().to_string());
+        }
+    }
+    PluginMetadata {
+        version: version.unwrap_or_else(|| "(not declared)".to_string()),
+        description: description
+            .or(fallback_description)
+            .unwrap_or_else(|| "(no leading plugin comment)".to_string()),
+    }
+}
+
+// Reads plugin metadata for direct-binary CLI output without evaluating code.
+fn read_plugin_metadata(path: &Path) -> PluginMetadata {
+    fs::read_to_string(path)
+        .map(|source| plugin_metadata(&source))
+        .unwrap_or_else(|_| PluginMetadata {
+            version: "(not declared)".to_string(),
+            description: "(unreadable plugin source)".to_string(),
+        })
+}
+
+// Resolves one filename or plugins-relative selector while rejecting traversal.
+fn resolve_plugin_selector(
+    selector: &str,
+    candidates: &[String],
+    action: &str,
+) -> Result<String, String> {
+    let normalized = selector
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_start_matches("plugins/")
+        .to_string();
+    if normalized.is_empty()
+        || normalized.starts_with('/')
+        || normalized.starts_with("../")
+        || normalized.contains("/../")
+    {
+        return Err(format!("invalid plugin name: {selector}"));
+    }
+    let exact = format!("plugins/{normalized}");
+    let matches = candidates
+        .iter()
+        .filter(|candidate| {
+            if normalized.contains('/') {
+                **candidate == exact
+            } else {
+                Path::new(candidate)
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    == Some(normalized.as_str())
+            }
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    match matches.as_slice() {
+        [] => Err(format!(
+            "cannot {action} plugin '{selector}': no matching plugin file"
+        )),
+        [plugin] => Ok(plugin.clone()),
+        _ => Err(format!(
+            "plugin name '{selector}' is ambiguous; use one of: {}",
+            matches.join(", ")
+        )),
+    }
+}
+
+// Reads the explicit plugins.enabled entries while tolerating malformed config values.
+fn configured_plugins(config: &toml::Value) -> Vec<String> {
+    config
+        .get("plugins")
+        .and_then(toml::Value::as_table)
+        .and_then(|plugins| plugins.get("enabled"))
+        .and_then(toml::Value::as_array)
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(toml::Value::as_str)
+                .map(str::to_string)
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+// Writes plugins.enabled while preserving every unrelated user setting.
+fn set_configured_plugins(config: &mut toml::Value, enabled: Vec<String>) -> Result<(), String> {
+    let table = config
+        .as_table_mut()
+        .ok_or_else(|| "config.toml must contain a top-level TOML table".to_string())?;
+    let plugins = table
+        .entry("plugins".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| "[plugins] must be a TOML table".to_string())?;
+    plugins.insert(
+        "enabled".to_string(),
+        toml::Value::Array(enabled.into_iter().map(toml::Value::String).collect()),
+    );
+    Ok(())
+}
+
+// Displays discovered sources and the explicit enabled selection without opening a window.
+fn print_plugin_list_cli(config_path: &str, enabled: &[String]) {
+    let available = discover_plugin_files(config_path);
+    let config_dir = Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    print_cli_text("Available plugins:\n");
+    if available.is_empty() {
+        print_cli_text("  (none found)\n");
+    } else {
+        for plugin in available {
+            let metadata = read_plugin_metadata(&config_dir.join(&plugin));
+            print_cli_text(&format!("  {plugin} [version {}]\n", metadata.version));
+        }
+    }
+    print_cli_text("\nEnabled plugins:\n");
+    if enabled.is_empty() {
+        print_cli_text("  (none enabled)\n");
+    } else {
+        for plugin in enabled {
+            print_cli_text(&format!("  {plugin}\n"));
+        }
+    }
+}
+
+// Handles direct-binary plugin inspection and enabled-list mutations.
+fn plugin_cli() {
+    let runtime = default_runtime_config();
+    let config_path = runtime.config_path;
+    if cli_has_flag(&["--plugin-path"]) {
+        print_cli_text(&format!("{}\n", plugin_directory(&config_path).display()));
+        return;
+    }
+
+    let config = match read_toml_config_or_empty(&config_path) {
+        Ok(config) => config,
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    };
+    let enabled = configured_plugins(&config);
+    if cli_has_flag(&["--plugin-list"]) {
+        print_plugin_list_cli(&config_path, &enabled);
+        return;
+    }
+
+    if let Some(selector) = cli_option_value("--plugin-info") {
+        let available = discover_plugin_files(&config_path);
+        match resolve_plugin_selector(&selector, &available, "inspect") {
+            Ok(plugin) => {
+                let source_path = Path::new(&config_path)
+                    .parent()
+                    .unwrap_or_else(|| Path::new("."))
+                    .join(&plugin);
+                let source = fs::read_to_string(&source_path).unwrap_or_default();
+                let metadata = plugin_metadata(&source);
+                let extension = source_path.extension().and_then(|value| value.to_str());
+                print_cli_text(&format!(
+                    "Plugin: {plugin}\nState: {}\nType: {}\nVersion: {}\nSource: {}\nDescription: {}\nLoad status: loadable\n",
+                    if enabled.contains(&plugin) { "enabled" } else { "disabled" },
+                    if extension == Some("ts") { "TypeScript" } else { "JavaScript" },
+                    metadata.version,
+                    source_path.display(),
+                    metadata.description,
+                ));
+            }
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+        }
+        return;
+    }
+
+    let mut next_enabled = enabled;
+    let available = discover_plugin_files(&config_path);
+    if cli_has_flag(&["--plugin-enable-all"]) {
+        if available.is_empty() {
+            print_cli_error(&format!(
+                "fpasoterm: no .js/.ts plugins found in {}\nCopy a trusted plugin there, then run --plugin-enable-all again.\n",
+                plugin_directory(&config_path).display()
+            ));
+            std::process::exit(1);
+        }
+        next_enabled.extend(available.iter().cloned());
+    }
+    if cli_has_flag(&["--plugin-disable-all"]) {
+        next_enabled.clear();
+    }
+    for (selectors, enabling) in [
+        (
+            cli_option_values_any(&["--enable-plugin", "--plugin-enable"]),
+            true,
+        ),
+        (
+            cli_option_values_any(&["--disable-plugin", "--plugin-disable"]),
+            false,
+        ),
+    ] {
+        for selector in selectors {
+            for name in selector
+                .split(',')
+                .map(str::trim)
+                .filter(|name| !name.is_empty())
+            {
+                let candidates = if enabling { &available } else { &next_enabled };
+                let plugin = match resolve_plugin_selector(
+                    name,
+                    candidates,
+                    if enabling { "enable" } else { "disable" },
+                ) {
+                    Ok(plugin) => plugin,
+                    Err(error) => {
+                        print_cli_error(&format!("fpasoterm: {error}\n"));
+                        std::process::exit(2);
+                    }
+                };
+                if enabling {
+                    next_enabled.push(plugin);
+                } else {
+                    next_enabled.retain(|entry| entry != &plugin);
+                }
+            }
+        }
+    }
+    next_enabled.sort();
+    next_enabled.dedup();
+    let mut updated = config;
+    if let Err(error) = set_configured_plugins(&mut updated, next_enabled.clone()).and_then(|_| {
+        if let Some(parent) = Path::new(&config_path).parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        write_toml_config(&config_path, &updated)
+    }) {
+        print_cli_error(&format!("fpasoterm: {error}\n"));
+        std::process::exit(2);
+    }
+    print_cli_text(&format!("updated {config_path}\n"));
+    print_plugin_list_cli(&config_path, &next_enabled);
+    print_cli_text("Restart fpasoterm to load the updated plugin selection.\n");
+}
+
+// Returns true when any direct-binary plugin-management option was supplied.
+fn plugin_cli_requested() -> bool {
+    cli_has_flag(&[
+        "--plugin-list",
+        "--plugin-path",
+        "--plugin-enable-all",
+        "--plugin-disable-all",
+    ]) || !cli_option_values_any(&[
+        "--plugin-info",
+        "--enable-plugin",
+        "--disable-plugin",
+        "--plugin-enable",
+        "--plugin-disable",
+    ])
+    .is_empty()
+}
+
+// Looks up a dotted TOML path without requiring a typed deserialization model.
+fn toml_value_at<'a>(value: &'a toml::Value, path: &str) -> Option<&'a toml::Value> {
+    path.split('.')
+        .try_fold(value, |current, key| current.get(key))
+}
+
+// Formats static runtime details as Markdown suitable for a GitHub Issue body.
+fn diagnostics_markdown_cli() -> String {
+    let runtime = runtime_config();
+    let config_status = read_toml_config_or_empty(&runtime.config_path)
+        .map(|_| "ok".to_string())
+        .unwrap_or_else(|_| "error".to_string());
+    let plugins = runtime
+        .config
+        .plugins
+        .get("enabled")
+        .and_then(serde_json::Value::as_array)
+        .map(|plugins| {
+            plugins
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ")
+        })
+        .filter(|plugins| !plugins.is_empty())
+        .unwrap_or_else(|| "(none enabled)".to_string());
+    let sync_enabled = runtime
+        .config
+        .sync
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let logging_enabled = runtime
+        .config
+        .logging
+        .get("enabled")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(true);
+    format!(
+        "## fpasoterm diagnostics\n\n- version: fpasoterm {}\n- platform: {} {}\n- webview: Tauri WebView (direct binary)\n- config path: {}\n- config status: {}\n- profile: {}\n- plugins: {}\n- terminal size: {}x{} (configured)\n- terminal font size: {}\n- logging: {} ({})\n- sync: {}\n- debug log: {}\n",
+        app_version(),
+        env::consts::OS,
+        env::consts::ARCH,
+        runtime.config_path,
+        config_status,
+        if runtime.active_profile.is_empty() { "(none)" } else { &runtime.active_profile },
+        plugins,
+        runtime.config.window.width,
+        runtime.config.window.height,
+        runtime.config.terminal.get("fontSize").and_then(serde_json::Value::as_f64).unwrap_or(14.0),
+        if logging_enabled { "enabled" } else { "disabled" },
+        terminal_log_directory().display(),
+        if sync_enabled { "enabled" } else { "disabled" },
+        PathBuf::from(runtime.config_dir).join("logs").join("fpasoterm-debug.log").display(),
+    )
+}
+
+// Opens the configured terminal-log directory in the operating system file manager.
+fn open_log_directory_cli() {
+    let directory = terminal_log_directory();
+    if let Err(error) = fs::create_dir_all(&directory) {
+        print_cli_error(&format!(
+            "fpasoterm: failed to create {}: {error}\n",
+            directory.display()
+        ));
+        std::process::exit(2);
+    }
+    #[cfg(target_os = "windows")]
+    let result = Command::new("explorer.exe").arg(&directory).spawn();
+    #[cfg(target_os = "macos")]
+    let result = Command::new("open").arg(&directory).spawn();
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let result = Command::new("xdg-open").arg(&directory).spawn();
+    match result {
+        Ok(_) => print_cli_text(&format!("{}\n", directory.display())),
+        Err(error) => {
+            print_cli_error(&format!(
+                "fpasoterm: could not open {}: {error}\n",
+                directory.display()
+            ));
             std::process::exit(2);
         }
     }
@@ -2450,6 +3218,11 @@ fn prune_toml_value(
         } else {
             format!("{prefix}.{key}")
         };
+        // Profiles are named user-owned overlays. Validate the selected one at
+        // launch time, but never remove all profiles as unsupported keys.
+        if prefix.is_empty() && key == "profiles" {
+            continue;
+        }
         let Some(default_value) = default_table.get(&key) else {
             config_table.remove(&key);
             removed.push(path);
@@ -2504,18 +3277,19 @@ fn print_cli_error(text: &str) {
 
 #[cfg(windows)]
 // Attaches to the parent console because release builds use windows_subsystem="windows".
+// Detaching again after the write lets PowerShell redraw its prompt immediately.
 fn print_cli_text_windows(text: &str) {
     use std::ptr::{null, null_mut};
     use windows_sys::Win32::Foundation::{CloseHandle, INVALID_HANDLE_VALUE};
     use windows_sys::Win32::Storage::FileSystem::{
         CreateFileA, WriteFile, FILE_SHARE_READ, FILE_SHARE_WRITE, OPEN_EXISTING,
     };
-    use windows_sys::Win32::System::Console::{AttachConsole, ATTACH_PARENT_PROCESS};
+    use windows_sys::Win32::System::Console::{AttachConsole, FreeConsole, ATTACH_PARENT_PROCESS};
 
     const GENERIC_WRITE: u32 = 0x4000_0000;
 
     unsafe {
-        AttachConsole(ATTACH_PARENT_PROCESS);
+        let attached_parent_console = AttachConsole(ATTACH_PARENT_PROCESS) != 0;
         let handle = CreateFileA(
             b"CONOUT$\0".as_ptr(),
             GENERIC_WRITE,
@@ -2535,11 +3309,19 @@ fn print_cli_text_windows(text: &str) {
                 null_mut(),
             );
             CloseHandle(handle);
+            if attached_parent_console {
+                FreeConsole();
+            }
             return;
+        }
+        if attached_parent_console {
+            FreeConsole();
         }
     }
 
-    print!("{text}");
+    let mut stdout = std::io::stdout().lock();
+    let _ = stdout.write_all(text.as_bytes());
+    let _ = stdout.flush();
 }
 
 // Reads saved window width and height, rejecting zero or out-of-range values.
@@ -5058,6 +5840,17 @@ mod tests {
             "--console-diagnostics",
             "-C",
             "--show-config",
+            "--config-check",
+            "--config-path",
+            "--config-example",
+            "--diagnostics",
+            "--open-log-dir",
+            "--copy-diagnostics",
+            "--profile-list",
+            "--plugin-list",
+            "--plugin-path",
+            "--plugin-enable-all",
+            "--plugin-disable-all",
             "--reset-window-state",
             "-r",
             "--reset-config",
@@ -5079,6 +5872,13 @@ mod tests {
         let value_options = [
             ("--config", "config.toml"),
             ("-c", "config.toml"),
+            ("--profile", "large-font"),
+            ("-p", "large-font"),
+            ("--plugin-info", "welcome-banner.ts"),
+            ("--enable-plugin", "welcome-banner.ts"),
+            ("--disable-plugin", "welcome-banner.ts"),
+            ("--plugin-enable", "welcome-banner.ts"),
+            ("--plugin-disable", "welcome-banner.ts"),
             ("--shell", "/bin/zsh"),
             ("-s", "/bin/zsh"),
             ("--command", "echo ok"),
@@ -5220,6 +6020,40 @@ mod tests {
         assert_eq!(
             terminal_font_family_for("linux"),
             DEFAULT_TERMINAL_FONT_FAMILY
+        );
+    }
+
+    #[test]
+    fn windows_extended_paths_are_normalized_before_file_url_encoding() {
+        assert_eq!(
+            normalize_file_url_path(
+                "//?/C:/Users/example/.config/fpasoterm/User/cache/plugins/hello.js"
+            ),
+            "C:/Users/example/.config/fpasoterm/User/cache/plugins/hello.js"
+        );
+        assert_eq!(
+            normalize_file_url_path("/tmp/fpasoterm/cache/plugins/hello.js"),
+            "/tmp/fpasoterm/cache/plugins/hello.js"
+        );
+    }
+
+    #[test]
+    fn plugin_metadata_reads_headers_and_legacy_comment() {
+        assert_eq!(
+            plugin_metadata(
+                "// @fpasoterm-plugin version: 1.2.3\n// @fpasoterm-plugin description: Example plugin\n"
+            ),
+            PluginMetadata {
+                version: "1.2.3".to_string(),
+                description: "Example plugin".to_string(),
+            }
+        );
+        assert_eq!(
+            plugin_metadata("// Existing plugin comment\nconst value = 1;\n"),
+            PluginMetadata {
+                version: "(not declared)".to_string(),
+                description: "Existing plugin comment".to_string(),
+            }
         );
     }
 

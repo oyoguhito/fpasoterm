@@ -5,7 +5,8 @@
 ```sh
 npm ci
 npm run check
-npm run scan:secrets
+npm run security
+cargo fmt --check --manifest-path src-tauri/Cargo.toml
 desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 npm pack --dry-run
@@ -22,6 +23,10 @@ git push origin v1.3.0
 ```
 
 `Release` workflow は tag version と `package.json` の version が一致することを確認し、`artifacts/` を生成して GitHub Release に添付します。
+
+tagを作る前に、PR templateのverification checklistと必須の`Check`、`Security` workflowが
+greenであることを確認します。workflowは`npm run check`、production dependency audit、
+secret scanを実行し、Release workflowはsource、Linux、macOS、Windowsのartifactを生成します。
 
 既存 tag の成果物を再生成する場合は、`Release` workflow を手動実行して tag 名を指定します。Release asset は上書き upload されます。
 

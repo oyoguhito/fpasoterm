@@ -138,6 +138,8 @@ let activeConfigPath = '';
 let pluginUrls = [];
 let pluginVersion = 'unknown';
 let pluginsReady = false;
+let pluginReadyTimer = null;
+let pluginReadyGeneration = 0;
 const pluginReadyCallbacks = [];
 const pluginCommands = new Map();
 let term;
@@ -605,6 +607,7 @@ function queueTerminalOutput(data) {
     logXtermCanvasDiagnostics();
     logXtermTextDiagnostics();
     showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
+    schedulePluginsReadyAfterTerminalOutput(180);
   });
 }
 
@@ -1493,7 +1496,28 @@ function runPluginReadyCallback(callback) {
     .catch((error) => showDiagnostic(`plugin onReady failed: ${error?.stack || error}`));
 }
 
-// Delivers the terminal-ready lifecycle event once after the backend PTY starts.
+// Schedules plugin startup after terminal output has become idle and painted.
+// Shell initialization can clear the terminal after startTerminal() resolves,
+// so notifying plugins directly at that point can erase their first writeln().
+function schedulePluginsReadyAfterTerminalOutput(delayMs = 180) {
+  if (pluginsReady) {
+    return;
+  }
+  const generation = ++pluginReadyGeneration;
+  if (pluginReadyTimer) {
+    clearTimeout(pluginReadyTimer);
+  }
+  pluginReadyTimer = setTimeout(() => {
+    pluginReadyTimer = null;
+    afterNextPaint().then(() => {
+      if (generation === pluginReadyGeneration) {
+        notifyPluginsReady();
+      }
+    });
+  }, delayMs);
+}
+
+// Delivers the terminal-ready lifecycle event once after initial PTY output settles.
 function notifyPluginsReady() {
   if (pluginsReady) {
     return;
@@ -2722,7 +2746,9 @@ async function initialize() {
     return;
   }
   installCompositionDuplicateGuard();
-  notifyPluginsReady();
+  // A no-output fallback keeps lifecycle plugins usable for shells that do not
+  // print a prompt. Normal PTY output resets this timer until it is painted.
+  schedulePluginsReadyAfterTerminalOutput(350);
   focusTerminalInput();
 }
 

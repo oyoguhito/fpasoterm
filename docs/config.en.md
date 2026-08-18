@@ -176,6 +176,52 @@ Print the resolved configuration and plugin status:
 fpasoterm --show-config
 ```
 
+Validate the selected TOML without changing it, print its selected path, or
+write the current default example to stdout:
+
+```sh
+fpasoterm --config-check
+fpasoterm --config-path
+fpasoterm --config-example > config.toml
+```
+
+See [Configuration and Diagnostics](diagnostics.en.md) for warnings, exit
+status, and the GitHub Issue-friendly `--diagnostics` report.
+
+## Profiles
+
+Profiles are optional named overlays selected for one launch. Normal settings
+are merged first, then `[profiles.<name>]`, then CLI overrides such as
+`--title`, `--shell`, and `--size`. A profile therefore never rewrites
+`config.toml` or saved window bounds.
+
+```toml
+[terminal]
+fontSize = 14
+
+[profiles.large-font.terminal]
+fontSize = 18
+
+[profiles.transparent.window]
+titlebarColor = "#00695c"
+
+[profiles.transparent.terminal]
+backgroundOpacity = 0.65
+```
+
+```sh
+fpasoterm --profile-list
+fpasoterm --profile large-font
+fpasoterm --config examples/config/profiles.toml --profile transparent
+```
+
+Profile names are case-sensitive TOML table names. A missing name or a profile
+that is not a table exits with an error instead of silently falling back to the
+normal configuration. `--show-config` and `--diagnostics` display the active
+profile. To use `fpasoterm --profile large-font` without `--config`, copy the
+`[profiles.large-font.terminal]` table into the file printed by
+`fpasoterm --config-path`. See [`examples/config/profiles.toml`](../examples/config/profiles.toml).
+
 Enable or disable plugins from the command line:
 
 ```sh

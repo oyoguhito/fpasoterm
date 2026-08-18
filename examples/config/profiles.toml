@@ -1,0 +1,20 @@
+# Apply this file with: fpasoterm --config ./examples/config/profiles.toml --profile large-font
+
+[window]
+title = "fpasoterm"
+titlebarColor = "#1565c0"
+
+[terminal]
+fontSize = 14
+backgroundOpacity = 0.8
+
+# Profiles override normal config sections for one launch. They do not modify
+# config.toml or User/window-state.json.
+[profiles.large-font.terminal]
+fontSize = 18
+
+[profiles.transparent.window]
+titlebarColor = "#00695c"
+
+[profiles.transparent.terminal]
+backgroundOpacity = 0.65

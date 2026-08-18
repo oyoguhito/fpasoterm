@@ -30,6 +30,17 @@ TypeScript plugin は起動時に変換され、次の directory に cache さ�
 
 この cache の生成 file は編集せず、`User/plugins` 配下にある元の `.ts` file を編集してください。
 
+## plugin version metadata
+
+plugin source の comment に version と description を宣言できます。manifestや追加 directory は不要です。
+
+```ts
+// @fpasoterm-plugin version: 1.0.0
+// @fpasoterm-plugin description: 簡潔な起動 message を表示する。
+```
+
+`version` は plugin 固有のローカル release 識別子です。一貫性のため `1.0.0` のような semantic version を推奨します。実行中 fpasoterm 本体の version を返す `api.version` とは別です。headerの無い既存 plugin は従来どおり動作し、CLIでは `(not declared)` と表示します。
+
 ## plugin の有効化
 
 directory を作成し、この repository にある公開 sample を一つまたは両方コピーします。
@@ -52,7 +63,7 @@ enabled = [
 
 plugin list または plugin source を変更した後は fpasoterm を再起動してください。`enabled` に書かれた順番で読み込まれます。
 
-Node launcher では file name を指定して list を更新することもできます。
+CLIでは、packaged Windows/macOS/Linux binaryを含めて、file nameを指定してlistを更新できます。
 
 ```sh
 fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
@@ -60,7 +71,7 @@ fpasoterm --disable-plugin status-banner.ts
 fpasoterm --show-config
 ```
 
-Node launcher では plugin 管理用の明示的な表記も使えます。
+すべてのCLIでplugin管理用の明示的な表記も使えます。
 
 ```sh
 fpasoterm --plugin-path
@@ -72,11 +83,23 @@ fpasoterm --plugin-enable-all
 fpasoterm --plugin-disable-all
 ```
 
-`--plugin-list` は検出した file と `enabled` の両方を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
-`--plugin-info <file>` は window を起動せずに、source path、有効状態、先頭のsource comment、load status、renderer URL を表示します。`welcome-banner.ts` のように `.js` または `.ts` の拡張子を含めて指定します。拡張子なしのnameはselectorとして無効です。
-`--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
+`--plugin-list` は検出した fileと宣言されたversion、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
+`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、load status、renderer URL を表示します。`welcome-banner.ts` のように `.js` または `.ts` の拡張子を含めて指定します。拡張子なしのnameはselectorとして無効です。
+`--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`User/plugins`にplugin sourceが無い場合は、空のlistを成功扱いにせずerrorを表示します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
 
 subdirectory に同名 file がある場合は、`team/status-banner.ts` のように `plugins` からの相対 path を指定してください。
+
+### Windows packaged binary
+
+MSI/EXEは公開sampleをwritableな`User/plugins` directoryへ自動コピーしません。source checkoutまたはsource archiveからsampleを取得し、installed binaryが使用するdirectoryをPowerShellで確認してから、内容を確認したsourceを配置・有効化してください。
+
+```powershell
+$pluginDir = & fpasoterm.exe --plugin-path
+New-Item -ItemType Directory -Force -Path $pluginDir
+Copy-Item .\examples\plugins\welcome-banner.ts $pluginDir
+fpasoterm.exe --plugin-enable-all
+fpasoterm.exe --plugin-list
+```
 
 起動時は、trusted な `User/plugins` source または生成されたTypeScript cacheをTauriのlocal asset protocol経由で読み込みます。標準の`User` directoryが対象です。pluginを有効化または編集した後は、対象のfpasoterm windowを閉じて再起動してください。読み込みerrorを調べる場合は、`fpasoterm --foreground --console-diagnostics`で起動し、`plugin loaded` または `failed to load plugin` を確認します。
 
@@ -106,6 +129,7 @@ plugin は小さく防御的に実装してください。読み込み error は
 
 ## sample
 
+- [`examples/plugins/hello.ts`](../examples/plugins/hello.ts): 最小の起動時出力 plugin です。shell の起動制御 sequence で出力が消えないよう、`onReady()` 後に表示します。
 - [`examples/plugins/welcome-banner.ts`](../examples/plugins/welcome-banner.ts): 短い起動 banner を表示し、diagnostic を記録します。
 - [`examples/plugins/status-banner.ts`](../examples/plugins/status-banner.ts): `Plugins` menu section に `Show Plugin Status` を追加します。
 - [`examples/plugins/theme.ts`](../examples/plugins/theme.ts): 見分けやすい青緑のterminal paletteを適用し、起動後に確認messageを表示します。

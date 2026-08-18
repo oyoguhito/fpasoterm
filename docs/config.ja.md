@@ -168,6 +168,52 @@ fpasoterm --prune-config
 fpasoterm --show-config
 ```
 
+選択中TOMLを変更せず検証する場合、選択中pathを確認する場合、現在の完全な既定exampleを
+標準出力へ出す場合:
+
+```sh
+fpasoterm --config-check
+fpasoterm --config-path
+fpasoterm --config-example > config.toml
+```
+
+warning、exit status、GitHub Issue向けの`--diagnostics` reportは
+[設定と診断](diagnostics.ja.md)を参照してください。
+
+## Profile
+
+profileは一回の起動にだけ適用する名前付きoverlayです。通常設定を先にmergeし、
+次に`[profiles.<name>]`、最後に`--title`、`--shell`、`--size`などのCLI引数を
+適用します。このためprofileを選んでも`config.toml`や保存済みwindow boundsは
+書き換わりません。
+
+```toml
+[terminal]
+fontSize = 14
+
+[profiles.large-font.terminal]
+fontSize = 18
+
+[profiles.transparent.window]
+titlebarColor = "#00695c"
+
+[profiles.transparent.terminal]
+backgroundOpacity = 0.65
+```
+
+```sh
+fpasoterm --profile-list
+fpasoterm --profile large-font
+fpasoterm --config examples/config/profiles.toml --profile transparent
+```
+
+profile名はcase-sensitiveなTOML table名です。存在しない名前、またはtableではない
+profileを指定すると、通常設定へ黙ってfallbackせずerrorで終了します。
+`--show-config`と`--diagnostics`には選択中profileを表示します。
+`--config`を指定せず`fpasoterm --profile large-font`を使う場合は、
+`fpasoterm --config-path`で表示されるfileへ`[profiles.large-font.terminal]`tableを
+copyします。[`examples/config/profiles.toml`](../examples/config/profiles.toml)も参照してください。
+
 コマンドラインから plugin を有効化・無効化する場合:
 
 ```sh
