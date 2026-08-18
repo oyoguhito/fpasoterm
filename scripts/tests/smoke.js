@@ -93,6 +93,8 @@ for (const file of [
   'docs/config.en.md',
   'docs/config.ja.md',
   'docs/fpasoterm-plugin.d.ts',
+  'docs/plugins.en.md',
+  'docs/plugins.ja.md',
   'docs/known-issues.en.md',
   'docs/known-issues.ja.md',
   'docs/pr-review.en.md',
@@ -109,6 +111,8 @@ for (const file of [
   'examples/apply-runtime-appearance.bat',
   'examples/plugins/hello.ts',
   'examples/plugins/theme.ts',
+  'examples/plugins/status-banner.ts',
+  'examples/plugins/welcome-banner.ts',
   'examples/config/default-appearance.toml',
   'examples/config/minimal.toml',
   'examples/config/runtime-appearance.toml',
@@ -168,6 +172,8 @@ assert.match(bin, /cargo-build-start/);
 assert.match(bin, /cargo-build-complete/);
 assert.match(bin, /--config/);
 assert.match(bin, /--show-config/);
+assert.match(bin, /--plugin-list/);
+assert.match(bin, /--plugin-path/);
 assert.match(bin, /--update-config/);
 assert.match(bin, /--prune-config/);
 assert.match(bin, /--self-update/);
@@ -181,6 +187,8 @@ assert.match(bin, /--reset-window-state/);
 assert.match(bin, /-R, --reset-config/);
 assert.match(bin, /--enable-plugin/);
 assert.match(bin, /--disable-plugin/);
+assert.match(bin, /--plugin-enable/);
+assert.match(bin, /--plugin-disable/);
 assert.match(bin, /--size/);
 assert.match(bin, /-t, --title/);
 assert.match(bin, /-b, --titlebar-color/);
@@ -215,6 +223,10 @@ assert.match(bin, /child\.unref\(\)/);
 assert.match(bin, /windowsHide: !options\.foreground/);
 assert.match(bin, /isBuiltBinaryCurrent/);
 assert.match(bin, /latestRuntimeSourceMtime/);
+assert.match(bin, /latestPathMtime/);
+assert.match(bin, /src\/renderer/);
+assert.match(bin, /cargo-clean-start/);
+assert.match(bin, /'clean'/);
 assert.match(bin, /buildTauriBinary/);
 assert.match(bin, /buildStampPath/);
 assert.match(bin, /readBuildStamp/);
@@ -341,7 +353,7 @@ for (const unknownOption of ['--hoge', '-?']) {
 
 const resetConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-reset-config-'));
 const resetConfigPath = path.join(resetConfigDir, 'User', 'config.toml');
-const resetStatePath = path.join(resetConfigDir, 'fpasoterm', 'User', 'window-state.json');
+const resetStatePath = path.join(path.dirname(resetConfigPath), 'window-state.json');
 fs.mkdirSync(path.dirname(resetConfigPath), { recursive: true });
 fs.writeFileSync(resetConfigPath, '[window]\ntitle = "custom"\n');
 fs.mkdirSync(path.dirname(resetStatePath), { recursive: true });
@@ -368,14 +380,28 @@ assert.match(fs.readFileSync(path.join(path.dirname(resetConfigPath), resetBacku
 assert.equal(fs.existsSync(resetStatePath), false);
 fs.rmSync(resetConfigDir, { recursive: true, force: true });
 
-const enableResult = runCli('--enable-plugin', 'hello.ts, theme.js');
+const pluginPathResult = runCli('--plugin-path');
+assert.equal(pluginPathResult.status, 0, pluginPathResult.stderr);
+assert.equal(pluginPathResult.stdout.trim(), cliPluginsDir);
+
+const emptyPluginListResult = runCli('--plugin-list');
+assert.equal(emptyPluginListResult.status, 0, emptyPluginListResult.stderr);
+assert.match(emptyPluginListResult.stdout, /Available plugins:/);
+assert.match(emptyPluginListResult.stdout, /plugins\/hello\.ts/);
+assert.match(emptyPluginListResult.stdout, /Enabled plugins:\n  \(none enabled\)/);
+
+const enableResult = runCli('--plugin-enable', 'hello.ts, theme.js');
 assert.equal(enableResult.status, 0, enableResult.stderr);
 assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enabled, [
   'plugins/hello.ts',
   'plugins/theme.js',
 ]);
 
-const disableResult = runCli('--disable-plugin', 'hello.ts', '--disable-plugin', 'theme.js');
+const pluginListResult = runCli('--plugin-list');
+assert.equal(pluginListResult.status, 0, pluginListResult.stderr);
+assert.match(pluginListResult.stdout, /Enabled plugins:\n  plugins\/hello\.ts\n  plugins\/theme\.js/);
+
+const disableResult = runCli('--plugin-disable', 'hello.ts', '--plugin-disable', 'theme.js');
 assert.equal(disableResult.status, 0, disableResult.stderr);
 assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enabled, []);
 
@@ -478,6 +504,9 @@ assert.match(installDesktop, /fpasoterm command/);
 assert.match(installDesktop, /APP_ROOT=/);
 assert.match(installDesktop, /buildLocalBinary/);
 assert.match(installDesktop, /cargo',\s*\[/);
+assert.match(installDesktop, /'clean'/);
+assert.match(installDesktop, /latestPathMtime/);
+assert.match(installDesktop, /src\/renderer/);
 assert.match(installDesktop, /writeBuildStamp/);
 assert.match(installDesktop, /\.fpasoterm-normal-build\.json/);
 assert.match(installDesktop, /FPASOTERM_SKIP_DESKTOP_BUILD/);
@@ -531,12 +560,16 @@ assert.match(tauriConfig, /"signingIdentity": "-"/);
 assert.match(tauriConfig, /"transparent": true/);
 assert.match(tauriConfig, /"backgroundColor": "#00000000"/);
 assert.match(tauriConfig, /"decorations": false/);
+assert.match(tauriConfig, /"assetProtocol": \{/);
+assert.match(tauriConfig, /\$HOME\/\.config\/fpasoterm\/User\/plugins\/\*\*\/*/);
+assert.match(tauriConfig, /\$HOME\/\.config\/fpasoterm\/User\/cache\/plugins\/\*\*\/*/);
 
 const cargoToml = read('src-tauri/Cargo.toml');
 assert.match(cargoToml, new RegExp(`version = "${packageJson.version}"`));
 assert.match(cargoToml, /tauri =/);
 assert.match(cargoToml, /macos-private-api/);
 assert.match(cargoToml, /image-png/);
+assert.match(cargoToml, /protocol-asset/);
 assert.match(cargoToml, /portable-pty/);
 assert.match(cargoToml, /toml =/);
 assert.match(cargoToml, /windows-sys/);
@@ -894,6 +927,7 @@ assert.match(indexHtml, /id="keyboard-shortcuts-help"/);
 assert.match(indexHtml, />Help \(H\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+H"/);
 assert.match(indexHtml, /id="window-menu-items"/);
+assert.match(indexHtml, /id="plugin-command-items"/);
 assert.match(indexHtml, /id="close-window"/);
 assert.match(indexHtml, /id="terminal"/);
 assert.match(indexHtml, /id="terminal-mirror"/);
@@ -913,6 +947,9 @@ assert.match(readme, /--setup-sync/);
 assert.match(readme, /node \.\\bin\\fpasoterm --setup-sync/);
 assert.match(readme, /docs\/pr-review\.en\.md/);
 assert.match(readme, /examples\/plugins/);
+assert.match(readme, /registerCommand\(\)/);
+assert.match(readme, /--plugin-list/);
+assert.match(readme, /docs\/plugins\.en\.md/);
 assert.match(readme, /--shell/);
 assert.match(readme, /PowerShell\\7\\pwsh\.exe/);
 assert.match(readme, /PowerShell 7 \(`pwsh\.exe`\) by default/);
@@ -1147,6 +1184,32 @@ assert.match(prReviewJa, /pull_request/);
 const samplePlugin = read('examples/plugins/hello.ts');
 assert.match(samplePlugin, /fpasotermPluginApi/);
 
+const pluginDocsEn = read('docs/plugins.en.md');
+assert.match(pluginDocsEn, /\[plugins\]/);
+assert.match(pluginDocsEn, /User\/plugins/);
+assert.match(pluginDocsEn, /fpasoterm-plugin\.d\.ts/);
+assert.match(pluginDocsEn, /local files that you trust/);
+assert.match(pluginDocsEn, /--plugin-list/);
+assert.match(pluginDocsEn, /registerCommand/);
+
+const pluginDocsJa = read('docs/plugins.ja.md');
+assert.match(pluginDocsJa, /\[plugins\]/);
+assert.match(pluginDocsJa, /User\/plugins/);
+assert.match(pluginDocsJa, /fpasoterm-plugin\.d\.ts/);
+assert.match(pluginDocsJa, /信頼できるローカル file/);
+assert.match(pluginDocsJa, /--plugin-list/);
+assert.match(pluginDocsJa, /registerCommand/);
+
+const welcomeBannerPlugin = read('examples/plugins/welcome-banner.ts');
+assert.match(welcomeBannerPlugin, /fpasotermPluginApi/);
+assert.match(welcomeBannerPlugin, /Welcome banner plugin is active/);
+assert.match(welcomeBannerPlugin, /onReady/);
+
+const statusBannerPlugin = read('examples/plugins/status-banner.ts');
+assert.match(statusBannerPlugin, /fpasotermPluginApi/);
+assert.match(statusBannerPlugin, /enabled plugins/);
+assert.match(statusBannerPlugin, /registerCommand/);
+
 const sampleConfig = read('examples/config/with-plugins.toml');
 assert.match(sampleConfig, /\[plugins\]/);
 assert.match(sampleConfig, /plugins\/hello\.ts/);
@@ -1329,8 +1392,15 @@ assert.match(defaultApplyBatch, /\[char\]7/);
 const pluginTypes = read('docs/fpasoterm-plugin.d.ts');
 assert.match(pluginTypes, /fpasotermPluginApi/);
 assert.match(pluginTypes, /duplicateWindowMs/);
+assert.match(pluginTypes, /version: string/);
+assert.match(pluginTypes, /onReady:/);
+assert.match(pluginTypes, /registerCommand:/);
 
 const renderer = read('src/renderer/renderer.js');
+assert.match(renderer, /registerPluginReadyCallback/);
+assert.match(renderer, /notifyPluginsReady/);
+assert.match(renderer, /registerPluginCommand/);
+assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /installTauriApiAdapter/);
 assert.match(renderer, /__TAURI__/);
 assert.match(renderer, /startWindowDrag/);
@@ -1587,6 +1657,9 @@ assert.match(renderer, /key === 'opacity'/);
 assert.match(renderer, /CSS\.supports\('color'/);
 assert.match(renderer, /titlebarColor/);
 assert.match(renderer, /--titlebar-background/);
+assert.match(renderer, /function fitWindowMenuToViewport\(\)/);
+assert.match(renderer, /window\.innerHeight - top - 8/);
+assert.match(renderer, /window\.addEventListener\('resize', fitWindowMenuToViewport\)/);
 
 const styles = read('src/renderer/styles.css');
 assert.match(styles, /xterm-image-layer-top/);
@@ -1602,6 +1675,9 @@ assert.match(styles, /height: var\(--titlebar-height\)/);
 assert.match(styles, /pointer-events: none/);
 assert.match(styles, /#window-controls/);
 assert.match(styles, /#window-title[\s\S]*flex: 1 1 auto/);
+assert.match(styles, /#window-menu-items[\s\S]*max-width: calc\(100vw - 12px\)/);
+assert.match(styles, /#window-menu-items[\s\S]*max-height: calc\(100vh - var\(--titlebar-height\) - 8px\)/);
+assert.match(styles, /#window-menu-items[\s\S]*overflow-y: auto/);
 assert.match(styles, /#terminal-log-status/);
 assert.match(styles, /#terminal-log-status\[hidden\]/);
 assert.doesNotMatch(styles, /#sync-menu/);
@@ -1685,6 +1761,9 @@ assert.match(config, /\.ts/);
 assert.match(config, /transpileModule/);
 
 const launcher = read('bin/fpasoterm');
+assert.match(launcher, /const runtimeConfig = loadConfig\(\);\s+printPluginList\(targetPath, \[\.\.\.enabled\]\.sort\(\), runtimeConfig\.pluginUrls\);/);
+assert.match(launcher, /--plugin-info <file>/);
+assert.match(launcher, /function showPluginInfo\(options\)/);
 assert.match(launcher, /--setup-sync/);
 assert.match(launcher, /--version/);
 assert.match(launcher, /printVersion/);
@@ -1714,6 +1793,9 @@ assert.match(launcher, /GoogleDrive-/);
 assert.match(launcher, /G:\\\\My Drive/);
 assert.match(launcher, /readline\.createInterface/);
 assert.match(launcher, /writeUserConfig/);
+assert.match(renderer, /function pluginScriptSource\(plugin\)/);
+assert.match(renderer, /convertFileSrc/);
+assert.match(renderer, /failed to load plugin \$\{plugin\.name\} source=\$\{source\}/);
 
 const desktop = read('extra/linux/io.github.oyoguhito.fpasoterm.desktop');
 assert.match(desktop, /^Name=fpasoterm$/m);

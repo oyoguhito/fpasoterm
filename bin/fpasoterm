@@ -20,7 +20,6 @@ const {
   platformDefaultConfig,
   writableConfigDefaults,
   pruneUnsupportedConfig,
-  windowStatePath,
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
 const packageJson = require(path.join(root, 'package.json'));
@@ -45,6 +44,9 @@ Options:
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --plugin-list             List available and enabled plugins, then exit.
+      --plugin-path             Print the active User/plugins directory, then exit.
+      --plugin-info <file>      Show a .js/.ts plugin's state, source, description, and load status.
       --update-config           Add missing default settings and back up config.toml, then exit.
       --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
@@ -59,6 +61,10 @@ Options:
   -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.
       --enable-plugin <names>   Enable plugin files by name (comma-separated/repeatable), then exit.
       --disable-plugin <names>  Disable plugin files by name (comma-separated/repeatable), then exit.
+      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.
+      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.
+      --plugin-enable <names>   Alias for --enable-plugin.
+      --plugin-disable <names>  Alias for --disable-plugin.
   -W, --width <px>              Override the configured window width for this launch.
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
@@ -102,9 +108,14 @@ function parseArgs(argv) {
   const runtimeArgs = [];
   const enablePlugins = [];
   const disablePlugins = [];
+  let enableAllPlugins = false;
+  let disableAllPlugins = false;
   let foreground = false;
   let dev = false;
   let showConfig = false;
+  let pluginList = false;
+  let pluginPath = false;
+  let pluginInfo = '';
   let listInstances = false;
   let closeTarget = '';
   let setupSync = false;
@@ -132,6 +143,22 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--plugin-list') {
+      pluginList = true;
+      continue;
+    }
+
+    if (arg === '--plugin-path') {
+      pluginPath = true;
+      continue;
+    }
+
+    if (arg === '--plugin-info') {
+      pluginInfo = requireValue(argv, index, arg);
+      index += 1;
       continue;
     }
 
@@ -210,15 +237,25 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--enable-plugin') {
+    if (arg === '--enable-plugin' || arg === '--plugin-enable') {
       enablePlugins.push(...parsePluginSelectors(requireValue(argv, index, arg), arg));
       index += 1;
       continue;
     }
 
-    if (arg === '--disable-plugin') {
+    if (arg === '--disable-plugin' || arg === '--plugin-disable') {
       disablePlugins.push(...parsePluginSelectors(requireValue(argv, index, arg), arg));
       index += 1;
+      continue;
+    }
+
+    if (arg === '--plugin-enable-all') {
+      enableAllPlugins = true;
+      continue;
+    }
+
+    if (arg === '--plugin-disable-all') {
+      disableAllPlugins = true;
       continue;
     }
 
@@ -283,12 +320,19 @@ function parseArgs(argv) {
       : `unexpected argument: ${arg}`);
   }
 
+  if (enableAllPlugins && disableAllPlugins) {
+    throw new Error('--plugin-enable-all and --plugin-disable-all cannot be used together');
+  }
+
   return {
     help: false,
     version: false,
     foreground,
     dev,
     showConfig,
+    pluginList,
+    pluginPath,
+    pluginInfo,
     listInstances,
     closeTarget,
     setupSync,
@@ -306,6 +350,8 @@ function parseArgs(argv) {
     startCommand,
     enablePlugins,
     disablePlugins,
+    enableAllPlugins,
+    disableAllPlugins,
     runtimeArgs,
   };
 }
@@ -314,15 +360,15 @@ function parseArgs(argv) {
 function validateArgs(argv) {
   const flags = new Set([
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
-    '--console-diagnostics', '-C', '--show-config', '--setup-sync', '--self-update',
+    '--console-diagnostics', '-C', '--show-config', '--plugin-list', '--plugin-path', '--setup-sync', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
-    '--prune-config',
+    '--prune-config', '--plugin-enable-all', '--plugin-disable-all',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--shell', '-s', '--command', '-e', '--title', '-t',
-    '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--width', '-W',
+    '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--width', '-W',
     '--height', '-H', '--size', '-z',
   ]);
 
@@ -575,7 +621,12 @@ function applyEnv(env) {
 
 // Updates plugins.enabled in config.toml without launching the application.
 function updatePluginConfig(options) {
-  if (options.enablePlugins.length === 0 && options.disablePlugins.length === 0) {
+  if (
+    options.enablePlugins.length === 0 &&
+    options.disablePlugins.length === 0 &&
+    !options.enableAllPlugins &&
+    !options.disableAllPlugins
+  ) {
     return false;
   }
 
@@ -585,6 +636,16 @@ function updatePluginConfig(options) {
   const plugins = userConfig.plugins && typeof userConfig.plugins === 'object' ? userConfig.plugins : {};
   const enabled = new Set(Array.isArray(plugins.enabled) ? plugins.enabled : []);
   const available = discoverPluginFiles(targetPath);
+
+  if (options.enableAllPlugins) {
+    for (const plugin of available) {
+      enabled.add(plugin);
+    }
+  }
+
+  if (options.disableAllPlugins) {
+    enabled.clear();
+  }
 
   for (const selector of options.enablePlugins) {
     enabled.add(resolvePluginSelector(selector, available, 'enable'));
@@ -604,7 +665,8 @@ function updatePluginConfig(options) {
   }, targetPath);
 
   console.log(`updated ${targetPath}`);
-  printPluginList(targetPath, [...enabled].sort());
+  const runtimeConfig = loadConfig();
+  printPluginList(targetPath, [...enabled].sort(), runtimeConfig.pluginUrls);
   return true;
 }
 
@@ -643,12 +705,13 @@ function resetConfig(options) {
     fs.renameSync(targetPath, backupPath);
   }
   writeUserConfig(writableConfigDefaults(), targetPath);
-  deleteWindowState(windowStatePath());
+  const statePath = path.join(path.dirname(targetPath), 'window-state.json');
+  deleteWindowState(statePath);
   console.log(`reset config ${targetPath}`);
   if (backupPath) {
     console.log(`renamed previous config ${backupPath}`);
   }
-  console.log(`deleted saved window state ${windowStatePath()}`);
+  console.log(`deleted saved window state ${statePath}`);
 }
 
 // Adds newly introduced defaults while retaining every existing user value.
@@ -719,6 +782,69 @@ function printPluginList(targetPath, enabled, pluginUrls = []) {
     const exists = fs.existsSync(pluginPath);
     const status = loaded ? 'loadable' : exists ? 'not loadable' : 'missing';
     console.log(`  - ${plugin} [${status}]${loaded ? ` -> ${loaded.url}` : ''}`);
+  }
+}
+
+// Lists every plugin file below User/plugins and the explicit enabled selection.
+function showPluginList(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const userConfig = readUserConfig(targetPath);
+  const enabled = Array.isArray(userConfig.plugins?.enabled) ? userConfig.plugins.enabled : [];
+  const available = discoverPluginFiles(targetPath);
+
+  console.log('Available plugins:');
+  if (available.length === 0) {
+    console.log('  (none found)');
+  } else {
+    for (const plugin of available) {
+      console.log(`  ${plugin}`);
+    }
+  }
+
+  console.log('');
+  console.log('Enabled plugins:');
+  if (enabled.length === 0) {
+    console.log('  (none enabled)');
+  } else {
+    for (const plugin of enabled) {
+      console.log(`  ${plugin}`);
+    }
+  }
+}
+
+// Prints the active configuration's plugin directory without creating it.
+function showPluginPath(options) {
+  applyEnv(options.env);
+  console.log(path.join(path.dirname(configPath()), 'plugins'));
+}
+
+// Prints one local plugin's resolved source and load details without opening a window.
+function showPluginInfo(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const available = discoverPluginFiles(targetPath);
+  const plugin = resolvePluginSelector(options.pluginInfo, available, 'inspect');
+  const sourcePath = path.resolve(path.dirname(targetPath), plugin);
+  const userConfig = readUserConfig(targetPath);
+  const enabled = Array.isArray(userConfig.plugins?.enabled) && userConfig.plugins.enabled.includes(plugin);
+  const runtimeConfig = loadConfig();
+  const resolved = runtimeConfig.pluginUrls.find((entry) => entry.name === plugin);
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  const description = source
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('//') && !line.startsWith('///'))
+    ?.replace(/^\/\/\s*/, '') || '(no leading plugin comment)';
+
+  console.log(`Plugin: ${plugin}`);
+  console.log(`State: ${enabled ? 'enabled' : 'disabled'}`);
+  console.log(`Type: ${path.extname(sourcePath) === '.ts' ? 'TypeScript' : 'JavaScript'}`);
+  console.log(`Source: ${sourcePath}`);
+  console.log(`Description: ${description}`);
+  console.log(`Load status: ${resolved ? 'loadable' : 'not loadable'}`);
+  if (resolved) {
+    console.log(`Renderer URL: ${resolved.url}`);
   }
 }
 
@@ -1078,6 +1204,34 @@ function buildLocalTauriBinary(options) {
       appendLauncherLog(`launcher cargo log fd error=${error.message}`);
     }
   }
+  // Tauri embeds frontendDist in the native binary, but Cargo does not always
+  // notice a renderer-only edit. Clean only this crate before building so an
+  // updated launcher never opens stale renderer assets.
+  appendLaunchPhase('cargo-clean-start');
+  const cleanResult = spawnSync('cargo', [
+    'clean',
+    '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'),
+    '-p', 'fpasoterm',
+  ], {
+    cwd: root,
+    env: process.env,
+    stdio,
+    windowsHide: !options.foreground,
+  });
+  if (cleanResult.error) {
+    if (logFd !== undefined) {
+      fs.closeSync(logFd);
+    }
+    return Promise.reject(new Error(`failed to start cargo clean: ${cleanResult.error.message}`));
+  }
+  if (cleanResult.status !== 0) {
+    if (logFd !== undefined) {
+      fs.closeSync(logFd);
+    }
+    return Promise.reject(new Error(`cargo clean failed with exit code ${cleanResult.status}`));
+  }
+  appendLaunchPhase('cargo-clean-complete');
+
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
     env: process.env,
@@ -1129,11 +1283,31 @@ function latestRuntimeSourceMtime() {
   return [
     'src-tauri/src/main.rs',
     'src-tauri/Cargo.toml',
+    'src-tauri/Cargo.lock',
+    'src-tauri/build.rs',
+    'src-tauri/default-config.toml',
     'src-tauri/tauri.conf.json',
+    'src-tauri/capabilities',
+    'src/renderer',
+    'extra/logo/fpasoterm.png',
+    'package.json',
   ]
     .map((relativePath) => path.join(root, relativePath))
-    .filter((sourcePath) => fs.existsSync(sourcePath))
-    .reduce((latest, sourcePath) => Math.max(latest, fs.statSync(sourcePath).mtimeMs), 0);
+    .reduce((latest, sourcePath) => Math.max(latest, latestPathMtime(sourcePath)), 0);
+}
+
+// Returns the newest mtime in a file or a small source directory recursively.
+function latestPathMtime(sourcePath) {
+  try {
+    const stat = fs.statSync(sourcePath);
+    if (!stat.isDirectory()) {
+      return stat.mtimeMs;
+    }
+    return fs.readdirSync(sourcePath, { withFileTypes: true })
+      .reduce((latest, entry) => Math.max(latest, latestPathMtime(path.join(sourcePath, entry.name))), stat.mtimeMs);
+  } catch {
+    return 0;
+  }
 }
 
 // Resolves config before launching so the Rust runtime can stay focused on
@@ -1324,6 +1498,12 @@ try {
     });
   } else if (options.showConfig) {
     showConfig(options);
+  } else if (options.pluginList) {
+    showPluginList(options);
+  } else if (options.pluginPath) {
+    showPluginPath(options);
+  } else if (options.pluginInfo) {
+    showPluginInfo(options);
   } else if (options.updateDesktop) {
     updateDesktopIntegration();
   } else if (options.selfUpdateCheckout) {

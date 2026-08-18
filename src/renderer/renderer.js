@@ -36,6 +36,7 @@ const terminalLogShowButton = document.getElementById('terminal-log-show');
 const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
+const pluginCommandItems = document.getElementById('plugin-command-items');
 const terminalBroadcastButton = document.getElementById('terminal-broadcast');
 const terminalBroadcastDialog = document.getElementById('terminal-broadcast-dialog');
 const terminalBroadcastText = document.getElementById('terminal-broadcast-text');
@@ -135,6 +136,10 @@ const fallbackConfig = {
 let appConfig = fallbackConfig;
 let activeConfigPath = '';
 let pluginUrls = [];
+let pluginVersion = 'unknown';
+let pluginsReady = false;
+const pluginReadyCallbacks = [];
+const pluginCommands = new Map();
 let term;
 let fitAddon;
 let imageAddon;
@@ -1415,31 +1420,133 @@ function rememberPlainTextWrite(data) {
   };
 }
 
+// Converts a trusted file URL from the config resolver into Tauri's scoped
+// asset protocol URL. This keeps local plugins compatible with the WebView CSP.
+function pluginScriptSource(plugin) {
+  const fileUrl = String(plugin?.url || '');
+  const convertFileSrc = window.__TAURI__?.core?.convertFileSrc;
+  if (!fileUrl.startsWith('file:') || typeof convertFileSrc !== 'function') {
+    return fileUrl;
+  }
+  try {
+    let filePath = decodeURIComponent(new URL(fileUrl).pathname);
+    if (/^\/[A-Za-z]:\//.test(filePath)) {
+      filePath = filePath.slice(1);
+    }
+    return convertFileSrc(filePath);
+  } catch (error) {
+    showDiagnostic(`plugin URL conversion failed for ${plugin?.name || 'unknown'}: ${error?.message || error}`);
+    return fileUrl;
+  }
+}
+
 // Publishes the plugin API and loads enabled user plugins in order.
 async function loadPlugins() {
   window.fpasotermPluginApi = Object.freeze({
+    version: pluginVersion,
     terminal: term,
     fitAddon,
     imageAddon,
     config: appConfig,
     log: (message) => showDiagnostic(`plugin: ${message}`),
+    onReady: registerPluginReadyCallback,
+    registerCommand: registerPluginCommand,
   });
 
   for (const plugin of pluginUrls) {
     await new Promise((resolve) => {
       const script = document.createElement('script');
-      script.src = plugin.url;
+      const source = pluginScriptSource(plugin);
+      script.src = source;
       script.async = false;
       script.onload = () => {
-        showDiagnostic(`plugin loaded ${plugin.name}`);
+        showDiagnostic(`plugin loaded ${plugin.name} source=${source}`);
         resolve();
       };
       script.onerror = () => {
-        console.error(`failed to load plugin ${plugin.name}`);
+        const message = `failed to load plugin ${plugin.name} source=${source}`;
+        console.error(message);
+        showDiagnostic(message);
         resolve();
       };
       document.head.appendChild(script);
     });
+  }
+}
+
+// Registers work that needs a successfully started PTY instead of only xterm.
+function registerPluginReadyCallback(callback) {
+  if (typeof callback !== 'function') {
+    throw new TypeError('plugin onReady callback must be a function');
+  }
+  if (pluginsReady) {
+    queueMicrotask(() => runPluginReadyCallback(callback));
+    return;
+  }
+  pluginReadyCallbacks.push(callback);
+}
+
+// Runs one plugin callback without allowing a plugin error to stop the renderer.
+function runPluginReadyCallback(callback) {
+  Promise.resolve()
+    .then(callback)
+    .catch((error) => showDiagnostic(`plugin onReady failed: ${error?.stack || error}`));
+}
+
+// Delivers the terminal-ready lifecycle event once after the backend PTY starts.
+function notifyPluginsReady() {
+  if (pluginsReady) {
+    return;
+  }
+  pluginsReady = true;
+  for (const callback of pluginReadyCallbacks.splice(0)) {
+    runPluginReadyCallback(callback);
+  }
+}
+
+// Adds a trusted plugin action to the existing keyboard-accessible window menu.
+function registerPluginCommand(id, title, handler) {
+  const commandId = String(id || '').trim();
+  const commandTitle = String(title || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(commandId)) {
+    throw new Error('plugin command id must start with a letter and use letters, numbers, ., _, :, or -');
+  }
+  if (!commandTitle || commandTitle.length > 80) {
+    throw new Error('plugin command title must contain 1 to 80 characters');
+  }
+  if (typeof handler !== 'function') {
+    throw new TypeError('plugin command handler must be a function');
+  }
+  if (pluginCommands.has(commandId)) {
+    throw new Error(`plugin command is already registered: ${commandId}`);
+  }
+  if (!pluginCommandItems) {
+    throw new Error('plugin command menu is unavailable');
+  }
+
+  const button = document.createElement('button');
+  button.type = 'button';
+  button.role = 'menuitem';
+  button.textContent = commandTitle;
+  button.dataset.pluginCommand = commandId;
+  button.addEventListener('click', () => runPluginCommand(commandId));
+  pluginCommands.set(commandId, { handler, button });
+  pluginCommandItems.appendChild(button);
+  pluginCommandItems.hidden = false;
+  showDiagnostic(`plugin command registered id=${commandId}`);
+}
+
+// Invokes a registered command and reports plugin failures without closing the app.
+async function runPluginCommand(commandId) {
+  const command = pluginCommands.get(commandId);
+  if (!command) {
+    return;
+  }
+  setWindowMenuOpen(false);
+  try {
+    await command.handler();
+  } catch (error) {
+    showDiagnostic(`plugin command ${commandId} failed: ${error?.stack || error}`);
   }
 }
 
@@ -1515,7 +1622,18 @@ function focusWindowMenuItem(delta) {
   }
   const currentIndex = items.indexOf(document.activeElement);
   const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
-  items[nextIndex].focus({ preventScroll: true });
+  items[nextIndex].focus();
+}
+
+// Keeps the popup within the actual WebView viewport. CSS viewport units alone
+// can be stale briefly after a native resize on WebKitGTK.
+function fitWindowMenuToViewport() {
+  if (!windowMenuItems || windowMenuItems.hidden) {
+    return;
+  }
+  const top = windowMenuItems.getBoundingClientRect().top;
+  const maximumHeight = Math.max(48, Math.floor(window.innerHeight - top - 8));
+  windowMenuItems.style.maxHeight = `${maximumHeight}px`;
 }
 
 // Returns focusable controls in the visible diagnostics/log panel.
@@ -2360,6 +2478,7 @@ function setWindowMenuOpen(open, preferredItem = newWindowButton) {
   windowMenuItems.hidden = !open;
   windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
   if (open) {
+    fitWindowMenuToViewport();
     const focusTarget = preferredItem && !preferredItem.hidden && !preferredItem.disabled
       ? preferredItem
       : newWindowButton;
@@ -2391,6 +2510,8 @@ windowMenuItems.addEventListener('keydown', (event) => {
     focusWindowMenuItem(backwards ? -1 : 1);
   }
 });
+
+window.addEventListener('resize', fitWindowMenuToViewport);
 
 // Starts native window dragging from the custom titlebar on Tauri.
 document.getElementById('drag-region').addEventListener('pointerdown', (event) => {
@@ -2524,6 +2645,7 @@ async function initialize() {
     return;
   }
   await loadRuntimeConfig();
+  pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();
   await refreshTerminalLogControl();
   if (debugKeys) {
@@ -2600,6 +2722,7 @@ async function initialize() {
     return;
   }
   installCompositionDuplicateGuard();
+  notifyPluginsReady();
   focusTerminalInput();
 }
 

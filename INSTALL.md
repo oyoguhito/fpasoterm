@@ -78,7 +78,14 @@ For a clean non-jj git checkout, this can be automated:
 fpasoterm --self-update-checkout
 ```
 
-Run `npm run update:desktop` after changing the checkout path, launcher icon, or installed command wrapper. It is not required for `./bin/fpasoterm --dev ...`.
+Run `npm run update:desktop` after changing the checkout path, launcher icon,
+installed command wrapper, Rust source, or renderer assets. It overwrites the
+desktop launcher and rebuilds the local runtime so the next icon or command
+launch uses the current checkout. It is not required for `./bin/fpasoterm --dev ...`.
+
+`npm run update:desktop` is for Linux and ChromeOS desktop integration. On
+Windows it intentionally makes no desktop changes; update by installing the
+current `.msi` or `.exe` artifact instead.
 
 To remove an npm global installation, including its npm-managed `fpasoterm`
 command, run:

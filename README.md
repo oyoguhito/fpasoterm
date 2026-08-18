@@ -357,7 +357,15 @@ repeatedTextWindowMs = 140
 enabled = ["plugins/example.ts"]
 ```
 
-Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) and TypeScript (`.ts`) plugins are supported. TypeScript plugins are transpiled into `~/.config/fpasoterm/User/cache/plugins/` at launch.
+Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) and TypeScript (`.ts`) plugins are supported. TypeScript plugins are transpiled into `~/.config/fpasoterm/User/cache/plugins/` at launch. They run in the renderer context, so enable only trusted local files that you have reviewed.
+
+Plugins can read `version`, run post-startup work through `onReady()`, and add
+actions to the hamburger menu's `Plugins` section through `registerCommand()`.
+Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins, or
+`--plugin-enable` / `--plugin-disable` to update the enabled list. Use
+`fpasoterm --plugin-info welcome-banner.ts` for a plugin's source, enabled
+state, description, and load status. Restart the affected window after an
+enable or source change.
 
 Minimal TypeScript plugin:
 
@@ -387,7 +395,7 @@ To restore every setting and window size to its platform default, run
 The saved `window-state.json` is also removed so the default width of 1000 and
 height of 680 take effect on the next launch.
 
-The full default configuration and plugin setup are documented in [Configuration](docs/config.en.md). Sample configs are available in [examples/config](examples/config), and sample TypeScript plugins are available in [examples/plugins](examples/plugins).
+The full default configuration is documented in [Configuration](docs/config.en.md). See [Plugins](docs/plugins.en.md) for setup, security guidance, CLI management, and the supported API declaration in [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts). Sample configs are available in [examples/config](examples/config), and public plugin samples are available in [examples/plugins](examples/plugins).
 
 For maintenance workflows across machines, fpasoterm can share diagnostics and
 terminal output logs through a local sync folder such as Google Drive for

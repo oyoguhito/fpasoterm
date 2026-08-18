@@ -1,6 +1,6 @@
 [package]
 name = "fpasoterm"
-version = "1.5.4"
+version = "1.5.5"
 description = "Cross-platform terminal with Japanese IME support."
 authors = ["oyoguhito"]
 edition = "2021"
@@ -13,7 +13,7 @@ tauri-build = { version = "2.5.2", features = [] }
 portable-pty = "0.9.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-tauri = { version = "2.9.2", features = ["image-png", "macos-private-api"] }
+tauri = { version = "2.9.2", features = ["image-png", "macos-private-api", "protocol-asset"] }
 toml = "0.9.8"
 
 [target.'cfg(unix)'.dependencies]
