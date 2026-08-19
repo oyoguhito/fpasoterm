@@ -8,14 +8,19 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   contents: read
   security-events: write
 
 jobs:
-  security:
+  dependency-security:
     name: Secret and vulnerability checks
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -30,19 +35,41 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Run security checks
+        run: npm run security
 
-      - name: Scan for credentials
-        run: npm run scan:secrets
+  security:
+    name: CodeQL JavaScript and TypeScript
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
 
-      - name: Audit production dependencies
-        run: npm run audit:prod
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3
+        uses: github/codeql-action/init@v4
         with:
-          languages: javascript-typescript, rust
+          languages: javascript-typescript
+          build-mode: none
 
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3
+        uses: github/codeql-action/analyze@v4
+
+  codeql-rust:
+    name: CodeQL Rust
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: rust
+          build-mode: none
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4

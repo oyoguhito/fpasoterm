@@ -268,6 +268,16 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
+
+# Profiles are optional named overlays selected with --profile <name>.
+# They may contain [window], [terminal], [ime], [keybindings], [sync], or
+# [logging] settings. The selected profile overrides the normal sections.
+#
+# [profiles.large-font.terminal]
+# fontSize = 18
+#
+# [profiles.transparent.terminal]
+# backgroundOpacity = 0.65
 `;
 }
 
@@ -349,6 +359,12 @@ function pruneUnsupportedConfig(defaults, config, prefix = '') {
   const removed = [];
   for (const [key, value] of Object.entries(config)) {
     const path = prefix ? `${prefix}.${key}` : key;
+    // Profiles are optional named overlays. Their keys are validated when the
+    // profile is selected, so do not erase a whole user-owned profile here.
+    if (prefix === '' && key === 'profiles' && isObject(value)) {
+      pruned[key] = value;
+      continue;
+    }
     if (!Object.hasOwn(defaults, key)) {
       removed.push(path);
       continue;
@@ -362,6 +378,30 @@ function pruneUnsupportedConfig(defaults, config, prefix = '') {
     }
   }
   return { config: pruned, removed };
+}
+
+// Returns deterministic names for the optional named configuration overlays.
+function profileNames(config) {
+  return isObject(config?.profiles) ? Object.keys(config.profiles).sort() : [];
+}
+
+// Separates normal settings from one selected profile before runtime merging.
+function selectProfileConfig(userConfig, profileName = process.env.FPASOTERM_PROFILE || '') {
+  const config = isObject(userConfig) ? userConfig : {};
+  const profiles = isObject(config.profiles) ? config.profiles : {};
+  const baseConfig = { ...config };
+  delete baseConfig.profiles;
+  const activeProfile = String(profileName || '').trim();
+  if (!activeProfile) {
+    return { baseConfig, profileConfig: {}, activeProfile: '' };
+  }
+  if (!Object.hasOwn(profiles, activeProfile)) {
+    throw new Error(`profile '${activeProfile}' does not exist; available profiles: ${profileNames(config).join(', ') || '(none)'}`);
+  }
+  if (!isObject(profiles[activeProfile])) {
+    throw new Error(`profile '${activeProfile}' must be a TOML table`);
+  }
+  return { baseConfig, profileConfig: profiles[activeProfile], activeProfile };
 }
 
 // Drops config sections that were removed from the supported schema.
@@ -387,6 +427,78 @@ function readUserConfig(targetPath = configPath()) {
   }
 
   return toml.parse(fs.readFileSync(targetPath, 'utf8'));
+}
+
+// Validates the user-owned TOML without changing it. The launcher can use this
+// result to explain recoverable configuration mistakes before opening a window.
+function validateUserConfig(targetPath = configPath(), profileName = process.env.FPASOTERM_PROFILE || '') {
+  const result = {
+    configPath: targetPath,
+    exists: fs.existsSync(targetPath),
+    warnings: [],
+    error: '',
+  };
+
+  let userConfig;
+  try {
+    userConfig = readUserConfig(targetPath);
+  } catch (error) {
+    result.error = `cannot parse TOML: ${error.message}`;
+    return result;
+  }
+
+  if (userConfig.profiles !== undefined && !isObject(userConfig.profiles)) {
+    result.warnings.push('profiles should be a table of named profile tables');
+  }
+  for (const name of profileNames(userConfig)) {
+    if (!isObject(userConfig.profiles[name])) {
+      result.warnings.push(`profiles.${name} should be a TOML table`);
+    }
+  }
+  if (profileName && !profileNames(userConfig).includes(profileName)) {
+    result.warnings.push(`selected profile '${profileName}' does not exist`);
+  }
+
+  const fontSize = userConfig.terminal?.fontSize;
+  if (fontSize !== undefined && (typeof fontSize !== 'number' || !Number.isFinite(fontSize) || fontSize <= 0)) {
+    result.warnings.push('terminal.fontSize should be a positive number');
+  }
+
+  for (const [key, value] of [
+    ['window.width', userConfig.window?.width],
+    ['window.height', userConfig.window?.height],
+    ['window.minWidth', userConfig.window?.minWidth],
+    ['window.minHeight', userConfig.window?.minHeight],
+    ['terminal.lineHeight', userConfig.terminal?.lineHeight],
+    ['terminal.scrollback', userConfig.terminal?.scrollback],
+    ['logging.maxBytes', userConfig.logging?.maxBytes],
+  ]) {
+    if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)) {
+      result.warnings.push(`${key} should be a positive number`);
+    }
+  }
+
+  const enabled = userConfig.plugins?.enabled;
+  if (enabled !== undefined && !Array.isArray(enabled)) {
+    result.warnings.push('plugins.enabled should be an array of .js/.ts file names');
+  } else if (Array.isArray(enabled)) {
+    const rootDir = path.dirname(targetPath);
+    for (const plugin of enabled) {
+      const pluginPath = typeof plugin === 'string' ? path.resolve(rootDir, plugin) : '';
+      if (typeof plugin !== 'string' || !pluginPath.startsWith(`${path.resolve(rootDir, 'plugins')}${path.sep}`)
+        || !['.js', '.ts'].includes(path.extname(pluginPath))) {
+        result.warnings.push(`plugins.enabled includes invalid entry ${JSON.stringify(plugin)}`);
+      } else if (!fs.existsSync(pluginPath)) {
+        result.warnings.push(`plugins.enabled includes ${plugin} but file does not exist`);
+      }
+    }
+  }
+
+  const unsupported = pruneUnsupportedConfig(writableConfigDefaults(), userConfig).removed;
+  for (const key of unsupported) {
+    result.warnings.push(`${key} is not a supported configuration key`);
+  }
+  return result;
 }
 
 // Writes a user config file, used by CLI commands that edit plugin settings.
@@ -495,6 +607,33 @@ function resolvePluginSelector(selector, candidates, action) {
   return matches[0];
 }
 
+// Reads optional single-file plugin metadata without requiring a manifest or
+// changing the established User/plugins .js/.ts layout.
+function pluginMetadata(source) {
+  const metadata = {};
+  let fallbackDescription = '';
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const trimmed = line.trim();
+    const header = trimmed.match(/^\/\/\s*@fpasoterm-plugin\s+(version|description)\s*:\s*(.+?)\s*$/i);
+    if (header) {
+      metadata[header[1].toLowerCase()] = header[2];
+      continue;
+    }
+    if (!fallbackDescription && trimmed.startsWith('//') && !trimmed.startsWith('///')) {
+      fallbackDescription = trimmed.replace(/^\/\/\s*/, '');
+    }
+  }
+  return {
+    version: metadata.version || '(not declared)',
+    description: metadata.description || fallbackDescription || '(no leading plugin comment)',
+  };
+}
+
+// Loads metadata from one trusted plugin source for CLI reporting.
+function readPluginMetadata(pluginPath) {
+  return pluginMetadata(fs.readFileSync(pluginPath, 'utf8'));
+}
+
 // Resolves enabled plugin files and transpiles TypeScript plugins into User/cache.
 function resolvePluginUrls(config, rootDir) {
   const enabled = Array.isArray(config.plugins?.enabled) ? config.plugins.enabled : [];
@@ -555,7 +694,11 @@ function loadConfig() {
   writeDefaultConfigExample(file);
 
   const userConfig = readUserConfig(file);
-  let config = removeUnsupportedConfigSections(mergeConfig(platformDefaultConfig(), userConfig));
+  const selected = selectProfileConfig(userConfig);
+  let config = removeUnsupportedConfigSections(mergeConfig(
+    mergeConfig(platformDefaultConfig(), selected.baseConfig),
+    selected.profileConfig,
+  ));
   config = migrateLegacyMacosFontFamily(config);
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
@@ -569,6 +712,7 @@ function loadConfig() {
     config,
     configDir: dir,
     configPath: file,
+    activeProfile: selected.activeProfile,
     pluginUrls,
     windowStatePath: windowStatePath(),
   };
@@ -582,7 +726,10 @@ module.exports = {
   deleteWindowState,
   discoverPluginFiles,
   profileDir,
+  pluginMetadata,
+  readPluginMetadata,
   readUserConfig,
+  validateUserConfig,
   resolvePluginSelector,
   writeUserConfig,
   readWindowState,
@@ -592,7 +739,9 @@ module.exports = {
   mergeConfig,
   missingConfigKeys,
   pruneUnsupportedConfig,
+  profileNames,
   platformDefaultConfig,
+  selectProfileConfig,
   writableConfigDefaults,
   windowStatePath,
 };

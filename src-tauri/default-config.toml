@@ -94,3 +94,13 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
+
+# Profiles are optional named overlays selected with --profile <name>.
+# They may contain [window], [terminal], [ime], [keybindings], [sync], or
+# [logging] settings. The selected profile overrides the normal sections.
+#
+# [profiles.large-font.terminal]
+# fontSize = 18
+#
+# [profiles.transparent.terminal]
+# backgroundOpacity = 0.65

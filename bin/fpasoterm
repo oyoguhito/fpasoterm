@@ -10,14 +10,19 @@ const toml = require('smol-toml');
 const root = path.resolve(__dirname, '..');
 const {
   configPath,
+  defaultConfigExample,
   deleteWindowState,
   discoverPluginFiles,
   loadConfig,
   mergeConfig,
   missingConfigKeys,
+  readPluginMetadata,
   readUserConfig,
   resolvePluginSelector,
+  selectProfileConfig,
   platformDefaultConfig,
+  profileNames,
+  validateUserConfig,
   writableConfigDefaults,
   pruneUnsupportedConfig,
   writeUserConfig,
@@ -43,10 +48,18 @@ Options:
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
+  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.
+      --profile-list            List available named profiles, then exit.
       --show-config             Print resolved settings and plugin load status, then exit.
+      --config-check             Validate config.toml and report warnings, then exit.
+      --config-path              Print the active config.toml path, then exit.
+      --config-example           Print the active config.toml.example contents, then exit.
+      --diagnostics              Print a Markdown diagnostics report, then exit.
+      --open-log-dir             Open the configured terminal log directory, then exit.
+      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.
       --plugin-list             List available and enabled plugins, then exit.
       --plugin-path             Print the active User/plugins directory, then exit.
-      --plugin-info <file>      Show a .js/.ts plugin's state, source, description, and load status.
+      --plugin-info <file>      Show a .js/.ts plugin's state, version, source, and load status.
       --update-config           Add missing default settings and back up config.toml, then exit.
       --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
@@ -76,6 +89,16 @@ Options:
 Normal launches build and run the local Tauri binary when needed, then detach
 from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
+
+Profile usage:
+  1. Find config: fpasoterm --config-path
+  2. Add to config.toml:
+       [profiles.large-font.terminal]
+       fontSize = 18
+  3. Launch: fpasoterm --profile large-font
+  List names: fpasoterm --profile-list
+  Sample file: --config examples/config/profiles.toml --profile large-font
+  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile
 `;
 
 // Appends diagnostics for launcher/icon starts where stdout and stderr are hidden.
@@ -113,6 +136,13 @@ function parseArgs(argv) {
   let foreground = false;
   let dev = false;
   let showConfig = false;
+  let configCheck = false;
+  let profileList = false;
+  let configPathOnly = false;
+  let configExample = false;
+  let diagnostics = false;
+  let openLogDir = false;
+  let copyDiagnostics = false;
   let pluginList = false;
   let pluginPath = false;
   let pluginInfo = '';
@@ -143,6 +173,41 @@ function parseArgs(argv) {
 
     if (arg === '--show-config') {
       showConfig = true;
+      continue;
+    }
+
+    if (arg === '--config-check') {
+      configCheck = true;
+      continue;
+    }
+
+    if (arg === '--profile-list') {
+      profileList = true;
+      continue;
+    }
+
+    if (arg === '--config-path') {
+      configPathOnly = true;
+      continue;
+    }
+
+    if (arg === '--config-example') {
+      configExample = true;
+      continue;
+    }
+
+    if (arg === '--diagnostics') {
+      diagnostics = true;
+      continue;
+    }
+
+    if (arg === '--open-log-dir') {
+      openLogDir = true;
+      continue;
+    }
+
+    if (arg === '--copy-diagnostics') {
+      copyDiagnostics = true;
       continue;
     }
 
@@ -291,6 +356,12 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--profile' || arg === '-p') {
+      env.FPASOTERM_PROFILE = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
     if (arg === '--width' || arg === '-W') {
       env.FPASOTERM_WINDOW_WIDTH = requirePositiveInteger(requireValue(argv, index, arg), arg);
       index += 1;
@@ -330,6 +401,13 @@ function parseArgs(argv) {
     foreground,
     dev,
     showConfig,
+    configCheck,
+    profileList,
+    configPathOnly,
+    configExample,
+    diagnostics,
+    openLogDir,
+    copyDiagnostics,
     pluginList,
     pluginPath,
     pluginInfo,
@@ -360,14 +438,15 @@ function parseArgs(argv) {
 function validateArgs(argv) {
   const flags = new Set([
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
-    '--console-diagnostics', '-C', '--show-config', '--plugin-list', '--plugin-path', '--setup-sync', '--self-update',
+    '--console-diagnostics', '-C', '--show-config', '--config-check', '--config-path', '--config-example',
+    '--diagnostics', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugin-path', '--setup-sync', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
   ]);
   const valueOptions = new Set([
-    '--config', '-c', '--shell', '-s', '--command', '-e', '--title', '-t',
+    '--config', '-c', '--profile', '-p', '--shell', '-s', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--width', '-W',
     '--height', '-H', '--size', '-z',
   ]);
@@ -390,12 +469,17 @@ function validateArgs(argv) {
 
 // Prints the package version and the checkout commit without starting the desktop process.
 function printVersion() {
+  console.log(versionText());
+}
+
+// Returns one stable build identifier for CLI output and diagnostics reports.
+function versionText() {
   const result = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
     encoding: 'utf8',
     windowsHide: true,
   });
   const commit = result.status === 0 ? result.stdout.trim() : 'unknown';
-  console.log(`fpasoterm ${packageJson.version} (commit ${commit})`);
+  return `fpasoterm ${packageJson.version} (commit ${commit})`;
 }
 
 // Returns the runtime marker directory shared with the native application.
@@ -667,6 +751,7 @@ function updatePluginConfig(options) {
   console.log(`updated ${targetPath}`);
   const runtimeConfig = loadConfig();
   printPluginList(targetPath, [...enabled].sort(), runtimeConfig.pluginUrls);
+  console.log('Restart fpasoterm to load the updated plugin selection.');
   return true;
 }
 
@@ -680,11 +765,150 @@ function showConfig(options) {
 
   console.log(`Config path: ${runtimeConfig.configPath}`);
   console.log(`Config directory: ${runtimeConfig.configDir}`);
+  console.log(`Active profile: ${runtimeConfig.activeProfile || '(none)'}`);
   console.log('');
   console.log('Resolved config:');
   process.stdout.write(toml.stringify(runtimeConfig.config));
   console.log('');
   printPluginList(runtimeConfig.configPath, enabled, runtimeConfig.pluginUrls);
+}
+
+// Prints validation results without rewriting or resolving the user's config.
+function checkConfig(options) {
+  applyEnv(options.env);
+  const result = validateUserConfig(configPath());
+  console.log(`config: ${result.configPath}`);
+  if (result.error) {
+    console.log('status: error');
+    console.log('');
+    console.log('errors:');
+    console.log(`- ${result.error}`);
+    process.exitCode = 1;
+    return;
+  }
+
+  console.log('status: ok');
+  if (result.warnings.length > 0) {
+    console.log('');
+    console.log('warnings:');
+    for (const warning of result.warnings) {
+      console.log(`- ${warning}`);
+    }
+  }
+}
+
+// Prints the selected config path without creating files or opening a window.
+function showConfigPath(options) {
+  applyEnv(options.env);
+  console.log(configPath());
+}
+
+// Prints the generated example so it can be redirected to a chosen TOML file.
+function showConfigExample(options) {
+  applyEnv(options.env);
+  process.stdout.write(defaultConfigExample());
+}
+
+// Lists profile names without resolving plugins or opening a terminal window.
+function showProfileList(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const names = profileNames(readUserConfig(targetPath));
+  console.log('Available profiles:');
+  if (names.length === 0) {
+    console.log('  (none found)');
+    return;
+  }
+  const active = process.env.FPASOTERM_PROFILE || '';
+  for (const name of names) {
+    console.log(`  ${name}${name === active ? ' [selected]' : ''}`);
+  }
+}
+
+// Resolves the local log directory using the same empty-directory default as the runtime.
+function configuredLogDirectory(targetPath, userConfig) {
+  const configured = typeof userConfig.logging?.directory === 'string'
+    ? expandHome(userConfig.logging.directory)
+    : '';
+  return configured || path.join(path.dirname(targetPath), 'logs');
+}
+
+// Formats static launcher information as a GitHub Issue-friendly Markdown report.
+function diagnosticsMarkdown(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const checked = validateUserConfig(targetPath);
+  const userConfig = checked.error ? {} : readUserConfig(targetPath);
+  const resolved = mergeConfig(platformDefaultConfig(), userConfig);
+  const enabledPlugins = Array.isArray(userConfig.plugins?.enabled) ? userConfig.plugins.enabled : [];
+  const logDirectory = configuredLogDirectory(targetPath, userConfig);
+  const windowState = (() => {
+    const statePath = path.join(path.dirname(targetPath), 'window-state.json');
+    try {
+      return fs.existsSync(statePath) ? JSON.parse(fs.readFileSync(statePath, 'utf8')).window : undefined;
+    } catch {
+      return undefined;
+    }
+  })();
+  const size = windowState?.width && windowState?.height
+    ? `${windowState.width}x${windowState.height} (saved)`
+    : `${resolved.window.width}x${resolved.window.height} (configured)`;
+
+  return [
+    '## fpasoterm diagnostics',
+    '',
+    `- version: ${versionText()}`,
+    `- platform: ${process.platform} ${process.arch}`,
+    '- webview: Tauri WebView (reported by launcher)',
+    `- config path: ${targetPath}`,
+    `- config status: ${checked.error ? 'error' : 'ok'}`,
+    `- profile: ${process.env.FPASOTERM_PROFILE || '(none)'}`,
+    `- plugins: ${enabledPlugins.length > 0 ? enabledPlugins.join(', ') : '(none enabled)'}`,
+    `- terminal size: ${size}`,
+    `- terminal font size: ${resolved.terminal.fontSize}`,
+    `- logging: ${resolved.logging?.enabled === false ? 'disabled' : 'enabled'} (${logDirectory})`,
+    `- sync: ${resolved.sync?.enabled ? `enabled (${resolved.sync.provider || 'folder'}:${resolved.sync.channel || 'default'})` : 'disabled'}`,
+    `- debug log: ${path.join(path.dirname(targetPath), 'logs', 'fpasoterm-debug.log')}`,
+    ...(checked.error ? ['', '### configuration errors', `- ${checked.error}`] : []),
+    ...(checked.warnings.length > 0 ? ['', '### configuration warnings', ...checked.warnings.map((warning) => `- ${warning}`)] : []),
+    '',
+  ].join('\n');
+}
+
+// Opens the local log folder with the operating system's file manager.
+function openLogDirectory(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const checked = validateUserConfig(targetPath);
+  if (checked.error) {
+    throw new Error(checked.error);
+  }
+  const directory = configuredLogDirectory(targetPath, readUserConfig(targetPath));
+  fs.mkdirSync(directory, { recursive: true });
+  const command = process.platform === 'win32' ? 'explorer.exe' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  const child = spawn(command, [directory], { detached: true, stdio: 'ignore', windowsHide: true });
+  child.unref();
+  console.log(directory);
+}
+
+// Writes the diagnostics report through platform clipboard tools without opening a window.
+function copyDiagnostics(options) {
+  const report = diagnosticsMarkdown(options);
+  const commands = process.platform === 'win32'
+    ? [['powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', 'Set-Clipboard -Value ([Console]::In.ReadToEnd())']]]
+    : process.platform === 'darwin'
+      ? [['pbcopy', []]]
+      : [['wl-copy', ['--type', 'text/plain;charset=utf-8']], ['xclip', ['-selection', 'clipboard', '-target', 'UTF8_STRING']], ['xsel', ['--clipboard', '--input']]];
+  const errors = [];
+  for (const [command, args] of commands) {
+    const result = spawnSync(command, args, { input: report, encoding: 'utf8', windowsHide: true });
+    if (!result.error && result.status === 0) {
+      console.log('copied diagnostics to clipboard');
+      return;
+    }
+    errors.push(result.error?.message || `${command} exited with ${result.status}`);
+  }
+  throw new Error(`could not copy diagnostics: ${errors.join('; ')}`);
 }
 
 // Clears remembered window bounds without touching config.toml.
@@ -763,7 +987,7 @@ function pruneConfigFile(options) {
   console.log(`backed up previous config ${backupPath}`);
 }
 
-// Prints plugin entries with simple status information.
+// Prints plugin entries with load and declared-version information.
 function printPluginList(targetPath, enabled, pluginUrls = []) {
   const configDir = path.dirname(targetPath);
   const loadedByName = new Map(pluginUrls.map((plugin) => [plugin.name, plugin]));
@@ -781,7 +1005,8 @@ function printPluginList(targetPath, enabled, pluginUrls = []) {
     const loaded = loadedByName.get(relativeName);
     const exists = fs.existsSync(pluginPath);
     const status = loaded ? 'loadable' : exists ? 'not loadable' : 'missing';
-    console.log(`  - ${plugin} [${status}]${loaded ? ` -> ${loaded.url}` : ''}`);
+    const version = exists ? readPluginMetadata(pluginPath).version : '(not declared)';
+    console.log(`  - ${plugin} [${status}; version ${version}]${loaded ? ` -> ${loaded.url}` : ''}`);
   }
 }
 
@@ -798,7 +1023,8 @@ function showPluginList(options) {
     console.log('  (none found)');
   } else {
     for (const plugin of available) {
-      console.log(`  ${plugin}`);
+      const metadata = readPluginMetadata(path.resolve(path.dirname(targetPath), plugin));
+      console.log(`  ${plugin} [version ${metadata.version}]`);
     }
   }
 
@@ -831,17 +1057,14 @@ function showPluginInfo(options) {
   const runtimeConfig = loadConfig();
   const resolved = runtimeConfig.pluginUrls.find((entry) => entry.name === plugin);
   const source = fs.readFileSync(sourcePath, 'utf8');
-  const description = source
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.startsWith('//') && !line.startsWith('///'))
-    ?.replace(/^\/\/\s*/, '') || '(no leading plugin comment)';
+  const metadata = readPluginMetadata(sourcePath);
 
   console.log(`Plugin: ${plugin}`);
   console.log(`State: ${enabled ? 'enabled' : 'disabled'}`);
   console.log(`Type: ${path.extname(sourcePath) === '.ts' ? 'TypeScript' : 'JavaScript'}`);
+  console.log(`Version: ${metadata.version}`);
   console.log(`Source: ${sourcePath}`);
-  console.log(`Description: ${description}`);
+  console.log(`Description: ${metadata.description}`);
   console.log(`Load status: ${resolved ? 'loadable' : 'not loadable'}`);
   if (resolved) {
     console.log(`Renderer URL: ${resolved.url}`);
@@ -1362,6 +1585,7 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
 
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
+  validateLaunchProfile(options);
   let preparedBinary;
   // Re-exec before a possible cargo build so normal launches return the caller
   // prompt consistently on macOS, Linux, and Windows.
@@ -1469,6 +1693,18 @@ async function launch(options) {
   });
 }
 
+// Validates a requested profile before a normal launch detaches from the shell.
+// This keeps a typo or missing profile visible to the invoking user instead of
+// only recording the failure in launcher.log.
+function validateLaunchProfile(options) {
+  const profile = options.env.FPASOTERM_PROFILE;
+  if (!profile) {
+    return;
+  }
+  applyEnv(options.env);
+  selectProfileConfig(readUserConfig(configPath()), profile);
+}
+
 let parsedArguments = false;
 try {
   const options = parseArgs(process.argv.slice(2));
@@ -1498,6 +1734,20 @@ try {
     });
   } else if (options.showConfig) {
     showConfig(options);
+  } else if (options.configCheck) {
+    checkConfig(options);
+  } else if (options.profileList) {
+    showProfileList(options);
+  } else if (options.configPathOnly) {
+    showConfigPath(options);
+  } else if (options.configExample) {
+    showConfigExample(options);
+  } else if (options.diagnostics) {
+    process.stdout.write(diagnosticsMarkdown(options));
+  } else if (options.openLogDir) {
+    openLogDirectory(options);
+  } else if (options.copyDiagnostics) {
+    copyDiagnostics(options);
   } else if (options.pluginList) {
     showPluginList(options);
   } else if (options.pluginPath) {

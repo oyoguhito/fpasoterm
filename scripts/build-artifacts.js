@@ -82,6 +82,21 @@ function labelArtifactName(fileName) {
   return `${parsed.name}-${artifactLabel}${parsed.ext}`;
 }
 
+// Places a console-subsystem wrapper next to the Windows GUI executable. It
+// waits for CLI-only operations so PowerShell redraws its prompt on completion.
+function copyWindowsCommandWrapper() {
+  if (process.platform !== 'win32') {
+    return;
+  }
+  const wrapper = path.join(root, 'extra', 'windows', 'fpasoterm.cmd');
+  const releaseDir = path.join(root, 'src-tauri', 'target', 'release');
+  if (!fs.existsSync(wrapper) || !fs.existsSync(path.join(releaseDir, 'fpasoterm.exe'))) {
+    return;
+  }
+  fs.copyFileSync(wrapper, path.join(releaseDir, 'fpasoterm.cmd'));
+  fs.copyFileSync(wrapper, path.join(artifactsDir, labelArtifactName(`fpasoterm-${version}-windows-cli.cmd`)));
+}
+
 fs.rmSync(artifactsDir, { recursive: true, force: true });
 fs.mkdirSync(artifactsDir, { recursive: true });
 
@@ -106,6 +121,7 @@ if (!sourceOnly) {
     buildArgs.push('--', '--bundles', 'deb,rpm');
   }
   run('npm', buildArgs);
+  copyWindowsCommandWrapper();
 
   const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
   if (fs.existsSync(bundleDir)) {

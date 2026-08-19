@@ -1,4 +1,6 @@
 /// <reference path="../../docs/fpasoterm-plugin.d.ts" />
+// @fpasoterm-plugin version: 1.0.0
+// @fpasoterm-plugin description: Applies the visible teal sample terminal palette.
 
 // This sample applies a visibly different terminal palette after startup.
 // Use config.toml for normal settings; use plugins for temporary behavior changes.

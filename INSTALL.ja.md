@@ -20,6 +20,14 @@ fpasoterm -v
 
 Windows で新しい `.exe` または `.msi` を導入した後も古い version が表示される場合、`Path`、Start menu、pinned shortcut のいずれかが古い executable を起動しています。起動中の fpasoterm window を閉じ、新しい package を再インストールしてから更新後の shortcut で起動してください。
 
+Windows build では release executable と同じ directory に `fpasoterm.cmd` を配置します。`--version`、`--plugin-path`、`--plugin-info`などCLI専用操作にはこのconsole wrapperを使ってください。GUI-subsystem executableの終了を待つため、PowerShell promptが直ちに再描画されます。通常起動は従来どおり非待機です。
+
+```powershell
+.\src-tauri\target\release\fpasoterm.cmd --version
+.\src-tauri\target\release\fpasoterm.cmd --plugin-path
+.\src-tauri\target\release\fpasoterm.cmd
+```
+
 ## 開発用の起動
 
 Linux では Tauri/WebKitGTK の開発用 package が必要です。
@@ -135,7 +143,7 @@ tag 付きの GitHub Release では、GitHub Actions で次の成果物を作成
 - ChromeOS/Baguette を含む arm64 Linux 向け `.deb` / `.rpm`
 - macOS x64 bundle
 - macOS arm64 bundle
-- Windows x64 bundle
+- Windows x64 bundle と `fpasoterm-<version>-windows-cli.cmd` console wrapper
 
 Debian package をローカルにインストールする場合:
 

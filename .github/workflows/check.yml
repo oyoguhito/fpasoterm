@@ -8,10 +8,18 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   check:
     name: Check and test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
 
     steps:
       - name: Checkout
@@ -42,14 +50,14 @@ jobs:
       - name: Run checks
         run: npm run check
 
-      - name: Scan for credentials
-        run: npm run scan:secrets
+      - name: Check Rust formatting
+        run: cargo fmt --check --manifest-path src-tauri/Cargo.toml
 
       - name: Validate desktop file
         run: desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 
-      - name: Audit production dependencies
-        run: npm run audit:prod
+      - name: Run security checks
+        run: npm run security
 
       - name: Build artifacts
         run: npm run build:artifacts

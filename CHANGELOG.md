@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.5.6
+
+- Added configuration inspection commands: `--config-check`, `--config-path`, and `--config-example`.
+- Added Markdown diagnostics commands: `--diagnostics`, `--copy-diagnostics`, and `--open-log-dir`.
+- Added named TOML profiles with `--profile` / `--profile-list`, including a documented profile example and early CLI validation before background launch.
+- Added PR and release quality checks for syntax, smoke tests, Cargo formatting, dependency/security scanning, and CodeQL.
+
 ## 1.5.4
 
 - Kept first-run local Cargo builds attached to the CLI and displayed preparation, compiler progress, build completion, and native window startup phases before returning the prompt.

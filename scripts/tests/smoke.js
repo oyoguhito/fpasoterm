@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const toml = require('smol-toml');
+const vm = require('node:vm');
 const {
   deleteWindowState,
   defaultConfigExample,
@@ -12,8 +13,12 @@ const {
   mergeConfig,
   missingConfigKeys,
   platformDefaultConfig,
+  pluginMetadata,
+  profileNames,
   pruneUnsupportedConfig,
   resolvePluginSelector,
+  selectProfileConfig,
+  validateUserConfig,
   writableConfigDefaults,
   windowStatePath,
   writeWindowState,
@@ -37,6 +42,20 @@ assert.deepEqual(
     retiredSection: { enabled: true },
   }),
   { config: { window: { title: 'test' } }, removed: ['window.oldSetting', 'retiredSection'] },
+);
+assert.deepEqual(profileNames({ profiles: { transparent: {}, largeFont: {} } }), ['largeFont', 'transparent']);
+assert.deepEqual(
+  selectProfileConfig({ terminal: { fontSize: 14 }, profiles: { large: { terminal: { fontSize: 18 } } } }, 'large'),
+  { baseConfig: { terminal: { fontSize: 14 } }, profileConfig: { terminal: { fontSize: 18 } }, activeProfile: 'large' },
+);
+assert.throws(() => selectProfileConfig({ profiles: {} }, 'missing'), /profile 'missing' does not exist/);
+assert.deepEqual(
+  pluginMetadata('// @fpasoterm-plugin version: 1.2.3\n// @fpasoterm-plugin description: Example plugin\n'),
+  { version: '1.2.3', description: 'Example plugin' },
+);
+assert.deepEqual(
+  pluginMetadata('// Existing plugin comment\nconst value = 1;\n'),
+  { version: '(not declared)', description: 'Existing plugin comment' },
 );
 
 const root = path.resolve(__dirname, '..', '..');
@@ -92,6 +111,8 @@ for (const file of [
   'README.ja.md',
   'docs/config.en.md',
   'docs/config.ja.md',
+  'docs/diagnostics.en.md',
+  'docs/diagnostics.ja.md',
   'docs/fpasoterm-plugin.d.ts',
   'docs/plugins.en.md',
   'docs/plugins.ja.md',
@@ -115,12 +136,14 @@ for (const file of [
   'examples/plugins/welcome-banner.ts',
   'examples/config/default-appearance.toml',
   'examples/config/minimal.toml',
+  'examples/config/profiles.toml',
   'examples/config/runtime-appearance.toml',
   'examples/config/sync-folder.toml',
   'examples/config/with-plugins.toml',
   'extra/logo/fpasoterm.png',
   'extra/macos/fpasoterm.icns',
   'extra/windows/fpasoterm.ico',
+  'extra/windows/fpasoterm.cmd',
   'scripts/install-linux-desktop.js',
   'scripts/uninstall-desktop.js',
   'scripts/uninstall-linux-desktop.js',
@@ -143,6 +166,7 @@ for (const file of [
   'src-tauri/src/main.rs',
   'extra/linux/io.github.oyoguhito.fpasoterm.desktop',
   '.github/workflows/release.yml',
+  '.github/pull_request_template.md',
 ]) {
   assertFile(file);
 }
@@ -171,7 +195,19 @@ assert.match(bin, /building local runtime with cargo/);
 assert.match(bin, /cargo-build-start/);
 assert.match(bin, /cargo-build-complete/);
 assert.match(bin, /--config/);
+assert.match(bin, /--profile/);
+assert.match(bin, /--profile-list/);
+assert.match(bin, /showProfileList/);
+assert.match(bin, /\[profiles\.large-font\.terminal\]/);
+assert.match(bin, /Find config: fpasoterm --config-path/);
 assert.match(bin, /--show-config/);
+assert.match(bin, /--config-check/);
+assert.match(bin, /--config-path/);
+assert.match(bin, /--config-example/);
+assert.match(bin, /--diagnostics/);
+assert.match(bin, /--open-log-dir/);
+assert.match(bin, /--copy-diagnostics/);
+assert.match(bin, /diagnosticsMarkdown/);
 assert.match(bin, /--plugin-list/);
 assert.match(bin, /--plugin-path/);
 assert.match(bin, /--update-config/);
@@ -254,7 +290,11 @@ const cliTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-cli-'
 const cliConfigPath = path.join(cliTestDir, 'User', 'config.toml');
 const cliPluginsDir = path.join(cliTestDir, 'User', 'plugins');
 fs.mkdirSync(cliPluginsDir, { recursive: true });
-fs.writeFileSync(path.join(cliPluginsDir, 'hello.ts'), '// test plugin\n');
+fs.writeFileSync(path.join(cliPluginsDir, 'hello.ts'), [
+  '// @fpasoterm-plugin version: 1.2.3',
+  '// @fpasoterm-plugin description: Test plugin',
+  '',
+].join('\n'));
 fs.writeFileSync(path.join(cliPluginsDir, 'theme.js'), '// test plugin\n');
 
 const runCli = (...args) => spawnSync(
@@ -288,6 +328,44 @@ assert.equal(versionResult.stdout.trim(), expectedVersion);
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
 assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
+
+const configPathResult = runCli('--config-path');
+assert.equal(configPathResult.status, 0, configPathResult.stderr);
+assert.equal(configPathResult.stdout.trim(), cliConfigPath);
+const configExampleResult = runCli('--config-example');
+assert.equal(configExampleResult.status, 0, configExampleResult.stderr);
+assert.match(configExampleResult.stdout, /\[window\]/);
+const configCheckResult = runCli('--config-check');
+assert.equal(configCheckResult.status, 0, configCheckResult.stderr);
+assert.match(configCheckResult.stdout, new RegExp(`config: ${cliConfigPath.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`));
+assert.match(configCheckResult.stdout, /status: ok/);
+const diagnosticsResult = runCli('--diagnostics');
+assert.equal(diagnosticsResult.status, 0, diagnosticsResult.stderr);
+assert.match(diagnosticsResult.stdout, /## fpasoterm diagnostics/);
+assert.match(diagnosticsResult.stdout, /- config path:/);
+assert.match(diagnosticsResult.stdout, /- logging:/);
+fs.writeFileSync(cliConfigPath, [
+  '[terminal]',
+  'fontSize = 14',
+  '',
+  '[profiles.large-font.terminal]',
+  'fontSize = 18',
+  '',
+].join('\n'));
+const profileListResult = runCli('--profile-list');
+assert.equal(profileListResult.status, 0, profileListResult.stderr);
+assert.match(profileListResult.stdout, /Available profiles:\n  large-font/);
+const selectedProfileResult = runCli('--profile', 'large-font', '--show-config');
+assert.equal(selectedProfileResult.status, 0, selectedProfileResult.stderr);
+assert.match(selectedProfileResult.stdout, /Active profile: large-font/);
+assert.match(selectedProfileResult.stdout, /fontSize = 18/);
+const missingProfileResult = runCli('--profile', 'missing', '--show-config');
+assert.equal(missingProfileResult.status, 1);
+assert.match(missingProfileResult.stderr, /profile 'missing' does not exist/);
+const missingProfileLaunch = runCli('--profile', 'missing');
+assert.equal(missingProfileLaunch.status, 1);
+assert.match(missingProfileLaunch.stderr, /profile 'missing' does not exist/);
+assert.doesNotMatch(missingProfileLaunch.stdout, /starting in background/);
 
 const listCacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-list-cli-'));
 const listMarkerDir = path.join(listCacheDir, 'fpasoterm', 'instances');
@@ -400,6 +478,12 @@ assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enab
 const pluginListResult = runCli('--plugin-list');
 assert.equal(pluginListResult.status, 0, pluginListResult.stderr);
 assert.match(pluginListResult.stdout, /Enabled plugins:\n  plugins\/hello\.ts\n  plugins\/theme\.js/);
+assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3\]/);
+
+const pluginInfoResult = runCli('--plugin-info', 'hello.ts');
+assert.equal(pluginInfoResult.status, 0, pluginInfoResult.stderr);
+assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
+assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 
 const disableResult = runCli('--plugin-disable', 'hello.ts', '--plugin-disable', 'theme.js');
 assert.equal(disableResult.status, 0, disableResult.stderr);
@@ -448,6 +532,20 @@ assert.equal(stateConfig.config.window.height, 900);
 assert.equal(stateConfig.config.terminal.shell, '');
 assert.equal(stateConfig.config.keybindings.prefix, 'Ctrl+Alt');
 assert.equal(stateConfig.config.keybindings.newWindow, 'N');
+fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), [
+  '[terminal]',
+  'fontSize = 0',
+  '',
+  '[plugins]',
+  'enabled = ["plugins/missing.ts"]',
+  '',
+].join('\n'));
+const configDiagnostics = validateUserConfig(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'));
+assert.equal(configDiagnostics.error, '');
+assert.ok(configDiagnostics.warnings.includes('terminal.fontSize should be a positive number'));
+assert.ok(configDiagnostics.warnings.includes('plugins.enabled includes plugins/missing.ts but file does not exist'));
+const profileDiagnostics = validateUserConfig(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), 'missing');
+assert.ok(profileDiagnostics.warnings.includes("selected profile 'missing' does not exist"));
 deleteWindowState();
 assert.ok(!fs.existsSync(statePath));
 if (originalConfigHome === undefined) {
@@ -472,6 +570,8 @@ assert.match(buildArtifacts, /--source-only/);
 assert.match(buildArtifacts, /--bundles-only/);
 assert.match(buildArtifacts, /FPASOTERM_ARTIFACT_LABEL/);
 assert.match(buildArtifacts, /labelArtifactName/);
+assert.match(buildArtifacts, /copyWindowsCommandWrapper/);
+assert.match(buildArtifacts, /fpasoterm\.cmd/);
 assert.match(buildArtifacts, /run\('npm', buildArgs\)/);
 assert.match(buildArtifacts, /spawnSync/);
 assert.match(buildArtifacts, /shell: process\.platform === 'win32'/);
@@ -479,6 +579,12 @@ assert.match(buildArtifacts, /\.dmg/);
 assert.match(buildArtifacts, /\.msi/);
 assert.match(buildArtifacts, /\.exe/);
 assert.match(buildArtifacts, /\.app\.tar\.gz/);
+
+const windowsCommandWrapper = read('extra/windows/fpasoterm.cmd');
+assert.match(windowsCommandWrapper, /start "" \/wait/);
+assert.match(windowsCommandWrapper, /--plugin-path/);
+assert.match(windowsCommandWrapper, /--version/);
+assert.match(windowsCommandWrapper, /start "" "%FPASOTERM_EXE%" %\*/);
 
 const releaseWorkflow = read('.github/workflows/release.yml');
 assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
@@ -627,6 +733,20 @@ assert.match(rustMain, /command\.env\("PATH", path_value\)/);
 assert.match(rustMain, /CARGO_PKG_VERSION/);
 assert.match(rustMain, /cli_has_flag\(&\["--show-config"\]\)/);
 assert.match(rustMain, /print_show_config/);
+assert.match(rustMain, /--profile-list/);
+assert.match(rustMain, /print_profile_list_cli/);
+assert.match(rustMain, /validate_selected_profile_cli/);
+assert.match(rustMain, /active_profile/);
+assert.match(rustMain, /--plugin-list/);
+assert.match(rustMain, /--plugin-path/);
+assert.match(rustMain, /--plugin-info <file>/);
+assert.match(rustMain, /fn plugin_cli/);
+assert.match(rustMain, /fn resolve_direct_plugin_urls/);
+assert.match(rustMain, /\[profiles\.large-font\.terminal\]/);
+assert.match(rustMain, /--config-check/);
+assert.match(rustMain, /config_check_cli/);
+assert.match(rustMain, /diagnostics_markdown_cli/);
+assert.match(rustMain, /open_log_directory_cli/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-window-state", "-r"\]\)/);
 assert.match(rustMain, /reset_window_state_cli/);
 assert.match(rustMain, /print_cli_text_windows/);
@@ -951,6 +1071,7 @@ assert.match(readme, /registerCommand\(\)/);
 assert.match(readme, /--plugin-list/);
 assert.match(readme, /docs\/plugins\.en\.md/);
 assert.match(readme, /--shell/);
+assert.match(readme, /--profile <name>/);
 assert.match(readme, /PowerShell\\7\\pwsh\.exe/);
 assert.match(readme, /PowerShell 7 \(`pwsh\.exe`\) by default/);
 assert.match(readme, /fpasoterm executable directory at the[\s\S]*front of `Path`/);
@@ -1183,6 +1304,55 @@ assert.match(prReviewJa, /pull_request/);
 
 const samplePlugin = read('examples/plugins/hello.ts');
 assert.match(samplePlugin, /fpasotermPluginApi/);
+assert.match(samplePlugin, /onReady/);
+assert.match(samplePlugin, /hello\.ts loaded/);
+assert.match(samplePlugin, /@fpasoterm-plugin version: 1\.0\.0/);
+
+// Executes each public sample in isolation with the supported renderer API.
+// This catches syntax and lifecycle regressions before users copy a sample.
+function runSamplePlugin(relativePath) {
+  const output = [];
+  const logs = [];
+  const readyCallbacks = [];
+  const commands = new Map();
+  const api = {
+    version: '1.5.6-test',
+    terminal: {
+      options: {},
+      write: (value) => output.push(value),
+      writeln: (value) => output.push(value),
+      focus: () => {},
+    },
+    fitAddon: { fit: () => {} },
+    config: {
+      window: { width: 900, height: 700 },
+      terminal: { theme: { background: '#000000' } },
+      plugins: { enabled: ['plugins/hello.ts'] },
+    },
+    log: (message) => logs.push(message),
+    onReady: (callback) => readyCallbacks.push(callback),
+    registerCommand: (id, title, handler) => commands.set(id, { title, handler }),
+  };
+  vm.runInNewContext(read(relativePath), { window: { fpasotermPluginApi: api } }, { filename: relativePath });
+  readyCallbacks.forEach((callback) => callback());
+  return { api, commands, logs, output };
+}
+
+const helloPluginRun = runSamplePlugin('examples/plugins/hello.ts');
+assert.deepEqual(helloPluginRun.output, ['', '[fpasoterm plugin] hello.ts loaded']);
+assert.deepEqual(helloPluginRun.logs, ['hello.ts loaded']);
+
+const themePluginRun = runSamplePlugin('examples/plugins/theme.ts');
+assert.equal(themePluginRun.api.terminal.options.theme.background, 'rgba(8, 42, 48, 0.86)');
+assert.match(themePluginRun.output.join('\n'), /theme\.ts applied the teal sample palette/);
+
+const welcomePluginRun = runSamplePlugin('examples/plugins/welcome-banner.ts');
+assert.match(welcomePluginRun.output.join('\n'), /Welcome banner plugin is active/);
+
+const statusPluginRun = runSamplePlugin('examples/plugins/status-banner.ts');
+assert.equal(statusPluginRun.commands.get('status-banner.show').title, 'Show Plugin Status');
+statusPluginRun.commands.get('status-banner.show').handler();
+assert.match(statusPluginRun.output.join('\n'), /Status: 900x700, enabled plugins: 1/);
 
 const pluginDocsEn = read('docs/plugins.en.md');
 assert.match(pluginDocsEn, /\[plugins\]/);
@@ -1191,6 +1361,7 @@ assert.match(pluginDocsEn, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsEn, /local files that you trust/);
 assert.match(pluginDocsEn, /--plugin-list/);
 assert.match(pluginDocsEn, /registerCommand/);
+assert.match(pluginDocsEn, /@fpasoterm-plugin version/);
 
 const pluginDocsJa = read('docs/plugins.ja.md');
 assert.match(pluginDocsJa, /\[plugins\]/);
@@ -1199,16 +1370,19 @@ assert.match(pluginDocsJa, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsJa, /信頼できるローカル file/);
 assert.match(pluginDocsJa, /--plugin-list/);
 assert.match(pluginDocsJa, /registerCommand/);
+assert.match(pluginDocsJa, /@fpasoterm-plugin version/);
 
 const welcomeBannerPlugin = read('examples/plugins/welcome-banner.ts');
 assert.match(welcomeBannerPlugin, /fpasotermPluginApi/);
 assert.match(welcomeBannerPlugin, /Welcome banner plugin is active/);
 assert.match(welcomeBannerPlugin, /onReady/);
+assert.match(welcomeBannerPlugin, /@fpasoterm-plugin version: 1\.0\.0/);
 
 const statusBannerPlugin = read('examples/plugins/status-banner.ts');
 assert.match(statusBannerPlugin, /fpasotermPluginApi/);
 assert.match(statusBannerPlugin, /enabled plugins/);
 assert.match(statusBannerPlugin, /registerCommand/);
+assert.match(statusBannerPlugin, /@fpasoterm-plugin version: 1\.0\.0/);
 
 const sampleConfig = read('examples/config/with-plugins.toml');
 assert.match(sampleConfig, /\[plugins\]/);
@@ -1399,6 +1573,8 @@ assert.match(pluginTypes, /registerCommand:/);
 const renderer = read('src/renderer/renderer.js');
 assert.match(renderer, /registerPluginReadyCallback/);
 assert.match(renderer, /notifyPluginsReady/);
+assert.match(renderer, /schedulePluginsReadyAfterTerminalOutput/);
+assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /installTauriApiAdapter/);

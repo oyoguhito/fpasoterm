@@ -284,6 +284,22 @@ fpasoterm --show-config
 fpasoterm --config ~/.config/fpasoterm/User/work.toml --show-config
 ```
 
+Validate a configuration or prepare a Markdown report for an Issue without
+opening a window:
+
+```sh
+fpasoterm --config-check
+fpasoterm --diagnostics
+fpasoterm --copy-diagnostics
+fpasoterm --open-log-dir
+```
+
+See [Configuration and Diagnostics](docs/diagnostics.en.md) for the exact
+output, exit status, and clipboard requirements.
+
+Use a named appearance or shell profile for one launch with
+`fpasoterm --profile <name>`. See [Profiles](docs/config.en.md#profiles).
+
 When a packaged `fpasoterm.exe` is launched directly on Windows, `--show-config`
 prints the resolved runtime config as JSON. The Node launcher prints TOML and
 plugin load details when it is available.

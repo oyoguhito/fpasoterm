@@ -55,10 +55,11 @@ revision that is being packaged. `git fetch` alone leaves the current branch
 unchanged and must not be used as the build step.
 
 First test the built executable directly, which cannot accidentally launch an
-older Start menu, pinned, or Path entry:
+older Start menu, pinned, or Path entry. Use the generated `.cmd` wrapper for
+CLI output so PowerShell waits for the GUI-subsystem executable:
 
 ```powershell
-.\src-tauri\target\release\fpasoterm.exe --version
+.\src-tauri\target\release\fpasoterm.cmd --version
 .\src-tauri\target\release\fpasoterm.exe
 ```
 
