@@ -12,7 +12,7 @@ _fpasoterm() {
   local cur prev options
   cur="${COMP_WORDS[COMP_CWORD]}"
   prev="${COMP_WORDS[COMP_CWORD - 1]}"
-  options='-h --help -v --version --update-check --doctor -l --list -q --close --broadcast --broadcast-target --broadcast-sync -d --dev -F --foreground -C --console-diagnostics -c --config -p --profile --profile-list --show-config --config-check --config-path --config-example --diagnostics --open-log-dir --copy-diagnostics --plugin-list --plugin-path --plugin-info --plugin-uninstall --plugin-search --plugin-install --plugin-install-force --enable --update-config --prune-config --setup-sync --sync-status --sync-clean --sync-diagnostics --self-update --self-update-checkout --update-desktop -s --shell -e --command -t --title -b --titlebar-color -r --reset-window-state -R --reset-config --enable-plugin --disable-plugin --plugin-enable-all --plugin-disable-all --plugin-enable --plugin-disable -W --width -H --height -z --size -k --debug-keys --x11 --debug-opaque-terminal --disable-dmabuf --completion --completion-install --completion-uninstall'
+  options='-h --help -v --version --update-check --doctor -l --list -q --close --broadcast --broadcast-target --broadcast-sync -d --dev -F --foreground -C --console-diagnostics -c --config -p --profile --profile-list --show-config --config-check --config-path --config-example --diagnostics --open-log-dir --copy-diagnostics --plugin-list --plugin-path --plugin-info --plugin-uninstall --plugin-search --plugin-install --plugin-ports-dir --plugin-install-file --force --enable --update-config --prune-config --setup-sync --sync-status --sync-clean --sync-diagnostics --self-update --self-update-checkout --update-desktop -s --shell -e --command -t --title -b --titlebar-color -r --reset-window-state -R --reset-config --enable-plugin --disable-plugin --plugin-enable-all --plugin-disable-all --plugin-enable --plugin-disable -W --width -H --height -z --size -k --debug-keys --x11 --debug-opaque-terminal --disable-dmabuf --completion --completion-install --completion-uninstall'
 
   case "$prev" in
     --completion|--completion-install|--completion-uninstall)
@@ -29,6 +29,10 @@ _fpasoterm() {
       ;;
     --plugin-install)
       COMPREPLY=( $(compgen -W 'terminal/hello terminal/welcome-banner terminal/status-banner terminal/theme appearance/amber appearance/teal appearance/high-contrast productivity/git-status productivity/session-marker' -- "$cur") )
+      return
+      ;;
+    --plugin-ports-dir|--plugin-install-file)
+      COMPREPLY=( $(compgen -f -- "$cur") )
       return
       ;;
     --config|-c)

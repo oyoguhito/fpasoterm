@@ -17,6 +17,7 @@ const {
   loadConfig,
   mergeConfig,
   missingConfigKeys,
+  pluginMetadata,
   readPluginMetadata,
   readUserConfig,
   resolvePluginSelector,
@@ -74,9 +75,12 @@ Options:
       --plugin-info <file>      Show a .js/.ts plugin's state, version, source, and load status.
       --plugin-uninstall <file> Remove comma-separated local User/plugins files, then exit.
       --plugin-search [query]   Search official public plugin ports, then exit.
-      --plugin-install <port>   Download one reviewed public port into User/plugins, then exit.
-      --plugin-install-force    Replace an existing port file during --plugin-install.
-      --enable                  Enable the downloaded port; valid only with --plugin-install.
+      --plugin-install <port>   Install one port from GitHub, or --plugin-ports-dir when supplied.
+      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout with --plugin-install.
+      --plugin-install-file <path>
+                                Copy one trusted local .js/.ts plugin into User/plugins.
+      --force                   Replace an existing file during a plugin install.
+      --enable                  Enable a plugin installed by one --plugin-install command.
       --update-config           Add missing default settings and back up config.toml, then exit.
       --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
@@ -186,6 +190,8 @@ function parseArgs(argv) {
   let pluginInfo = '';
   const pluginUninstall = [];
   let pluginInstall = '';
+  let pluginPortsDir = '';
+  let pluginInstallFile = '';
   let pluginInstallForce = false;
   let pluginInstallEnable = false;
   let listInstances = false;
@@ -311,7 +317,19 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--plugin-install-force') {
+    if (arg === '--plugin-ports-dir') {
+      pluginPortsDir = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--plugin-install-file') {
+      pluginInstallFile = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--force') {
       pluginInstallForce = true;
       continue;
     }
@@ -528,11 +546,18 @@ function parseArgs(argv) {
   if ((broadcastTargets.length > 0 || broadcastSync) && !broadcastText) {
     throw new Error('--broadcast-target and --broadcast-sync require --broadcast <text>');
   }
-  if ((pluginInstallForce || pluginInstallEnable) && !pluginInstall) {
-    throw new Error('--plugin-install-force and --enable require --plugin-install <category/name>');
+  const pluginInstallCount = [pluginInstall, pluginInstallFile].filter(Boolean).length;
+  if (pluginInstallCount > 1) {
+    throw new Error('use only one of --plugin-install or --plugin-install-file');
+  }
+  if ((pluginInstallForce || pluginInstallEnable) && pluginInstallCount === 0) {
+    throw new Error('--force and --enable require a --plugin-install command');
+  }
+  if (pluginPortsDir && !pluginInstall) {
+    throw new Error('--plugin-ports-dir requires --plugin-install <category/name>');
   }
   if (pluginUninstall.length > 0 && (
-    enablePlugins.length > 0 || disablePlugins.length > 0 || enableAllPlugins || disableAllPlugins || pluginInstall
+    enablePlugins.length > 0 || disablePlugins.length > 0 || enableAllPlugins || disableAllPlugins || pluginInstallCount > 0
   )) {
     throw new Error('--plugin-uninstall cannot be combined with other plugin mutation options');
   }
@@ -559,6 +584,8 @@ function parseArgs(argv) {
     pluginInfo,
     pluginUninstall,
     pluginInstall,
+    pluginPortsDir,
+    pluginInstallFile,
     pluginInstallForce,
     pluginInstallEnable,
     listInstances,
@@ -599,14 +626,14 @@ function validateArgs(argv) {
     '--diagnostics', '--doctor', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugin-path', '--plugin-search', '--setup-sync', '--sync-status', '--sync-clean', '--sync-diagnostics', '--self-update',
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
-    '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--plugin-install-force', '--enable',
+    '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--force', '--enable',
     '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--plugin-uninstall', '--width', '-W',
     '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
-    '--completion-install', '--completion-uninstall', '--plugin-install',
+    '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-install-file',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -793,35 +820,37 @@ async function fetchPublicPluginText(relativePath, maximumBytes) {
   return text;
 }
 
-// Installs one reviewed public port without starting Cargo or the native desktop runtime.
-async function installPublicPlugin(options) {
-  const id = validatePublicPluginPortId(options.pluginInstall);
-  const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
+// Parses and validates the narrow port manifest contract shared by remote and local sources.
+function parsePluginPortManifest(id, manifestText, label) {
   const manifest = toml.parse(manifestText)?.port;
   const required = (key) => {
     const value = typeof manifest?.[key] === 'string' ? manifest[key].trim() : '';
-    if (!value) throw new Error(`public port manifest is missing port.${key}`);
+    if (!value) throw new Error(`${label} port manifest is missing port.${key}`);
     return value;
   };
-  if (required('id') !== id) throw new Error(`public port manifest id mismatch: requested ${id}`);
+  if (required('id') !== id) throw new Error(`${label} port manifest id mismatch: requested ${id}`);
   const version = required('version');
   const minimumVersion = required('minFpasotermVersion');
   const sourceName = required('source');
   const installPath = required('installPath').replaceAll('\\', '/');
   if (!/^\d+\.\d+\.\d+$/.test(version) || !/^\d+\.\d+\.\d+$/.test(minimumVersion)) {
-    throw new Error('public port manifest has an invalid version');
+    throw new Error(`${label} port manifest has an invalid version`);
   }
   if (comparePackageVersions(packageJson.version, minimumVersion) < 0) {
     throw new Error(`${id} requires fpasoterm >= ${minimumVersion}; found ${packageJson.version}`);
   }
   if (!/^[^/\\]+\.(?:js|ts)$/.test(sourceName)
     || !/^(?:[A-Za-z0-9_-]+\/)+[A-Za-z0-9_-]+\.(?:js|ts)$/.test(installPath)) {
-    throw new Error('public port manifest has an unsafe source or install path');
+    throw new Error(`${label} port manifest has an unsafe source or install path`);
   }
-  const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, 1024 * 1024);
+  return { version, sourceName, installPath };
+}
+
+// Writes one reviewed source into User/plugins without following an existing symlink.
+function installPluginSource(options, source, installPath, origin, version) {
   if (!source.includes(`@fpasoterm-plugin version: ${version}`)
     || !source.includes('window.fpasotermPluginApi')) {
-    throw new Error(`${id} does not contain a valid fpasoterm plugin header`);
+    throw new Error(`${origin} does not contain a valid fpasoterm plugin header`);
   }
 
   applyEnv(options.env);
@@ -838,7 +867,7 @@ async function installPublicPlugin(options) {
     if (metadata.isSymbolicLink()) throw new Error(`refusing to replace symlinked plugin ${destination}`);
     if (!metadata.isFile()) throw new Error(`cannot replace non-file plugin ${destination}`);
     if (!options.pluginInstallForce) {
-      throw new Error(`${destination} already exists; review it and rerun with --plugin-install-force to replace it`);
+      throw new Error(`${destination} already exists; review it and rerun with --force to replace it`);
     }
   }
   const temporary = `${destination}.fpasoterm-download-${process.pid}.tmp`;
@@ -855,18 +884,69 @@ async function installPublicPlugin(options) {
   }
 
   const plugin = `plugins/${installPath}`;
-  console.log(`installed public port ${id} -> ${plugin}`);
+  console.log(`installed ${origin} -> ${plugin}`);
   if (options.pluginInstallEnable) {
     const userConfig = readUserConfig(targetPath);
     const plugins = userConfig.plugins && typeof userConfig.plugins === 'object' ? userConfig.plugins : {};
     const enabled = new Set(Array.isArray(plugins.enabled) ? plugins.enabled : []);
     enabled.add(plugin);
     writeUserConfig({ ...userConfig, plugins: { ...plugins, enabled: [...enabled].sort() } }, targetPath);
-    console.log(`enabled downloaded plugin in ${targetPath}`);
+    console.log(`enabled installed plugin in ${targetPath}`);
   } else {
     console.log(`review the source, then enable it with: fpasoterm --plugin-enable ${installPath.replace(/\.(?:js|ts)$/, '')}`);
   }
-  console.log('Restart fpasoterm to load the downloaded plugin selection.');
+  console.log('Restart fpasoterm to load the installed plugin selection.');
+}
+
+// Installs one reviewed public port without starting Cargo or the native desktop runtime.
+async function installPublicPlugin(options) {
+  const id = validatePublicPluginPortId(options.pluginInstall);
+  const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
+  const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'public');
+  const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, 1024 * 1024);
+  installPluginSource(options, source, installPath, `public port ${id}`, version);
+}
+
+// Resolves a local ports checkout from an explicit path, environment, or sibling repository.
+function localPluginPortsDirectory(options) {
+  const directory = path.resolve(options.pluginPortsDir || '');
+  if (!options.pluginPortsDir || !fs.existsSync(path.join(directory, 'ports'))) {
+    throw new Error('local fpasoterm-plugins checkout not found; pass --plugin-ports-dir <path>');
+  }
+  return directory;
+}
+
+// Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
+function readLocalPluginText(filePath, maximumBytes, label) {
+  const metadata = fs.lstatSync(filePath, { throwIfNoEntry: false });
+  if (!metadata || !metadata.isFile() || metadata.isSymbolicLink()) {
+    throw new Error(`${label} must be a regular file`);
+  }
+  if (metadata.size > maximumBytes) throw new Error(`${label} exceeds ${maximumBytes} bytes`);
+  return fs.readFileSync(filePath, 'utf8');
+}
+
+// Installs a port from a checked-out fpasoterm-plugins tree for local development and review.
+function installLocalPluginPort(options) {
+  const id = validatePublicPluginPortId(options.pluginInstall);
+  const portsDirectory = localPluginPortsDirectory(options);
+  const portDirectory = path.join(portsDirectory, 'ports', ...id.split('/'));
+  const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
+  const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'local');
+  const source = readLocalPluginText(path.join(portDirectory, sourceName), 1024 * 1024, 'local plugin source');
+  installPluginSource(options, source, installPath, `local port ${id}`, version);
+}
+
+// Copies one explicit, trusted local renderer plugin without needing a ports checkout.
+function installLocalPluginFile(options) {
+  const filePath = path.resolve(options.pluginInstallFile);
+  if (!/\.(?:js|ts)$/i.test(filePath)) throw new Error('--plugin-install-file requires a .js or .ts file');
+  const source = readLocalPluginText(filePath, 1024 * 1024, 'local plugin source');
+  const version = pluginMetadata(source).version;
+  if (!version || version === '(not declared)') {
+    throw new Error('local plugin source must declare // @fpasoterm-plugin version: <version>');
+  }
+  installPluginSource(options, source, path.basename(filePath), `local plugin ${path.basename(filePath)}`, version);
 }
 
 // Prints a shell-specific completion script without resolving or launching the app runtime.
@@ -2712,11 +2792,25 @@ try {
     printRunningInstances();
   } else if (options.closeTarget) {
     closeRunningInstance(options.closeTarget);
+  } else if (options.pluginInstall && options.pluginPortsDir) {
+    try {
+      installLocalPluginPort(options);
+    } catch (installError) {
+      console.error(`fpasoterm: could not install local plugin port: ${installError.message}`);
+      process.exitCode = 1;
+    }
   } else if (options.pluginInstall) {
     Promise.resolve(installPublicPlugin(options)).catch((installError) => {
       console.error(`fpasoterm: could not install public plugin: ${installError.message}`);
       process.exitCode = 1;
     });
+  } else if (options.pluginInstallFile) {
+    try {
+      installLocalPluginFile(options);
+    } catch (installError) {
+      console.error(`fpasoterm: could not install local plugin file: ${installError.message}`);
+      process.exitCode = 1;
+    }
   } else if (uninstallLocalPlugins(options)) {
     // The selected local plugin sources and config entries have been removed.
   } else if (updatePluginConfig(options)) {

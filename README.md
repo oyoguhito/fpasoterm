@@ -431,6 +431,13 @@ installing Node.js, use `fpasoterm --plugin-install appearance/teal`. Add
 `--enable` only after review to enable it. See [Plugins](docs/plugins.en.md)
 for the fixed repository, validation, and overwrite rules.
 
+For a reviewed local `fpasoterm-plugins` checkout, use
+`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`.
+For one trusted standalone source file, use
+`fpasoterm --plugin-install-file ./my-plugin.ts --enable`. The ports project is
+for catalog/INDEX search and plugin development or validation; fpasoterm performs
+the end-user installation.
+
 Use `fpasoterm --plugin-search [query]` to search official public port metadata
 without installing a plugin or downloading plugin source. The output includes a
 copyable `--plugin-install` command for every matching port. The command labels

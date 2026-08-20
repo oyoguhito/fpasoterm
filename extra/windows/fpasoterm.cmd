@@ -19,7 +19,8 @@ for %%F in (
   --profile-list --config-check --config-path --config-example
   --diagnostics --open-log-dir --copy-diagnostics
   --plugin-list --plugin-path --plugin-info --plugin-uninstall --plugin-search --plugin-install
-  --plugin-install-force --enable
+  --plugin-ports-dir --plugin-install-file
+  --force --enable
   --enable-plugin --disable-plugin --plugin-enable --plugin-disable
   --plugin-enable-all --plugin-disable-all
   --reset-window-state -r --reset-config -R --update-config --prune-config

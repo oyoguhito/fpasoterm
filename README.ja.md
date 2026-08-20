@@ -275,6 +275,8 @@ review済みのlocal pluginとそのenabled entryを削除する場合は`fpasot
 
 ports repository全体をcloneせず、Node.jsも使わずにreview済み公開pluginを取得する場合は、`fpasoterm --plugin-install appearance/teal`を実行します。内容確認後に有効化する場合だけ`--enable`を追加します。固定repository、検証、上書き条件は[プラグイン](docs/plugins.ja.md)を参照してください。
 
+review済みのlocal `fpasoterm-plugins` checkoutからは、`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`を使用します。単独の信頼済みsource fileは`fpasoterm --plugin-install-file ./my-plugin.ts --enable`でcopyできます。ports projectはcatalog / INDEX検索とplugin開発・検証用で、利用者向けのinstallはfpasoterm本体が行います。
+
 `fpasoterm --plugin-search [query]`はpluginを導入せず、公開port metadataだけを検索します。各結果にはcopyして使える`--plugin-install` commandとremote公式`INDEX`であるsourceを表示します。`--plugin-list`はlocal-onlyであり、networkには接続しません。
 
 最小の TypeScript plugin:
