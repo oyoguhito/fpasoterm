@@ -6,7 +6,7 @@ Cross-platform terminal app built with Tauri, xterm.js, and a Rust PTY bridge.
 
 fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
 
-Kitty Graphics Protocol, SIXEL, and iTerm inline images are currently unsupported because image streams can freeze the Tauri/WebKitGTK renderer. `Ctrl+Shift+B` opens Broadcast Input, which selects local fpasoterm windows before sending one command; a trusted sync folder can optionally deliver the same short-lived command to every already-running instance on another machine. See [Configuration](docs/config.en.md) and [Sync Folder](docs/sync.en.md).
+Kitty Graphics Protocol, SIXEL, and iTerm inline images are currently unsupported because image streams can freeze the Tauri/WebKitGTK renderer. `Ctrl+Shift+B` opens Broadcast Input, which selects local fpasoterm windows before sending one command. The same operation is available as `fpasoterm --broadcast "command"`; a trusted sync folder can optionally deliver the short-lived command to every already-running instance on another machine. See [Configuration](docs/config.en.md) and [Sync Folder](docs/sync.en.md).
 
 Japanese documentation: [README.ja.md](README.ja.md). Installation instructions are available in [English](INSTALL.md) and [Japanese](INSTALL.ja.md).
 
@@ -418,6 +418,8 @@ terminal output logs through a local sync folder such as Google Drive for
 desktop. It does not use Google Drive API or OAuth. See [Sync Folder](docs/sync.en.md).
 Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
+Use `fpasoterm --sync-status` to inspect folder health and channels, or
+`fpasoterm --sync-clean` to remove only expired sync command files.
 Terminal output logs can be written from the hamburger menu with `Log Start (^S)` /
 `Log Stop (^S)` or `Ctrl+Shift+S`, and inspected with `Log Show (^P)` or `Ctrl+Shift+P`.
 `Log Show` displays the active log or the last log closed by `Log Stop`. Point
@@ -518,7 +520,9 @@ desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 ```
 
-GitHub Actions runs the same check set on pushes and pull requests.
+GitHub Actions runs the same check set and Linux artifact build on pushes and
+pull requests. Official cross-platform artifacts are built by the tag-based
+Release workflow.
 
 ## Documentation
 

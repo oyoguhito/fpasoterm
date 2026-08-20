@@ -2,7 +2,8 @@
 setlocal DisableDelayedExpansion
 
 rem Console wrapper for the GUI-subsystem fpasoterm.exe beside this file.
-rem CLI operations wait so PowerShell redraws its prompt; normal launches detach.
+rem CLI operations run as a direct child so output and exit codes return to the
+rem invoking PowerShell/cmd console; normal launches remain detached.
 set "FPASOTERM_EXE=%~dp0fpasoterm.exe"
 if not exist "%FPASOTERM_EXE%" (
   echo fpasoterm: executable not found: "%FPASOTERM_EXE%" 1>&2
@@ -20,13 +21,14 @@ for %%F in (
   --plugin-enable-all --plugin-disable-all
   --reset-window-state -r --reset-config -R --update-config --prune-config
   --setup-sync --foreground -F
+  --broadcast --broadcast-target --broadcast-sync
 ) do if /I "%~1"=="%%F" set "FPASOTERM_WAIT=1"
 shift
 goto scan
 
 :run
 if defined FPASOTERM_WAIT (
-  start "" /wait "%FPASOTERM_EXE%" %*
+  call "%FPASOTERM_EXE%" %*
   exit /b %ERRORLEVEL%
 )
 

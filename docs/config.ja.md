@@ -384,7 +384,7 @@ maxBytes = 10485760
 
 window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
-Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executable directoryを追加します。macOSでは、以前のreleaseでも使用していた標準的な`~/.local/bin/fpasoterm`を現在起動中のapp bundle向けに毎回生成し、`~/.local/bin`を`PATH`先頭に置いて全引数を変更せず転送します。互換性のため`~/.config/fpasoterm/bin/fpasoterm`も更新します。これにより従来のcommand pathを維持したまま、fpasoterm内で`fpasoterm --help`、`--list`、`--close`など直接binaryのcommandを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。終了まで待つ場合は`--foreground`を使います。Node launcher専用option、`--hoge`や`-?`などの未知option、値不足のoptionを配布binaryへ指定した場合は、無関係なGUIを開かずhelp付きerrorにします。`--version` と app内の `Help (^H)` panelにはpackage versionとbuild commitを表示するため、同じversionのcontributor buildやPR buildも識別できます。
+Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executable directoryを追加します。macOSでは、以前のreleaseでも使用していた標準的な`~/.local/bin/fpasoterm`を現在起動中のapp bundle向けに毎回生成し、`~/.local/bin`を`PATH`先頭に置いて全引数を変更せず転送します。互換性のため`~/.config/fpasoterm/bin/fpasoterm`も更新します。これにより従来のcommand pathを維持したまま、fpasoterm内で`fpasoterm --help`、`--list`、`--close`など直接binaryのcommandを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。終了まで待つ場合は`--foreground`を使います。Node launcher専用option、`--hoge`や`-?`などの未知option、値不足のoptionを配布binaryへ指定した場合は、無関係なGUIを開かず一行のerrorだけを表示します。全option一覧が必要な場合だけ`--help`を実行してください。`--version` と app内の `Help (^H)` panelにはpackage versionとbuild commitを表示するため、同じversionのcontributor buildやPR buildも識別できます。
 
 macOSは最後のwindowを閉じてもapplicationをactiveのまま維持するのが通常動作です。CLIの`--close` / `-q`とapp内のClose Allでは一致する各fpasoterm processを明示終了するため、`fpasoterm -q all`後はmacOSのメニューバーにもfpasotermを残しません。
 

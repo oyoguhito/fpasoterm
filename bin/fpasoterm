@@ -44,6 +44,10 @@ Options:
   -v, --version                 Show the version and source commit.
   -l, --list                    List running fpasoterm windows, then exit.
   -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
+      --broadcast <text>        Send text plus Enter to running local terminal windows.
+      --broadcast-target <pid|title>
+                                Limit Broadcast targets (comma-separated/repeatable).
+      --broadcast-sync          Also send Broadcast through the trusted sync channel.
   -d, --dev                     Force a local debug-binary rebuild and launch.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
@@ -63,6 +67,9 @@ Options:
       --update-config           Add missing default settings and back up config.toml, then exit.
       --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
+      --sync-status             Report sync-folder health, command state, and channels, then exit.
+      --sync-clean              Remove expired sync commands and abandoned temporary files, then exit.
+      --sync-diagnostics        Print a Markdown sync diagnostic report, then exit.
       --self-update             Update an npm-installed fpasoterm package, then refresh desktop files on Linux.
       --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
       --update-desktop          Reinstall the local command, desktop entry, and launcher icons, then exit.
@@ -149,6 +156,12 @@ function parseArgs(argv) {
   let listInstances = false;
   let closeTarget = '';
   let setupSync = false;
+  let syncStatus = false;
+  let syncClean = false;
+  let syncDiagnostics = false;
+  let broadcastText = '';
+  const broadcastTargets = [];
+  let broadcastSync = false;
   let resetWindowState = false;
   let resetConfig = false;
   let updateConfig = false;
@@ -240,6 +253,38 @@ function parseArgs(argv) {
 
     if (arg === '--setup-sync') {
       setupSync = true;
+      continue;
+    }
+
+    if (arg === '--sync-status') {
+      syncStatus = true;
+      continue;
+    }
+
+    if (arg === '--sync-clean') {
+      syncClean = true;
+      continue;
+    }
+
+    if (arg === '--sync-diagnostics') {
+      syncDiagnostics = true;
+      continue;
+    }
+
+    if (arg === '--broadcast') {
+      broadcastText = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--broadcast-target') {
+      broadcastTargets.push(...parseBroadcastSelectors(requireValue(argv, index, arg), arg));
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--broadcast-sync') {
+      broadcastSync = true;
       continue;
     }
 
@@ -394,6 +439,9 @@ function parseArgs(argv) {
   if (enableAllPlugins && disableAllPlugins) {
     throw new Error('--plugin-enable-all and --plugin-disable-all cannot be used together');
   }
+  if ((broadcastTargets.length > 0 || broadcastSync) && !broadcastText) {
+    throw new Error('--broadcast-target and --broadcast-sync require --broadcast <text>');
+  }
 
   return {
     help: false,
@@ -414,6 +462,12 @@ function parseArgs(argv) {
     listInstances,
     closeTarget,
     setupSync,
+    syncStatus,
+    syncClean,
+    syncDiagnostics,
+    broadcastText,
+    broadcastTargets,
+    broadcastSync,
     resetWindowState,
     resetConfig,
     updateConfig,
@@ -439,16 +493,16 @@ function validateArgs(argv) {
   const flags = new Set([
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--config-check', '--config-path', '--config-example',
-    '--diagnostics', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugin-path', '--setup-sync', '--self-update',
+    '--diagnostics', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugin-path', '--setup-sync', '--sync-status', '--sync-clean', '--sync-diagnostics', '--self-update',
     '--self-update-checkout', '--update-desktop', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all',
-    '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf',
+    '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--width', '-W',
-    '--height', '-H', '--size', '-z',
+    '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -488,6 +542,12 @@ function instanceMarkerDirectory() {
   return path.join(cacheHome, 'fpasoterm', 'instances');
 }
 
+// Returns the local command directory shared with the native Broadcast watcher.
+function localBroadcastCommandDirectory() {
+  const cacheHome = process.env.XDG_CACHE_HOME || path.join(os.homedir(), '.cache');
+  return path.join(cacheHome, 'fpasoterm', 'broadcast', 'commands');
+}
+
 // Checks whether a marker PID still belongs to a running process.
 function instanceProcessIsLive(pid) {
   if (process.platform === 'linux') {
@@ -525,6 +585,7 @@ function runningInstances() {
           continue;
         }
         instances.push({
+          id: String(marker.instanceId || ''),
           pid,
           title: String(marker.title || marker.baseTitle || 'fpasoterm'),
           createdAt: Number(marker.createdAt || 0),
@@ -550,6 +611,73 @@ function printRunningInstances() {
     const started = instance.createdAt > 0 ? new Date(instance.createdAt).toISOString() : 'unknown';
     console.log(`session=${instance.pid} pid=${instance.pid} title=${JSON.stringify(instance.title)} started=${started}`);
   }
+}
+
+// Publishes one complete command file so running terminal watchers never read partial JSON.
+function writeBroadcastItem(directory, item) {
+  fs.mkdirSync(directory, { recursive: true });
+  const baseName = `command-${item.id}`;
+  const temporaryPath = path.join(directory, `${baseName}.tmp`);
+  const commandPath = path.join(directory, `${baseName}.json`);
+  fs.writeFileSync(temporaryPath, JSON.stringify(item));
+  fs.renameSync(temporaryPath, commandPath);
+}
+
+// Sends a command to selected live local windows and optionally the configured sync channel.
+function broadcastTerminalInput(options) {
+  const allInstances = runningInstances().filter((instance) => instance.id);
+  if (allInstances.length === 0) {
+    throw new Error('no running fpasoterm windows were found');
+  }
+
+  const selected = new Map();
+  if (options.broadcastTargets.length === 0) {
+    allInstances.forEach((instance) => selected.set(instance.id, instance));
+  } else {
+    for (const selector of options.broadcastTargets) {
+      const numericPid = /^\d+$/.test(selector) ? Number(selector) : undefined;
+      const matches = allInstances.filter((instance) => (
+        numericPid === undefined ? instance.title === selector : instance.pid === numericPid
+      ));
+      if (matches.length === 0) {
+        throw new Error(`no running window matches Broadcast target ${JSON.stringify(selector)}`);
+      }
+      matches.forEach((instance) => selected.set(instance.id, instance));
+    }
+  }
+
+  if (options.broadcastSync && selected.size !== allInstances.length) {
+    throw new Error('--broadcast-sync requires every running local window to be selected');
+  }
+
+  const text = `${options.broadcastText.replace(/\r\n?/g, '\n').replace(/\n/g, '\r').replace(/\r+$/, '')}\r`;
+  const status = syncStatusReport(options);
+  const bytes = Buffer.byteLength(text, 'utf8');
+  if (bytes > status.maxBytes) {
+    throw new Error(`broadcast payload is too large: ${bytes} bytes > ${status.maxBytes} bytes`);
+  }
+  if (options.broadcastSync && !status.commandsEnabled) {
+    throw new Error('sync commands are disabled; set sync.commands = true');
+  }
+  if (options.broadcastSync && !status.enabled) {
+    throw new Error(status.message);
+  }
+
+  const createdAt = Date.now();
+  const item = {
+    schemaVersion: 1,
+    id: `cli-${process.pid}-${createdAt}`,
+    sourceId: `cli-${process.pid}`,
+    createdAt,
+    expiresAt: createdAt + status.commandTtlMs,
+    text,
+    targetInstanceIds: [...selected.keys()],
+  };
+  writeBroadcastItem(localBroadcastCommandDirectory(), item);
+  if (options.broadcastSync) {
+    writeBroadcastItem(status.commandsPath, item);
+  }
+  console.log(`broadcast: sent id=${item.id} local_targets=${selected.size} synced=${options.broadcastSync}`);
 }
 
 // Atomically broadcasts a graceful close request by PID, exact title, or all.
@@ -692,6 +820,15 @@ function parsePluginSelectors(value, flag) {
   const selectors = value.split(',').map((entry) => entry.trim()).filter(Boolean);
   if (selectors.length === 0) {
     throw new Error(`${flag} requires at least one plugin name`);
+  }
+  return selectors;
+}
+
+// Splits explicit Broadcast target selectors without accepting empty entries.
+function parseBroadcastSelectors(value, flag) {
+  const selectors = value.split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (selectors.length === 0) {
+    throw new Error(`${flag} requires at least one PID or exact title`);
   }
   return selectors;
 }
@@ -1292,7 +1429,7 @@ async function setupSync(options) {
         diagnostics: currentSync.diagnostics ?? true,
         pasteRequiresConfirm: currentSync.pasteRequiresConfirm ?? true,
         maxBytes: currentSync.maxBytes ?? 1048576,
-        ttlSeconds: currentSync.ttlSeconds ?? 86400,
+        commandTtlSeconds: currentSync.commandTtlSeconds ?? 60,
       },
       logging: {
         ...currentLogging,
@@ -1311,6 +1448,249 @@ async function setupSync(options) {
   } finally {
     rl.close();
   }
+}
+
+// Normalizes a configured sync channel to the directory name used by the backend.
+function normalizedSyncChannel(value) {
+  const normalized = String(value || 'default')
+    .trim()
+    .replace(/[^A-Za-z0-9_.-]/g, '_')
+    .replace(/^[._]+|[._]+$/g, '')
+    .slice(0, 80);
+  return normalized || 'default';
+}
+
+// Reads a file modification time in milliseconds without treating a failure as
+// an error for an informational health check.
+function modificationTimeMs(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+// Inspects one channel directory. This is intentionally read-only so status
+// does not create a folder or alter a network-synced drive.
+function inspectSyncChannel(channelPath, name, now, ttlMs) {
+  const result = {
+    name,
+    diagnosticsExists: fs.existsSync(path.join(channelPath, 'diagnostics.json')),
+    activeCommands: 0,
+    staleCommands: 0,
+    invalidCommands: 0,
+    temporaryFiles: 0,
+  };
+  const commandsPath = path.join(channelPath, 'commands');
+  let entries;
+  try {
+    entries = fs.readdirSync(commandsPath, { withFileTypes: true });
+  } catch {
+    return result;
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.startsWith('command-')) {
+      continue;
+    }
+    const itemPath = path.join(commandsPath, entry.name);
+    if (entry.name.endsWith('.json')) {
+      try {
+        const item = JSON.parse(fs.readFileSync(itemPath, 'utf8'));
+        if (Number(item.expiresAt) > now) {
+          result.activeCommands += 1;
+        } else {
+          result.staleCommands += 1;
+        }
+      } catch {
+        result.invalidCommands += 1;
+      }
+    } else if (entry.name.endsWith('.tmp') && modificationTimeMs(itemPath) + ttlMs <= now) {
+      result.temporaryFiles += 1;
+    }
+  }
+  return result;
+}
+
+// Collects all direct-child channels, keeping ordinary files and log folders out.
+function inspectSyncChannels(rootPath, now, ttlMs) {
+  let entries;
+  try {
+    entries = fs.readdirSync(rootPath, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => inspectSyncChannel(path.join(rootPath, entry.name), entry.name, now, ttlMs))
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+// Resolves and inspects the configured sync folder without starting the desktop app.
+function syncStatusReport(options) {
+  applyEnv(options.env);
+  const targetPath = configPath();
+  const selected = selectProfileConfig(readUserConfig(targetPath));
+  const sync = mergeConfig(
+    mergeConfig(platformDefaultConfig(), selected.baseConfig),
+    selected.profileConfig,
+  ).sync || {};
+  const provider = String(sync.provider || 'folder');
+  const configuredPath = String(sync.path || '').trim();
+  const channel = normalizedSyncChannel(sync.channel);
+  const enabled = sync.enabled === true && provider === 'folder' && Boolean(configuredPath);
+  const rootPath = configuredPath ? expandHome(configuredPath) : '';
+  const diagnosticsPath = rootPath ? path.join(rootPath, channel, 'diagnostics.json') : '';
+  const commandsPath = rootPath ? path.join(rootPath, channel, 'commands') : '';
+  const now = Date.now();
+  const ttlMs = Math.min(Math.max(Number(sync.commandTtlSeconds) || 60, 1), 600) * 1000;
+  const commandsEnabled = sync.commands !== false;
+  const maxBytes = Number(sync.maxBytes) > 0 ? Number(sync.maxBytes) : 1048576;
+  const rootExists = Boolean(rootPath) && fs.existsSync(rootPath);
+  let rootReadable = false;
+  let rootWritable = false;
+  if (rootExists) {
+    try {
+      fs.readdirSync(rootPath);
+      rootReadable = true;
+    } catch {}
+    rootWritable = canWriteDirectory(rootPath);
+  }
+  const channels = rootExists ? inspectSyncChannels(rootPath, now, ttlMs) : [];
+  const current = channels.find((item) => item.name === channel);
+  const diagnosticsExists = Boolean(diagnosticsPath) && fs.existsSync(diagnosticsPath);
+  const diagnosticsBytes = diagnosticsExists ? fs.statSync(diagnosticsPath).size : 0;
+  const diagnosticsUpdatedAt = diagnosticsExists ? modificationTimeMs(diagnosticsPath) : 0;
+  const staleCommands = current?.staleCommands || 0;
+  const invalidCommands = current?.invalidCommands || 0;
+  const temporaryFiles = current?.temporaryFiles || 0;
+  let health = 'ok';
+  let message = 'sync folder is healthy';
+  if (!enabled) {
+    health = 'disabled';
+    message = !sync.enabled ? 'sync folder is disabled; set sync.enabled = true' : provider !== 'folder'
+      ? `unsupported sync provider: ${provider}`
+      : 'sync path is empty; set sync.path to a synced local folder';
+  } else if (!rootExists) {
+    health = 'missing';
+    message = 'sync root does not exist';
+  } else if (!rootReadable) {
+    health = 'unreadable';
+    message = 'sync root cannot be read';
+  } else if (!rootWritable) {
+    health = 'read-only';
+    message = 'sync root cannot be written';
+  } else if (staleCommands + invalidCommands + temporaryFiles > 0) {
+    health = 'cleanup recommended';
+    message = 'expired or abandoned command files were found';
+  }
+  return {
+    enabled,
+    commandsEnabled,
+    maxBytes,
+    provider,
+    path: rootPath,
+    channel,
+    diagnosticsPath,
+    commandsPath,
+    health,
+    rootExists,
+    rootReadable,
+    rootWritable,
+    diagnosticsExists,
+    diagnosticsBytes,
+    diagnosticsUpdatedAt,
+    activeCommands: current?.activeCommands || 0,
+    staleCommands,
+    invalidCommands,
+    temporaryFiles,
+    channels,
+    commandTtlMs: ttlMs,
+    message,
+  };
+}
+
+// Makes the health check readable in a terminal and ready to paste into an issue.
+function syncStatusMarkdown(options) {
+  const status = syncStatusReport(options);
+  const lines = [
+    '## fpasoterm sync status',
+    '',
+    `- status: ${status.enabled ? 'enabled' : 'disabled'}`,
+    `- health: ${status.health}`,
+    `- provider: ${status.provider}`,
+    `- path: ${status.path || '(not configured)'}`,
+    `- channel: ${status.channel || '(not configured)'}`,
+    `- root exists: ${status.rootExists}`,
+    `- root readable: ${status.rootReadable}`,
+    `- root writable: ${status.rootWritable}`,
+    `- diagnostics: ${status.diagnosticsExists} (${status.diagnosticsBytes} bytes)`,
+    `- command directory: ${status.commandsPath || '(not available)'}`,
+    `- commands: active=${status.activeCommands} stale=${status.staleCommands} invalid=${status.invalidCommands} temporary=${status.temporaryFiles}`,
+    `- message: ${status.message}`,
+    '',
+    '### Channels',
+  ];
+  if (status.channels.length === 0) {
+    lines.push('- (none found)');
+  } else {
+    status.channels.forEach((item) => lines.push(
+      `- ${item.name}: diagnostics=${item.diagnosticsExists} active=${item.activeCommands} stale=${item.staleCommands} invalid=${item.invalidCommands} temporary=${item.temporaryFiles}`,
+    ));
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+// Deletes only expired commands and stale temporary/malformed requests from all
+// channels. Valid pending commands and diagnostics files remain untouched.
+function cleanSyncFolder(options) {
+  const status = syncStatusReport(options);
+  if (!status.enabled) {
+    throw new Error(status.message);
+  }
+  if (!status.rootExists) {
+    console.log('sync clean: sync root does not exist; nothing to clean');
+    return;
+  }
+  const now = Date.now();
+  const ttlMs = status.commandTtlMs;
+  const removed = { expired: 0, invalid: 0, temporary: 0 };
+  for (const channel of status.channels) {
+    const directory = path.join(status.path, channel.name, 'commands');
+    let entries;
+    try {
+      entries = fs.readdirSync(directory, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.startsWith('command-')) {
+        continue;
+      }
+      const itemPath = path.join(directory, entry.name);
+      let kind = '';
+      if (entry.name.endsWith('.json')) {
+        try {
+          const item = JSON.parse(fs.readFileSync(itemPath, 'utf8'));
+          if (Number(item.expiresAt) <= now) {
+            kind = 'expired';
+          }
+        } catch {
+          if (modificationTimeMs(itemPath) + ttlMs <= now) {
+            kind = 'invalid';
+          }
+        }
+      } else if (entry.name.endsWith('.tmp') && modificationTimeMs(itemPath) + ttlMs <= now) {
+        kind = 'temporary';
+      }
+      if (kind) {
+        fs.rmSync(itemPath, { force: true });
+        removed[kind] += 1;
+      }
+    }
+  }
+  console.log(`sync clean: removed expired=${removed.expired} invalid=${removed.invalid} temporary=${removed.temporary}`);
+  console.log(`path: ${status.path}`);
+  console.log(`channel: ${status.channel}`);
 }
 
 // Finds a built Tauri application binary when one is available locally.
@@ -1727,6 +2107,12 @@ try {
     updateConfig(options);
   } else if (options.pruneConfig) {
     pruneConfigFile(options);
+  } else if (options.syncStatus || options.syncDiagnostics) {
+    process.stdout.write(syncStatusMarkdown(options));
+  } else if (options.syncClean) {
+    cleanSyncFolder(options);
+  } else if (options.broadcastText) {
+    broadcastTerminalInput(options);
   } else if (options.setupSync) {
     Promise.resolve(setupSync(options)).catch((setupError) => {
       console.error(`fpasoterm: ${setupError.message}`);
@@ -1769,9 +2155,7 @@ try {
   }
 } catch (error) {
   console.error(`fpasoterm: ${error.message}`);
-  if (!parsedArguments) {
-    console.error(helpText.trimEnd());
-  }
-  // Let stdout/stderr flush before Node exits, including when called from a pipe.
+  // Invalid CLI input must remain concise enough for scripts and shell history.
+  // Explicit --help is the only operation that prints the full option list.
   process.exitCode = parsedArguments ? 1 : 2;
 }

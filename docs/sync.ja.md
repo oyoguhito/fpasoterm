@@ -42,6 +42,22 @@ ChromeOS で `shared` や `temp` など複数の folder を `Linux と共有` �
 
 同じ `path` と同じ `channel` を指定した fpasoterm 同士だけが、diagnostics と logs を同じ場所で共有します。ChromeOS と Windows で同じ同期領域を使いたい場合は、両方で同じ channel 名を指定してください。
 
+### Status、health check、cleanup
+
+sync folder の調査前、または端末が長時間 offline だった後には、次を実行します。
+
+```bash
+fpasoterm --sync-status
+fpasoterm --sync-diagnostics
+fpasoterm --sync-clean
+```
+
+`--sync-status` は read-only です。解決済み local path、現在の channel、root folder の存在・read/write check、diagnostics file size、短寿命 command の件数、sync root 配下で見つかった全 channel を表示します。`--sync-diagnostics` は同じ内容を GitHub Issue へ貼り付けやすい Markdown として出力します。
+
+`--sync-clean` は、設定済み sync root の全 channel を確認します。期限切れの command JSON、及び `commandTtlSeconds` より古い壊れた command file / temporary file だけを削除します。`diagnostics.json`、terminal log、期限内の command は削除しません。sync が無効、または folder が無い場合も、status/cleanup によって directory を作成しません。
+
+hamburger menu にも **Sync Status** と **Sync Clean** を追加しています。Sync Status は同じ health 情報を diagnostics panel に表示します。Sync Clean は同じ安全な stale file cleanup を実行してから、その panel を更新します。
+
 例:
 
 ```text
@@ -197,6 +213,21 @@ enabled = false
 ## Broadcast Input
 
 `Ctrl+Shift+B` で Broadcast dialog を開きます。title と PID で対象の local fpasoterm window を選択して `Send` を実行すると、選択した window だけへ command を送ります。全 local window を選択して `Include synced channel` を選ぶと、追加で `<sync path>/<channel>/commands` 配下へ一時 request を保存します。同じ folder と channel を使って、すでに起動している各 fpasoterm は一度だけ自身の PTY へ書き込みます。local の一部選択時は sync channel へ送信しません。
+
+window を開かずに CLI からも同じ操作を実行できます。
+
+```sh
+# 起動中の全 local fpasoterm window へ送信します。
+fpasoterm --broadcast "git status"
+
+# PID または完全一致 title で一つ以上の local target を選択します。
+fpasoterm --broadcast "uptime" --broadcast-target 1234,"Build-2"
+
+# 全 local window と設定済み trusted sync channel へ送信します。
+fpasoterm --broadcast "hostname" --broadcast-sync
+```
+
+`--broadcast` は改行コードを正規化して Enter を末尾へ追加します。`--broadcast-target` は繰り返し指定または comma 区切りで使え、存在しない selector は error になります。target を指定しない場合は起動中の全 local window が対象です。`--broadcast-sync` は全 local window を選択している場合だけ使え、`[sync] enabled = true` と `commands = true` が必要です。別 machine の fpasoterm を起動する機能ではなく、同じ trusted folder と channel を使用して既に起動している instance だけが command を受信します。
 
 これは trusted folder を前提にした機能です。この folder に command JSON を書き込める人は参加中の terminal へ command を入力できます。暗号化、認証、remote 起動、遅延実行は行いません。shared または信頼できない folder では synced command を有効にしないでください。
 

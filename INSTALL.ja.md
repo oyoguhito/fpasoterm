@@ -20,11 +20,12 @@ fpasoterm -v
 
 Windows で新しい `.exe` または `.msi` を導入した後も古い version が表示される場合、`Path`、Start menu、pinned shortcut のいずれかが古い executable を起動しています。起動中の fpasoterm window を閉じ、新しい package を再インストールしてから更新後の shortcut で起動してください。
 
-Windows build では release executable と同じ directory に `fpasoterm.cmd` を配置します。`--version`、`--plugin-path`、`--plugin-info`などCLI専用操作にはこのconsole wrapperを使ってください。GUI-subsystem executableの終了を待つため、PowerShell promptが直ちに再描画されます。通常起動は従来どおり非待機です。
+Windows build では release executable と同じ directory に `fpasoterm.cmd` を配置します。`--version`、`--plugin-path`、`--plugin-info`などCLI専用操作にはこのconsole wrapperを使ってください。CLI操作は executable を直接実行するため、stdout、stderr、終了codeがPowerShellまたはcmdへ戻ります。通常起動は従来どおり非待機です。
 
 ```powershell
 .\src-tauri\target\release\fpasoterm.cmd --version
 .\src-tauri\target\release\fpasoterm.cmd --plugin-path
+.\src-tauri\target\release\fpasoterm.cmd --help
 .\src-tauri\target\release\fpasoterm.cmd
 ```
 
