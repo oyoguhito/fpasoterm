@@ -8,14 +8,14 @@ title = "fpasoterm"
 titlebarColor = "#1565c0"
 
 [terminal]
-lineHeight = 1.12
+lineHeight = 0.92
 # Preserve application-selected ANSI/RGB colors and block/box glyph art.
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"

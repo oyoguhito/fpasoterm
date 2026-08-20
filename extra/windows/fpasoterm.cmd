@@ -14,6 +14,7 @@ if not exist "%FPASOTERM_EXE%" (
 if "%~1"=="" goto run
 for %%F in (
   --help -h --version -v --list -l --close -q --show-config
+  --completion --completion-install --completion-uninstall
   --profile-list --config-check --config-path --config-example
   --diagnostics --open-log-dir --copy-diagnostics
   --plugin-list --plugin-path --plugin-info

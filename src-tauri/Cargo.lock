@@ -839,8 +839,9 @@ dependencies = [
 
 [[package]]
 name = "fpasoterm"
-version = "1.5.9"
+version = "1.5.10"
 dependencies = [
+ "base64 0.22.1",
  "hmac",
  "libc",
  "portable-pty",

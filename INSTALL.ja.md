@@ -29,6 +29,14 @@ Windows build では release executable と同じ directory に `fpasoterm.cmd` 
 .\src-tauri\target\release\fpasoterm.cmd
 ```
 
+同じ wrapper から PowerShell の command completion を有効化できます。
+
+```powershell
+.\src-tauri\target\release\fpasoterm.cmd --completion powershell | Out-String | Invoke-Expression
+```
+
+Bash、Zsh、Fish、永続化方法、および `cmd.exe` の制約は[コマンド補完](docs/completion.ja.md)を参照してください。
+
 ## 開発用の起動
 
 Linux では Tauri/WebKitGTK の開発用 package が必要です。

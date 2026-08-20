@@ -10,7 +10,7 @@ Repeated delayed position reapplication and `moveTop()` were tested in earlier r
 
 Before the Tauri migration, xterm.js canvas alpha backgrounds did not compose as transparent on the tested ChromeOS/Baguette environment. Alpha backgrounds were rendered as black or opaque colors instead of showing the desktop behind the terminal.
 
-The Tauri backend uses WebKitGTK on Linux, enables transparent windows, and sets xterm.js `allowTransparency = true` with an 80% opaque terminal background by default. ChromeOS/Baguette still needs device testing. If rendering flickers or turns black/white, launch with `--disable-dmabuf`, which sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
+The Tauri backend uses WebKitGTK on Linux, enables transparent windows, and sets xterm.js `allowTransparency = true` with a 65% opaque terminal background by default. ChromeOS/Baguette still needs device testing. If rendering flickers or turns black/white, launch with `--disable-dmabuf`, which sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
 ## Kitty/SIXEL Graphics
 

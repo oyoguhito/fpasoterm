@@ -255,10 +255,10 @@ cursorStyle = "block"
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # When omitted, the default is 12 on Intel macOS and 14 on other platforms.
-lineHeight = 1.12
+lineHeight = 0.92
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
 shell = ""
@@ -267,7 +267,7 @@ shell = ""
 # Current builds ignore this section. Do not add it to config.toml.
 
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
@@ -372,7 +372,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
-commands = true
+commands = false
+commandSecret = ""
 commandTtlSeconds = 60
 
 [logging]
@@ -382,10 +383,19 @@ autoStart = false
 maxBytes = 10485760
 ```
 
+`lineHeight` defaults to `0.92` on Linux and Windows, and `0.80` on macOS.
+The lower macOS value compensates for WebKit device-pixel rounding so terminal
+art and TUI logos use adjacent rows. fpasoterm's bundled xterm.js accepts
+values down to `0.5`. Existing macOS values matching former defaults `0.92`,
+`1`, or `1.12` are migrated at runtime; explicit custom values are retained.
+
+On macOS, `Menlo` is the first default terminal font because its box and block
+glyph metrics match the macOS Terminal renderer more closely than `SF Mono`.
+
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `lineHeight` defaults to `1` to keep terminal art and TUI logo rows connected. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
 
 ### TUI compatibility check
 
@@ -434,7 +444,7 @@ This feature deliberately has no remote server, OAuth token, or automatic comman
 Broadcast always appends Enter. Its **Control byte** picker inserts visible
 notation at the textarea cursor: `\x09` for `Tab`, `\x03` for `Ctrl+C`,
 `\x04` for `Ctrl+D`, `\x18` for `Ctrl+X`, and `\x1A` for `Ctrl+Z`.
-FpasoTerm converts only these picker-inserted notations to terminal bytes when
+fpasoterm converts only these picker-inserted notations to terminal bytes when
 you send them. The standalone `Esc` option is intentionally omitted because
 **Alt prefix / Esc** inserts the same `\x1B`. `Ctrl` and `Alt` are modifiers,
 not bytes. For the conventional `Alt+x` terminal sequence, insert **Alt prefix

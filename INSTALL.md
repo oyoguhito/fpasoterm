@@ -33,6 +33,15 @@ the exit code return to PowerShell or cmd. Normal launches remain detached:
 .\src-tauri\target\release\fpasoterm.cmd
 ```
 
+PowerShell command completion is available from the same wrapper:
+
+```powershell
+.\src-tauri\target\release\fpasoterm.cmd --completion powershell | Out-String | Invoke-Expression
+```
+
+For Bash, Zsh, Fish, persistent setup, and the Windows limitations of
+`cmd.exe`, see [Command Completion](docs/completion.en.md).
+
 ## Development Build
 
 Linux development requires the Tauri/WebKitGTK system packages:

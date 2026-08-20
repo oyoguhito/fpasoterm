@@ -194,7 +194,7 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 
 `diagnostics.json` の JSON には `kind`、`channel`、`sourceId`、`updatedAt`、`text` が入ります。
 
-`commands` は Broadcast dialog で user が `Include synced channel` を明示選択した時だけ短寿命の broadcast-input request を保存します。既定では無効です。trusted device間で共有する32文字以上の`commandSecret`とともに有効化してください。FpasoTermはcommand fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。`commandTtlSeconds` の既定値は 60 秒で、最大 600 秒です。diagnostics/log の同期は残したままremote input commandを拒否する場合は `commands = false` にしてください。
+`commands` は Broadcast dialog で user が `Include synced channel` を明示選択した時だけ短寿命の broadcast-input request を保存します。既定では無効です。trusted device間で共有する32文字以上の`commandSecret`とともに有効化してください。fpasotermはcommand fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。`commandTtlSeconds` の既定値は 60 秒で、最大 600 秒です。diagnostics/log の同期は残したままremote input commandを拒否する場合は `commands = false` にしてください。
 
 ## 使用方法
 

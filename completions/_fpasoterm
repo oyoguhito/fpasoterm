@@ -1,0 +1,73 @@
+#compdef fpasoterm
+
+_fpasoterm_profile_names() {
+  local -a profiles
+  profiles=("${(@f)$(command fpasoterm --profile-list 2>/dev/null | sed -n 's/^  //p')}")
+  _describe -t profiles profile profiles
+}
+
+_fpasoterm_plugin_names() {
+  local -a plugins
+  plugins=("${(@f)$(command fpasoterm --plugin-list 2>/dev/null | sed -n 's/^  plugins\/\([^ ]*\).*/\1/p')}")
+  _describe -t plugins plugin plugins
+}
+
+_fpasoterm() {
+  _arguments -s -S \
+    '(-h --help)'{-h,--help}'[show help]' \
+    '(-v --version)'{-v,--version}'[show version and build commit]' \
+    '--completion=[print a completion script]:shell:(bash zsh fish powershell)' \
+    '--completion-install=[install persistent completion]:shell:(bash zsh fish powershell)' \
+    '--completion-uninstall=[remove persistent completion]:shell:(bash zsh fish powershell)' \
+    '(-l --list)'{-l,--list}'[list running windows]' \
+    '(-q --close)'{-q,--close}'[close a PID, exact title, or all]:target:(all)' \
+    '--broadcast=[send text plus Enter to local windows]:text:' \
+    '--broadcast-target=[limit Broadcast targets]:PID or title:' \
+    '--broadcast-sync[also send Broadcast through the sync channel]' \
+    '(-d --dev)'{-d,--dev}'[rebuild the local debug binary]' \
+    '(-F --foreground)'{-F,--foreground}'[keep the launcher attached]' \
+    '(-C --console-diagnostics)'{-C,--console-diagnostics}'[print diagnostics to stderr]' \
+    '(-c --config)'{-c,--config}'[use a config.toml file]:config file:_files -g "*.toml"' \
+    '(-p --profile)'{-p,--profile}'[apply a named profile]:profile:_fpasoterm_profile_names' \
+    '--profile-list[list available profiles]' \
+    '--show-config[print resolved config]' \
+    '--config-check[validate config]' \
+    '--config-path[print config path]' \
+    '--config-example[print config example]' \
+    '--diagnostics[print diagnostics report]' \
+    '--open-log-dir[open terminal log directory]' \
+    '--copy-diagnostics[copy diagnostics report]' \
+    '--plugin-list[list plugins]' \
+    '--plugin-path[print plugin directory]' \
+    '--plugin-info=[show plugin information]:plugin:_fpasoterm_plugin_names' \
+    '--enable-plugin=[enable plugins]:plugin:_fpasoterm_plugin_names' \
+    '--disable-plugin=[disable plugins]:plugin:_fpasoterm_plugin_names' \
+    '--plugin-enable=[alias for enable-plugin]:plugin:_fpasoterm_plugin_names' \
+    '--plugin-disable=[alias for disable-plugin]:plugin:_fpasoterm_plugin_names' \
+    '--plugin-enable-all[enable all discovered plugins]' \
+    '--plugin-disable-all[disable all plugins]' \
+    '--update-config[add missing config defaults]' \
+    '--prune-config[remove unsupported config settings]' \
+    '--setup-sync[configure a sync folder]' \
+    '--sync-status[show sync health]' \
+    '--sync-clean[remove expired sync commands]' \
+    '--sync-diagnostics[print sync diagnostics]' \
+    '--self-update[update an npm installation]' \
+    '--self-update-checkout[update a git checkout]' \
+    '--update-desktop[refresh desktop integration]' \
+    '(-s --shell)'{-s,--shell}'[override shell]:command:_command_names' \
+    '(-e --command)'{-e,--command}'[run command after launch]:command:' \
+    '(-t --title)'{-t,--title}'[override titlebar title]:title:' \
+    '(-b --titlebar-color)'{-b,--titlebar-color}'[override titlebar color]:color:' \
+    '(-r --reset-window-state)'{-r,--reset-window-state}'[delete saved window size]' \
+    '(-R --reset-config)'{-R,--reset-config}'[back up config and restore defaults]' \
+    '(-W --width)'{-W,--width}'[override window width]:pixels:' \
+    '(-H --height)'{-H,--height}'[override window height]:pixels:' \
+    '(-z --size)'{-z,--size}'[override window size]:width x height:' \
+    '(-k --debug-keys)'{-k,--debug-keys}'[enable key diagnostics]' \
+    '--x11[use the X11 GTK backend]' \
+    '--debug-opaque-terminal[use opaque terminal background]' \
+    '--disable-dmabuf[disable the Linux DMA-BUF renderer]'
+}
+
+_fpasoterm "$@"

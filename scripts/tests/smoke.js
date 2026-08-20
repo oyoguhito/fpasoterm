@@ -10,6 +10,7 @@ const {
   defaultConfigExample,
   discoverPluginFiles,
   loadConfig,
+  migrateLegacyTerminalLineHeight,
   mergeConfig,
   missingConfigKeys,
   platformDefaultConfig,
@@ -26,17 +27,28 @@ const {
 
 assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 12);
 assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
+assert.equal(platformDefaultConfig('darwin', 'x64').terminal.lineHeight, 0.8);
+assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.lineHeight, 0.8);
+assert.equal(platformDefaultConfig('linux', 'x64').terminal.lineHeight, 0.92);
+assert.equal(
+  migrateLegacyTerminalLineHeight({ terminal: { lineHeight: 0.92 } }, 'darwin').terminal.lineHeight,
+  0.8,
+);
+assert.equal(
+  migrateLegacyTerminalLineHeight({ terminal: { lineHeight: 0.75 } }, 'darwin').terminal.lineHeight,
+  0.75,
+);
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.minimumContrastRatio, 1);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.rescaleOverlappingGlyphs, false);
-assert.match(platformDefaultConfig('darwin', 'arm64').terminal.fontFamily, /^"SF Mono", Menlo/);
+assert.match(platformDefaultConfig('darwin', 'arm64').terminal.fontFamily, /^Menlo, "SF Mono"/);
 assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /^"DejaVu Sans Mono"/);
 assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /"Noto Sans CJK KR"/);
 assert.match(platformDefaultConfig('darwin', 'arm64').terminal.fontFamily, /"Apple SD Gothic Neo"/);
 assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /"Symbols Nerd Font Mono"/);
 assert.match(defaultConfigExample('darwin', 'x64'), /fontSize = 12/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
-assert.match(defaultConfigExample('darwin', 'arm64'), /fontFamily = "\\"SF Mono\\", Menlo/);
+assert.match(defaultConfigExample('darwin', 'arm64'), /fontFamily = "Menlo, \\"SF Mono\\"/);
 const missingDefaults = missingConfigKeys(writableConfigDefaults(), { keybindings: { prefix: 'Ctrl+Alt' } });
 assert.ok(missingDefaults.includes('keybindings.newWindow'));
 assert.equal(missingDefaults.includes('terminal.images.enabled'), false);
@@ -105,6 +117,7 @@ const oldPtyPackage = `${'node'}-${'pty'}`;
 assert.equal(Object.hasOwn(packageJson.dependencies, oldRuntimePackage), false);
 assert.equal(Object.hasOwn(packageJson.dependencies, oldPtyPackage), false);
 assert.equal(Object.hasOwn(packageJson, 'allowScripts'), false);
+assert.ok(packageJson.files.includes('completions/'));
 
 for (const file of [
   'bin/fpasoterm',
@@ -114,6 +127,8 @@ for (const file of [
   'INSTALL.md',
   'INSTALL.ja.md',
   'README.ja.md',
+  'docs/completion.en.md',
+  'docs/completion.ja.md',
   'docs/config.en.md',
   'docs/config.ja.md',
   'docs/diagnostics.en.md',
@@ -152,6 +167,10 @@ for (const file of [
   'extra/macos/fpasoterm.icns',
   'extra/windows/fpasoterm.ico',
   'extra/windows/fpasoterm.cmd',
+  'completions/fpasoterm.bash',
+  'completions/_fpasoterm',
+  'completions/fpasoterm.fish',
+  'completions/fpasoterm.ps1',
   'scripts/install-linux-desktop.js',
   'scripts/uninstall-desktop.js',
   'scripts/uninstall-linux-desktop.js',
@@ -329,7 +348,9 @@ assert.deepEqual(prunedConfig.removed, ['retired']);
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-const sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+const sourceCommit = spawnSync(fs.existsSync(path.join(root, '.jj')) ? 'jj' : 'git', fs.existsSync(path.join(root, '.jj'))
+  ? ['-R', root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id.short(12)']
+  : ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
   encoding: 'utf8',
 });
 const expectedVersion = `fpasoterm ${packageJson.version} (commit ${sourceCommit.stdout.trim() || 'unknown'})`;
@@ -338,6 +359,41 @@ assert.equal(versionResult.stdout.trim(), expectedVersion);
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
 assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
+
+const bashCompletionResult = runCli('--completion', 'bash');
+assert.equal(bashCompletionResult.status, 0, bashCompletionResult.stderr);
+assert.match(bashCompletionResult.stdout, /complete -F _fpasoterm fpasoterm/);
+const powershellCompletionResult = runCli('--completion', 'powershell');
+assert.equal(powershellCompletionResult.status, 0, powershellCompletionResult.stderr);
+assert.match(powershellCompletionResult.stdout, /Register-ArgumentCompleter/);
+assert.match(fs.readFileSync(path.join(root, 'bin', 'fpasoterm'), 'utf8'), /ToBase64String\(\[System\.Text\.Encoding\]::Unicode/);
+assert.match(fs.readFileSync(path.join(root, 'src-tauri', 'src', 'main.rs'), 'utf8'), /decode_powershell_profile_path/);
+assert.match(fs.readFileSync(path.join(root, 'docs', 'completion.en.md'), 'utf8'), /Set-ExecutionPolicy -Scope CurrentUser -ExecutionPolicy RemoteSigned/);
+assert.match(fs.readFileSync(path.join(root, 'docs', 'completion.ja.md'), 'utf8'), /profile自体を削除/);
+const invalidCompletionResult = runCli('--completion', 'invalid-shell');
+assert.equal(invalidCompletionResult.status, 1);
+assert.match(invalidCompletionResult.stderr, /unsupported completion shell: invalid-shell/);
+const missingCompletionShellResult = runCli('--completion-uninstall');
+assert.equal(missingCompletionShellResult.status, 2);
+assert.match(missingCompletionShellResult.stderr, /requires a shell: bash, zsh, fish, or powershell/);
+const completionDataHome = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-completion-'));
+const completionEnvironment = { ...process.env, XDG_DATA_HOME: completionDataHome };
+const completionInstallResult = spawnSync(
+  process.execPath,
+  [path.join(root, 'bin', 'fpasoterm'), '--completion-install', 'bash'],
+  { encoding: 'utf8', env: completionEnvironment },
+);
+assert.equal(completionInstallResult.status, 0, completionInstallResult.stderr);
+const installedBashCompletion = path.join(completionDataHome, 'bash-completion', 'completions', 'fpasoterm');
+assert.ok(fs.existsSync(installedBashCompletion), 'bash completion should be installed under XDG_DATA_HOME');
+assert.match(fs.readFileSync(installedBashCompletion, 'utf8'), /complete -F _fpasoterm fpasoterm/);
+const completionUninstallResult = spawnSync(
+  process.execPath,
+  [path.join(root, 'bin', 'fpasoterm'), '--completion-uninstall', 'bash'],
+  { encoding: 'utf8', env: completionEnvironment },
+);
+assert.equal(completionUninstallResult.status, 0, completionUninstallResult.stderr);
+assert.equal(fs.existsSync(installedBashCompletion), false);
 
 const configPathResult = runCli('--config-path');
 assert.equal(configPathResult.status, 0, configPathResult.stderr);
@@ -547,6 +603,7 @@ assert.equal(stateConfig.config.window.height, 900);
 assert.equal(stateConfig.config.terminal.shell, '');
 assert.equal(stateConfig.config.keybindings.prefix, 'Ctrl+Alt');
 assert.equal(stateConfig.config.keybindings.newWindow, 'N');
+assert.ok(fs.existsSync(path.join(stateTestDir, 'fpasoterm', 'User', 'plugins')));
 fs.writeFileSync(path.join(stateTestDir, 'fpasoterm', 'User', 'config.toml'), [
   '[terminal]',
   'fontSize = 0',
@@ -715,6 +772,7 @@ assert.match(tauriCapabilities, /"windows": \["main"\]/);
 const rustMain = read('src-tauri/src/main.rs');
 const rustBuild = read('src-tauri/build.rs');
 assert.match(rustBuild, /FPASOTERM_BUILD_COMMIT/);
+assert.match(rustBuild, /jj_working_copy_commit/);
 assert.match(rustBuild, /rev-parse.*HEAD/);
 assert.match(rustBuild, /rerun-if-changed/);
 assert.match(rustMain, /windows_subsystem = "windows"/);
@@ -1172,10 +1230,10 @@ assert.match(configDocsEn, /shell-emitted title changes are ignored/);
 assert.match(configDocsEn, /rememberBounds = true/);
 assert.match(configDocsEn, /frame = false/);
 assert.match(configDocsEn, /allowTransparency = true/);
-assert.match(configDocsEn, /backgroundOpacity = 0\.8/);
+assert.match(configDocsEn, /backgroundOpacity = 0\.65/);
 assert.match(configDocsEn, /termName = "xterm-256color"/);
 assert.match(configDocsEn, /fontSize = 14/);
-assert.match(configDocsEn, /lineHeight = 1\.12/);
+assert.match(configDocsEn, /lineHeight = 0\.92/);
 assert.match(configDocsEn, /terminal\.lineHeight/);
 assert.match(configDocsEn, /minimumContrastRatio = 1/);
 assert.match(configDocsEn, /selected ANSI and RGB colors/);
@@ -1246,9 +1304,9 @@ assert.match(configDocsJa, /shell が送る title change は無視/);
 assert.match(configDocsJa, /rememberBounds = true/);
 assert.match(configDocsJa, /frame = false/);
 assert.match(configDocsJa, /allowTransparency = true/);
-assert.match(configDocsJa, /backgroundOpacity = 0\.8/);
+assert.match(configDocsJa, /backgroundOpacity = 0\.65/);
 assert.match(configDocsJa, /termName = "xterm-256color"/);
-assert.match(configDocsJa, /lineHeight = 1\.12/);
+assert.match(configDocsJa, /lineHeight = 0\.92/);
 assert.match(configDocsJa, /terminal\.lineHeight/);
 assert.match(configDocsJa, /minimumContrastRatio = 1/);
 assert.match(configDocsJa, /ANSI\/RGB色/);
@@ -1451,8 +1509,8 @@ assert.match(sampleConfig, /\[plugins\]/);
 assert.match(sampleConfig, /plugins\/hello\.ts/);
 assert.match(sampleConfig, /shell = ""/);
 assert.match(sampleConfig, /titlebarColor = "#1565c0"/);
-assert.match(sampleConfig, /backgroundOpacity = 0\.8/);
-assert.match(sampleConfig, /lineHeight = 1\.12/);
+assert.match(sampleConfig, /backgroundOpacity = 0\.65/);
+assert.match(sampleConfig, /lineHeight = 0\.92/);
 assert.match(sampleConfig, /termName = "xterm-256color"/);
 
 
@@ -1619,11 +1677,11 @@ assert.match(defaultConfig, /title = "fpasoterm"/);
 assert.match(defaultConfig, /POSIX shell/);
 assert.match(defaultConfig, /apply-default-appearance\.ps1 or \.bat/);
 assert.match(defaultConfig, /titlebarColor = "#1565c0"/);
-assert.match(defaultConfig, /backgroundOpacity = 0\.8/);
-assert.match(defaultConfig, /lineHeight = 1\.12/);
+assert.match(defaultConfig, /backgroundOpacity = 0\.65/);
+assert.match(defaultConfig, /lineHeight = 0\.92/);
 assert.match(defaultConfig, /minimumContrastRatio = 1/);
 assert.match(defaultConfig, /rescaleOverlappingGlyphs = false/);
-assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.80\)"/);
+assert.match(defaultConfig, /background = "rgba\(16, 19, 23, 0\.65\)"/);
 assert.match(defaultConfig, /foreground = "#e8edf2"/);
 assert.match(defaultConfig, /cursor = "#f5d76e"/);
 assert.match(defaultConfig, /\[keybindings\]/);
@@ -1664,6 +1722,9 @@ assert.match(renderer, /schedulePluginsReadyAfterTerminalOutput/);
 assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
 assert.match(renderer, /plugin command registered id=/);
+assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
+assert.match(renderer, /pluginMenuSection\.hidden = !hasCommands/);
+assert.match(renderer, /plugin loaded \$\{plugin\.name\} commands=\$\{registeredCommandCount\}/);
 assert.match(renderer, /installTauriApiAdapter/);
 assert.match(renderer, /__TAURI__/);
 assert.match(renderer, /startWindowDrag/);
@@ -1939,6 +2000,7 @@ assert.match(renderer, /window\.innerHeight - top - 8/);
 assert.match(renderer, /window\.addEventListener\('resize', fitWindowMenuToViewport\)/);
 
 const styles = read('src/renderer/styles.css');
+assert.match(styles, /\.window-menu-submenu\[hidden\]\s*\{\s*display: none;/);
 assert.match(styles, /xterm-image-layer-top/);
 assert.match(styles, /#drag-region/);
 assert.doesNotMatch(styles, removedKebabHttpUiPattern);
@@ -2036,8 +2098,13 @@ assert.match(config, /defaultConfigExample/);
 assert.match(config, /title: 'fpasoterm'/);
 assert.match(config, /titlebarColor: '#1565c0'/);
 assert.match(config, /titleLocked: true/);
-assert.match(config, /backgroundOpacity: 0\.8/);
-assert.match(config, /lineHeight: 1\.12/);
+assert.match(config, /backgroundOpacity: 0\.65/);
+
+const rendererFallbackConfig = read('src/renderer/renderer.js');
+assert.match(rendererFallbackConfig, /backgroundOpacity: 0\.65/);
+assert.match(rendererFallbackConfig, /background: 'rgba\(16, 19, 23, 0\.65\)'/);
+assert.match(config, /lineHeight: defaultTerminalLineHeight/);
+assert.match(read('src/renderer/vendor/xterm/xterm.js'), /case"lineHeight":if\(i<\.5\)/);
 assert.match(config, /minimumContrastRatio: 1/);
 assert.match(config, /rescaleOverlappingGlyphs: false/);
 assert.match(config, /BIZ UDGothic/);

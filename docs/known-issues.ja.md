@@ -10,7 +10,7 @@ ChromeOS/Baguette では、fpasoterm から desktop runtime window の `x` / `y`
 
 Tauri 移行前にテストした ChromeOS/Baguette 環境では、xterm.js canvas の alpha 背景は透明として合成されませんでした。alpha 付き背景は、デスクトップが透けるのではなく黒または不透明色として表示されました。
 
-Tauri backend は Linux で WebKitGTK を使い、transparent window を有効にし、xterm.js に `allowTransparency = true` と 80% 不透明の terminal 背景を設定します。ChromeOS/Baguette 実機では再検証が必要です。描画がちらつく、黒または白になる場合は `--disable-dmabuf` で起動してください。この引数は `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定します。
+Tauri backend は Linux で WebKitGTK を使い、transparent window を有効にし、xterm.js に `allowTransparency = true` と 65% 不透明の terminal 背景を設定します。ChromeOS/Baguette 実機では再検証が必要です。描画がちらつく、黒または白になる場合は `--disable-dmabuf` で起動してください。この引数は `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定します。
 
 ## Kitty/SIXEL graphics
 

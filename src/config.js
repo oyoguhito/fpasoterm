@@ -12,7 +12,11 @@ const broadCjkFontFallback = '"Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans
 // Prefer an installed monospace font for terminal cell measurement. Nerd Font
 // fallbacks remain available for private-use glyphs without becoming the base font.
 const defaultTerminalFontFamily = `${cjkMonospaceFontFallback}, ${nerdFontFallback}, ${broadCjkFontFallback}, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
-const macosTerminalFontFamily = `"SF Mono", Menlo, ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
+const legacyMacosTerminalFontFamily = `"SF Mono", Menlo, ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
+// Menlo's box and block glyph metrics match the macOS Terminal renderer more closely.
+const macosTerminalFontFamily = `Menlo, "SF Mono", ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
+const defaultTerminalLineHeight = 0.92;
+const macosTerminalLineHeight = 0.8;
 const legacyTerminalFontFamily = `${nerdFontFallback}, "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "NanumGothicCoding", "BIZ UDGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
 // The complete set of supported user settings. This object is also used to
@@ -37,10 +41,10 @@ const defaultConfig = Object.freeze({
     cursorStyle: 'block',
     fontFamily: defaultTerminalFontFamily,
     fontSize: 14,
-    lineHeight: 1.12,
+    lineHeight: defaultTerminalLineHeight,
     minimumContrastRatio: 1,
     rescaleOverlappingGlyphs: false,
-    backgroundOpacity: 0.8,
+    backgroundOpacity: 0.65,
     scrollback: 1000,
     termName: 'xterm-256color',
     shell: '',
@@ -53,7 +57,7 @@ const defaultConfig = Object.freeze({
       iipSupport: false,
     },
     theme: {
-      background: 'rgba(16, 19, 23, 0.80)',
+      background: 'rgba(16, 19, 23, 0.65)',
       foreground: '#e8edf2',
       cursor: '#f5d76e',
       selectionBackground: '#35506b',
@@ -126,6 +130,7 @@ function platformDefaultConfig(platform = process.platform, architecture = proce
       terminal: {
         fontFamily: macosTerminalFontFamily,
         fontSize: architecture === 'x64' ? 12 : 14,
+        lineHeight: macosTerminalLineHeight,
       },
     });
   }
@@ -135,7 +140,7 @@ function platformDefaultConfig(platform = process.platform, architecture = proce
 // Safely migrates only previously shipped defaults, preserving custom font choices.
 function migrateLegacyMacosFontFamily(config, platform = process.platform) {
   const fontFamily = config?.terminal?.fontFamily;
-  if (platform === 'darwin' && (fontFamily === legacyTerminalFontFamily || fontFamily === defaultTerminalFontFamily)) {
+  if (platform === 'darwin' && (fontFamily === legacyTerminalFontFamily || fontFamily === legacyMacosTerminalFontFamily || fontFamily === defaultTerminalFontFamily)) {
     return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
   }
   if (platform !== 'darwin' && fontFamily === legacyTerminalFontFamily) {
@@ -145,6 +150,19 @@ function migrateLegacyMacosFontFamily(config, platform = process.platform) {
     return config;
   }
   return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
+}
+
+// Compacts former defaults across platforms now that xterm accepts sub-unit line heights.
+function migrateLegacyTerminalLineHeight(config, platform = process.platform) {
+  const formerDefaults = platform === 'darwin' ? [0.92, 1, 1.12] : [1, 1.12];
+  if (formerDefaults.includes(config?.terminal?.lineHeight)) {
+    return mergeConfig(config, {
+      terminal: {
+        lineHeight: platform === 'darwin' ? macosTerminalLineHeight : defaultTerminalLineHeight,
+      },
+    });
+  }
+  return config;
 }
 
 // Returns the settings persisted in user config files. Image protocol options
@@ -188,14 +206,14 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = ${JSON.stringify(terminalDefaults.fontFamily)}
 fontSize = ${terminalDefaults.fontSize}
-# lineHeight leaves enough vertical room for underscores and descenders.
-lineHeight = 1.12
+# A compact value keeps adjacent rows connected for terminal art and TUI logos.
+lineHeight = ${terminalDefaults.lineHeight}
 # minimumContrastRatio = 1 preserves application-selected ANSI and RGB colors.
 minimumContrastRatio = 1
 # Keep this false for glyph fidelity in terminal applications. Enable only if needed for CJK overlap.
 rescaleOverlappingGlyphs = false
 # backgroundOpacity changes only the terminal background alpha, not text opacity.
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 scrollback = 1000
 # termName is the terminal type used by xterm.js. The backend PTY exports
 # TERM=xterm-256color so terminal multiplexers such as tmux can use terminfo.
@@ -209,7 +227,7 @@ shell = ""
 
 # Terminal color palette.
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
@@ -432,7 +450,11 @@ function removeUnsupportedConfigSections(config) {
 function writeDefaultConfigExample(targetPath) {
   const examplePath = `${targetPath}.example`;
   const example = defaultConfigExample();
-  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  const userDir = path.dirname(targetPath);
+  fs.mkdirSync(userDir, { recursive: true });
+  // Keep the documented plugin location ready without creating or replacing
+  // plugin source files on the user's behalf.
+  fs.mkdirSync(path.join(userDir, 'plugins'), { recursive: true });
   if (!fs.existsSync(examplePath) || fs.readFileSync(examplePath, 'utf8') !== example) {
     fs.writeFileSync(examplePath, example);
   }
@@ -723,6 +745,7 @@ function loadConfig() {
     selected.profileConfig,
   ));
   config = migrateLegacyMacosFontFamily(config);
+  config = migrateLegacyTerminalLineHeight(config);
   if (config.window?.rememberBounds !== false) {
     const statePath = readableWindowStatePath();
     if (statePath) {
@@ -759,6 +782,7 @@ module.exports = {
   writeWindowState,
   loadConfig,
   migrateLegacyMacosFontFamily,
+  migrateLegacyTerminalLineHeight,
   mergeConfig,
   missingConfigKeys,
   pruneUnsupportedConfig,

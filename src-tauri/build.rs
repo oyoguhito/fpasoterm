@@ -46,12 +46,61 @@ fn watch_git_revision(root: &Path) {
     }
 }
 
-// Embeds an override for reproducible packaging, or the checkout's HEAD for
-// local contributor builds. The value is exposed by --version and Help.
+// jj keeps the working-copy commit outside Git's HEAD. Watch its state when
+// present so contributor builds refresh the version shown by Help and --version.
+fn watch_jj_revision(root: &Path) {
+    for relative_path in [".jj/working_copy/tree_state", ".jj/repo/op_heads"] {
+        let path = root.join(relative_path);
+        if path.exists() {
+            println!("cargo:rerun-if-changed={}", path.display());
+        }
+    }
+}
+
+// Returns the current jj commit only in a jj checkout. Release archives and
+// regular Git clones intentionally continue through the Git fallback below.
+fn jj_working_copy_commit(root: &Path) -> Option<String> {
+    if !root.join(".jj").is_dir() {
+        return None;
+    }
+    let home = env::var_os("HOME").map(PathBuf::from);
+    let mise_data = env::var_os("MISE_DATA_DIR")
+        .map(PathBuf::from)
+        .or_else(|| home.as_ref().map(|path| path.join(".local/share/mise")));
+    let mut candidates = Vec::new();
+    if let Some(path) = env::var_os("JJ").map(PathBuf::from) {
+        candidates.push(path);
+    }
+    if let Some(path) = mise_data {
+        candidates.push(path.join("shims/jj"));
+    }
+    if let Some(path) = home {
+        candidates.push(path.join(".cargo/bin/jj"));
+    }
+    let jj_program = candidates
+        .into_iter()
+        .find(|path| path.is_file())
+        .unwrap_or_else(|| PathBuf::from("jj"));
+    let output = Command::new(jj_program)
+        .current_dir(root)
+        .args(["log", "-r", "@", "--no-graph", "-T", "commit_id"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let value = String::from_utf8(output.stdout).ok()?;
+    let value = value.trim().to_string();
+    (!value.is_empty()).then_some(value)
+}
+
+// Embeds an override for reproducible packaging, the jj working copy for
+// contributor builds, or the checkout's Git HEAD. The value is shown by Help.
 fn build_commit(root: &Path) -> String {
     env::var("FPASOTERM_BUILD_COMMIT")
         .ok()
         .filter(|value| !value.trim().is_empty())
+        .or_else(|| jj_working_copy_commit(root))
         .or_else(|| git_output(root, &["rev-parse", "HEAD"]))
         .unwrap_or_else(|| "unknown".to_string())
 }
@@ -62,6 +111,7 @@ fn main() {
     let repository_root = manifest_dir.parent().unwrap_or(&manifest_dir);
     println!("cargo:rerun-if-env-changed=FPASOTERM_BUILD_COMMIT");
     watch_git_revision(repository_root);
+    watch_jj_revision(repository_root);
     println!(
         "cargo:rustc-env=FPASOTERM_BUILD_COMMIT={}",
         build_commit(repository_root)

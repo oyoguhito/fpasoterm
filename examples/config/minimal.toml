@@ -9,10 +9,10 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 14
-lineHeight = 1.12
+lineHeight = 0.92
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 termName = "xterm-256color"
 # Leave empty for the platform default shell.
