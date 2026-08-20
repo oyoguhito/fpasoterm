@@ -2,6 +2,7 @@ const terminalElement = document.getElementById('terminal');
 const diagnosticsPanel = document.getElementById('diagnostics-panel');
 const diagnosticsTitleElement = document.getElementById('diagnostics-title');
 const diagnosticsElement = document.getElementById('diagnostics');
+const fontGlyphPreviewElement = document.getElementById('font-glyph-preview');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const terminalLogSelectElement = document.getElementById('terminal-log-select');
@@ -31,10 +32,19 @@ const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
+const logMenuToggleButton = document.getElementById('log-menu-toggle');
+const logMenuItems = document.getElementById('log-menu-items');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
+const syncMenuToggleButton = document.getElementById('sync-menu-toggle');
+const syncMenuItems = document.getElementById('sync-menu-items');
 const syncStatusButton = document.getElementById('sync-status');
 const syncCleanButton = document.getElementById('sync-clean');
+const diagnosticsMenuToggleButton = document.getElementById('diagnostics-menu-toggle');
+const diagnosticsMenuItems = document.getElementById('diagnostics-menu-items');
+const fontGlyphTestButton = document.getElementById('font-glyph-test');
+const windowActionsMenuToggleButton = document.getElementById('window-actions-menu-toggle');
+const windowActionsMenuItems = document.getElementById('window-actions-menu-items');
 const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
@@ -66,11 +76,11 @@ const fallbackConfig = {
     allowTransparency: true,
     cursorBlink: true,
     cursorStyle: 'block',
-    fontFamily: '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
+    fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "NanumGothicCoding", "BIZ UDGothic", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 14,
     lineHeight: 1.12,
-    minimumContrastRatio: 4.5,
-    rescaleOverlappingGlyphs: true,
+    minimumContrastRatio: 1,
+    rescaleOverlappingGlyphs: false,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -563,12 +573,21 @@ function appendDiagnosticLine(message) {
     diagnosticsPanelMode = 'diagnostics';
     setTerminalLogPickerVisible(false);
   }
+  showDiagnosticsTextArea();
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
   diagnosticsPanel.hidden = false;
   diagnosticsElement.value = diagnosticLines.join('\n');
   diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+}
+
+// Restores the shared panel's regular text body after another diagnostics view.
+function showDiagnosticsTextArea() {
+  diagnosticsElement.hidden = false;
+  if (fontGlyphPreviewElement) {
+    fontGlyphPreviewElement.hidden = true;
+  }
 }
 
 // Shows debug messages locally and mirrors renderer diagnostics to the backend.
@@ -1644,12 +1663,54 @@ async function refreshTerminalLogControl() {
   terminalLogStatusElement.hidden = !status.active;
 }
 
+// Returns nested menu sections with their disclosure control and child actions.
+function windowMenuSubmenus() {
+  return [
+    { name: 'log', toggle: logMenuToggleButton, items: logMenuItems },
+    { name: 'sync', toggle: syncMenuToggleButton, items: syncMenuItems },
+    { name: 'diagnostics', toggle: diagnosticsMenuToggleButton, items: diagnosticsMenuItems },
+    { name: 'window', toggle: windowActionsMenuToggleButton, items: windowActionsMenuItems },
+  ].filter((submenu) => submenu.toggle && submenu.items);
+}
+
+// Expands one menu section and optionally focuses a visible action inside it.
+function setWindowMenuSubmenuOpen(name, open, focusTarget) {
+  const submenu = windowMenuSubmenus().find((candidate) => candidate.name === name);
+  if (!submenu) {
+    return;
+  }
+  submenu.items.hidden = !open;
+  submenu.toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+  fitWindowMenuToViewport();
+  if (open && focusTarget && !focusTarget.hidden && !focusTarget.disabled) {
+    focusTarget.focus({ preventScroll: true });
+  }
+}
+
+// Collapses sections whenever the parent popup is closed or reopened.
+function closeWindowMenuSubmenus() {
+  for (const submenu of windowMenuSubmenus()) {
+    submenu.items.hidden = true;
+    submenu.toggle.setAttribute('aria-expanded', 'false');
+  }
+}
+
+// Finds the nested section containing a menu item, if any.
+function windowMenuSubmenuForElement(element) {
+  const container = element?.closest?.('[data-menu-submenu]');
+  if (!container) {
+    return undefined;
+  }
+  return windowMenuSubmenus().find((submenu) => container.dataset.menuSubmenu === submenu.name);
+}
+
 // Moves keyboard focus inside the compact window menu.
 function focusWindowMenuItem(delta) {
   if (!windowMenuItems || windowMenuItems.hidden) {
     return;
   }
-  const items = Array.from(windowMenuItems.querySelectorAll('button:not([hidden]):not(:disabled)'));
+  const items = Array.from(windowMenuItems.querySelectorAll('button:not([hidden]):not(:disabled)'))
+    .filter((item) => item.getClientRects().length > 0);
   if (items.length === 0) {
     return;
   }
@@ -1689,6 +1750,7 @@ function diagnosticsPanelFocusItems() {
     terminalLogDeleteAllButton,
     closeDiagnosticsButton,
     diagnosticsElement,
+    fontGlyphPreviewElement,
   ].filter((element) => element && !element.hidden && !element.disabled);
 }
 
@@ -2036,11 +2098,51 @@ function setTerminalLogPickerVisible(visible) {
   }
 }
 
+// Displays representative glyphs using the same configured font values as xterm.js.
+function showFontGlyphTest() {
+  if (!fontGlyphPreviewElement) {
+    showDiagnostic('font glyph diagnostics panel is unavailable');
+    return;
+  }
+  const terminalConfig = appConfig.terminal || {};
+  const fontFamily = String(terminalConfig.fontFamily || fallbackConfig.terminal.fontFamily);
+  const fontSize = Number(terminalConfig.fontSize) || fallbackConfig.terminal.fontSize;
+  const lineHeight = Number(terminalConfig.lineHeight) || fallbackConfig.terminal.lineHeight;
+
+  diagnosticsPanelMode = 'font-glyph-test';
+  setTerminalLogPickerVisible(false);
+  setWindowMenuOpen(false);
+  diagnosticsTitleElement.textContent = 'Font / Glyph Diagnostics';
+  diagnosticsElement.hidden = true;
+  fontGlyphPreviewElement.hidden = false;
+  fontGlyphPreviewElement.style.fontFamily = fontFamily;
+  fontGlyphPreviewElement.style.fontSize = `${fontSize}px`;
+  fontGlyphPreviewElement.style.lineHeight = String(lineHeight);
+  fontGlyphPreviewElement.textContent = [
+    'Configured terminal font',
+    `fontFamily: ${fontFamily}`,
+    `fontSize: ${fontSize}`,
+    `lineHeight: ${lineHeight}`,
+    '',
+    'CJK: 日本語 漢字 ひらがな カタカナ 中文 한국어',
+    'Half-width kana: ｱｲｳｴｵ ｶｯﾁｮｲ ﾊﾝｶｸ ｶﾀｶﾅ ｰﾞﾟ',
+    'Box drawing: ┌─┬─┐ │ │ │ ├─┼─┤ │ │ │ └─┴─┘  ╔═╦═╗ ║ ║ ║ ╚═╩═╝',
+    'Symbols: ← → ↑ ↓ ⇄ ✓ ✗ ★ ☆ ◆ ◇ ● ○ ± ≠ ≤ ≥',
+    'Nerd Font (Powerline):   ',
+    'Nerd Font (icons):  󰆍 󰘧 󰊢',
+    'Nerd Font code points: U+E0A0 U+E0B0 U+E0B2 U+F423 U+F010D U+F0627 U+F02A2',
+  ].join('\n');
+  diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
+  diagnosticsPanel.hidden = false;
+  fontGlyphPreviewElement.focus({ preventScroll: true });
+}
+
 // Displays the application keyboard shortcuts in the existing accessible panel.
 async function showKeyboardShortcutsHelp() {
   const version = await window.fpasoterm?.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   diagnosticsPanelMode = 'keyboard-shortcuts';
   setTerminalLogPickerVisible(false);
+  showDiagnosticsTextArea();
   setWindowMenuOpen(false);
   diagnosticsTitleElement.textContent = 'Keyboard Shortcuts';
   diagnosticsElement.value = [
@@ -2073,6 +2175,7 @@ async function showSyncStatus() {
   const status = await window.fpasoterm.syncStatus();
   diagnosticsPanelMode = 'sync-status';
   setTerminalLogPickerVisible(false);
+  showDiagnosticsTextArea();
   setWindowMenuOpen(false);
   diagnosticsTitleElement.textContent = 'Sync Status';
   const lines = [
@@ -2139,6 +2242,7 @@ async function refreshTerminalLogList(selectedPath = '') {
 function renderTerminalLogPreview(preview) {
   diagnosticsPanelMode = 'terminal-log';
   setTerminalLogPickerVisible(true);
+  showDiagnosticsTextArea();
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Terminal Log';
   }
@@ -2197,6 +2301,7 @@ async function clearTerminalOutputLog() {
 
   const status = await window.fpasoterm.clearTerminalLog();
   diagnosticsPanelMode = 'terminal-log';
+  showDiagnosticsTextArea();
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Terminal Log';
   }
@@ -2228,6 +2333,7 @@ async function deleteSelectedTerminalOutputLog() {
   }
   const status = await window.fpasoterm.deleteTerminalLog(path);
   await refreshTerminalLogList();
+  showDiagnosticsTextArea();
   diagnosticsElement.value = `${status.message}\npath: ${status.path || '(none)'}`;
   diagnosticsPathElement.textContent = status.path || '';
   showDiagnostic(`terminal log deleted path=${status.path || '(none)'}`);
@@ -2257,6 +2363,26 @@ syncStatusButton.addEventListener('click', () => {
 
 syncCleanButton.addEventListener('click', () => {
   cleanSyncFolder().catch((error) => showDiagnostic(`sync clean failed: ${error}`));
+});
+
+fontGlyphTestButton.addEventListener('click', () => {
+  showFontGlyphTest();
+});
+
+logMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuSubmenuOpen('log', logMenuItems.hidden);
+});
+
+syncMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuSubmenuOpen('sync', syncMenuItems.hidden);
+});
+
+diagnosticsMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuSubmenuOpen('diagnostics', diagnosticsMenuItems.hidden);
+});
+
+windowActionsMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuSubmenuOpen('window', windowActionsMenuItems.hidden);
 });
 
 terminalLogShowSelectedButton.addEventListener('click', () => {
@@ -2384,7 +2510,10 @@ document.addEventListener('keydown', (event) => {
   if (matchesKeybinding(event, 'logMenu')) {
     event.preventDefault();
     const open = windowMenuItems?.hidden !== false;
-    setWindowMenuOpen(open, terminalLogToggleButton);
+    setWindowMenuOpen(open);
+    if (open) {
+      setWindowMenuSubmenuOpen('log', true, terminalLogToggleButton);
+    }
     return;
   }
 
@@ -2562,7 +2691,11 @@ function setWindowMenuOpen(open, preferredItem = newWindowButton) {
   }
   windowMenuItems.hidden = !open;
   windowMenuToggleButton.setAttribute('aria-expanded', open ? 'true' : 'false');
+  if (!open) {
+    closeWindowMenuSubmenus();
+  }
   if (open) {
+    closeWindowMenuSubmenus();
     fitWindowMenuToViewport();
     const focusTarget = preferredItem && !preferredItem.hidden && !preferredItem.disabled
       ? preferredItem
@@ -2593,6 +2726,21 @@ windowMenuItems.addEventListener('keydown', (event) => {
     event.preventDefault();
     const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
     focusWindowMenuItem(backwards ? -1 : 1);
+    return;
+  }
+
+  const submenu = windowMenuSubmenuForElement(document.activeElement);
+  if (event.key === 'ArrowRight' && document.activeElement?.classList.contains('window-menu-submenu-toggle')) {
+    event.preventDefault();
+    const firstChild = submenu?.items.querySelector('button:not([hidden]):not(:disabled)');
+    setWindowMenuSubmenuOpen(submenu?.name, true, firstChild);
+    return;
+  }
+
+  if (event.key === 'ArrowLeft' && submenu && document.activeElement !== submenu.toggle) {
+    event.preventDefault();
+    setWindowMenuSubmenuOpen(submenu.name, false);
+    submenu.toggle.focus({ preventScroll: true });
   }
 });
 

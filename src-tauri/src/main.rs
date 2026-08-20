@@ -1951,7 +1951,7 @@ fn runtime_config() -> RuntimeConfig {
     } else {
         direct_runtime_config()
     };
-    migrate_legacy_macos_font_family(&mut config);
+    migrate_legacy_terminal_font_family(&mut config);
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -1980,8 +1980,10 @@ fn apply_saved_window_bounds(runtime: &mut RuntimeConfig) {
     }
 }
 
-const DEFAULT_TERMINAL_FONT_FAMILY: &str = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-const MACOS_TERMINAL_FONT_FAMILY: &str = "\"SF Mono\", Menlo, ui-monospace, SFMono-Regular, \"Hiragino Sans\", \"Hiragino Kaku Gothic ProN\", monospace";
+const DEFAULT_TERMINAL_FONT_FAMILY: &str = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const MACOS_TERMINAL_FONT_FAMILY: &str = "\"SF Mono\", Menlo, ui-monospace, SFMono-Regular, \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, monospace";
+const LEGACY_TERMINAL_FONT_FAMILY: &str = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+const LEGACY_NERD_FIRST_TERMINAL_FONT_FAMILY: &str = "\"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Hiragino Sans\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 // Matches the Intel macOS renderer default to the host's more compact terminal metrics.
 fn default_terminal_font_size() -> u32 {
@@ -2002,11 +2004,8 @@ fn terminal_font_family_for(platform: &str) -> &'static str {
     }
 }
 
-// Replaces only the old shipped default after parsing a user config file.
-fn migrate_legacy_macos_font_family(runtime: &mut RuntimeConfig) {
-    if env::consts::OS != "macos" {
-        return;
-    }
+// Replaces only previously shipped defaults after parsing a user config file.
+fn migrate_legacy_terminal_font_family(runtime: &mut RuntimeConfig) {
     let Some(font_family) = runtime
         .config
         .terminal
@@ -2015,9 +2014,12 @@ fn migrate_legacy_macos_font_family(runtime: &mut RuntimeConfig) {
     else {
         return;
     };
-    if font_family == DEFAULT_TERMINAL_FONT_FAMILY {
+    if font_family == LEGACY_TERMINAL_FONT_FAMILY
+        || font_family == LEGACY_NERD_FIRST_TERMINAL_FONT_FAMILY
+        || (env::consts::OS == "macos" && font_family == DEFAULT_TERMINAL_FONT_FAMILY)
+    {
         runtime.config.terminal["fontFamily"] =
-            serde_json::Value::String(MACOS_TERMINAL_FONT_FAMILY.to_string());
+            serde_json::Value::String(default_terminal_font_family().to_string());
     }
 }
 
@@ -2071,7 +2073,7 @@ fn merge_runtime_config_from_path(
         merge_json_value(&mut config_value, profile_value);
     }
     config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
-    migrate_legacy_macos_font_family(&mut config);
+    migrate_legacy_terminal_font_family(&mut config);
     config.config_path = absolute_path.to_string_lossy().to_string();
     config.config_dir = absolute_path
         .parent()
@@ -4015,6 +4017,9 @@ fn terminal_start(
     }
     command.cwd(home_dir());
     command.env("TERM", "xterm-256color");
+    // xterm.js renders 24-bit ANSI colors. Advertise that separately from the
+    // xterm-256color terminfo entry so TUI applications choose their truecolor path.
+    command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "fpasoterm");
     if let Some(path_value) = terminal_path_with_app_dir() {
         if cfg!(windows) {

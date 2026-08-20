@@ -1,8 +1,10 @@
 # プラグイン
 
-fpasoterm のプラグインは、terminal の準備後に renderer で動作するローカルの JavaScript または TypeScript file です。起動時メッセージ、terminal option の調整、diagnostics 連携など、個人用の小さな挙動変更に使えます。
+fpasoterm のプラグインは、terminal の準備後に renderer で動作するローカルの JavaScript または TypeScript file です。起動時メッセージ、terminal option の調整、diagnostics 連携など、個人用の小さな挙動変更に使えます。追加すると便利な workflow は、原則として本体ではなく plugin として実装します。本体の変更は terminal の正確性、platform integration、security、shell / multiplexer / TUI editorとの互換性に必要なものへ限定します。
 
 プラグインは高度なローカルカスタマイズ機能です。sandbox 化された extension 形式ではなく、fpasoterm がネットワークから plugin を取得することもありません。
+
+review済みの公開pluginは [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。公開catalog、port metadata、compatibility check、local install/update/uninstall command、contribution processはこのrepositoryで管理します。本書はfpasoterm本体のruntime contractと手動local plugin配置を説明します。
 
 ## セキュリティ
 
@@ -43,12 +45,10 @@ plugin source の comment に version と description を宣言できます。ma
 
 ## plugin の有効化
 
-directory を作成し、この repository にある公開 sample を一つまたは両方コピーします。
+手動管理するlocal pluginの場合は、directoryを作成して信頼できるsourceを設定で有効化します。
 
 ```sh
 mkdir -p ~/.config/fpasoterm/User/plugins
-cp examples/plugins/welcome-banner.ts ~/.config/fpasoterm/User/plugins/
-cp examples/plugins/status-banner.ts ~/.config/fpasoterm/User/plugins/
 ```
 
 `~/.config/fpasoterm/User/config.toml` で有効にします。
@@ -91,15 +91,7 @@ subdirectory に同名 file がある場合は、`team/status-banner.ts` のよ�
 
 ### Windows packaged binary
 
-MSI/EXEは公開sampleをwritableな`User/plugins` directoryへ自動コピーしません。source checkoutまたはsource archiveからsampleを取得し、installed binaryが使用するdirectoryをPowerShellで確認してから、内容を確認したsourceを配置・有効化してください。
-
-```powershell
-$pluginDir = & fpasoterm.exe --plugin-path
-New-Item -ItemType Directory -Force -Path $pluginDir
-Copy-Item .\examples\plugins\welcome-banner.ts $pluginDir
-fpasoterm.exe --plugin-enable-all
-fpasoterm.exe --plugin-list
-```
+MSI/EXEは公開sampleをwritableな`User/plugins` directoryへ自動コピーしません。review済みportは [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) のWindows source checkout手順で導入してください。手動配置する場合は`fpasoterm.cmd --plugin-path`でdirectoryを確認します。
 
 起動時は、trusted な `User/plugins` source または生成されたTypeScript cacheをTauriのlocal asset protocol経由で読み込みます。標準の`User` directoryが対象です。pluginを有効化または編集した後は、対象のfpasoterm windowを閉じて再起動してください。読み込みerrorを調べる場合は、`fpasoterm --foreground --console-diagnostics`で起動し、`plugin loaded` または `failed to load plugin` を確認します。
 
@@ -127,11 +119,8 @@ plugin は小さく防御的に実装してください。読み込み error は
 
 登録した command は既存 menu の Tab / 矢印キー操作で選択できます。`Ctrl+Shift+P` は `Log Show` に割り当て済みのため維持します。将来 command palette を追加する場合も、同じ command registry を plugin source の変更なしに利用できます。
 
-## sample
+## Sample と Ports
 
-- [`examples/plugins/hello.ts`](../examples/plugins/hello.ts): 最小の起動時出力 plugin です。shell の起動制御 sequence で出力が消えないよう、`onReady()` 後に表示します。
-- [`examples/plugins/welcome-banner.ts`](../examples/plugins/welcome-banner.ts): 短い起動 banner を表示し、diagnostic を記録します。
-- [`examples/plugins/status-banner.ts`](../examples/plugins/status-banner.ts): `Plugins` menu section に `Show Plugin Status` を追加します。
-- [`examples/plugins/theme.ts`](../examples/plugins/theme.ts): 見分けやすい青緑のterminal paletteを適用し、起動後に確認messageを表示します。
+repository内の`examples/plugins/`は最小のAPI参照用です。install可能なsample、appearance theme、metadata、compatibility validation、updateは [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) で管理します。
 
 `config.toml` の全設定は [設定](config.ja.md) を参照してください。

@@ -6,6 +6,8 @@ Cross-platform terminal app built with Tauri, xterm.js, and a Rust PTY bridge.
 
 fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
 
+This is a deliberate boundary: fpasoterm avoids reimplementing capabilities that belong to the user's shell, multiplexer, or TUI editor. This includes pane and session management, shell commands, job control, multiplexer configuration, and editor features supplied by Vim, Emacs, Fresh, Helix, and similar tools. Use those tools for their native workflows; fpasoterm provides the terminal surface, OS integration, and local customization hooks. New convenience behavior should normally be delivered as a plugin instead of expanding the core application. Compatibility with those multiplexers and TUI editors is a maintenance priority.
+
 Kitty Graphics Protocol, SIXEL, and iTerm inline images are currently unsupported because image streams can freeze the Tauri/WebKitGTK renderer. `Ctrl+Shift+B` opens Broadcast Input, which selects local fpasoterm windows before sending one command. The same operation is available as `fpasoterm --broadcast "command"`; a trusted sync folder can optionally deliver the short-lived command to every already-running instance on another machine. See [Configuration](docs/config.en.md) and [Sync Folder](docs/sync.en.md).
 
 Japanese documentation: [README.ja.md](README.ja.md). Installation instructions are available in [English](INSTALL.md) and [Japanese](INSTALL.ja.md).
@@ -19,6 +21,10 @@ Japanese IME composition and keyboard layout switching are handled by the OS web
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
 Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
+
+Use `Font / Glyph Test` in the window menu to inspect the active terminal font
+settings and representative CJK, half-width kana, box drawing, symbol, and
+Nerd Font glyphs. See [Font and Glyph Diagnostics](docs/font-diagnostics.en.md).
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 
@@ -411,7 +417,7 @@ To restore every setting and window size to its platform default, run
 The saved `window-state.json` is also removed so the default width of 1000 and
 height of 680 take effect on the next launch.
 
-The full default configuration is documented in [Configuration](docs/config.en.md). See [Plugins](docs/plugins.en.md) for setup, security guidance, CLI management, and the supported API declaration in [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts). Sample configs are available in [examples/config](examples/config), and public plugin samples are available in [examples/plugins](examples/plugins).
+The full default configuration is documented in [Configuration](docs/config.en.md). See [Plugins](docs/plugins.en.md) for the runtime/API contract and [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) for the supported API declaration. Sample configs are available in [examples/config](examples/config), and minimal local plugin examples are in [examples/plugins](examples/plugins). For reviewed, installable public plugins, use [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins), which owns the ports catalog, compatibility checks, updates, and contribution workflow.
 
 For maintenance workflows across machines, fpasoterm can share diagnostics and
 terminal output logs through a local sync folder such as Google Drive for

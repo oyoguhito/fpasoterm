@@ -5,8 +5,15 @@ const { pathToFileURL } = require('node:url');
 const toml = require('smol-toml');
 const ts = require('typescript');
 
-const defaultTerminalFontFamily = '"Noto Sans Mono CJK JP", "Noto Sans CJK JP", "BIZ UDGothic", "Hiragino Sans", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
-const macosTerminalFontFamily = '"SF Mono", Menlo, ui-monospace, SFMono-Regular, "Hiragino Sans", "Hiragino Kaku Gothic ProN", monospace';
+const nerdFontFallback = '"Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font"';
+// CJK monospace candidates cover Japanese, Korean, Chinese, and half-width kana.
+const cjkMonospaceFontFallback = '"DejaVu Sans Mono", "Noto Sans Mono", "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "NanumGothicCoding", "BIZ UDGothic"';
+const broadCjkFontFallback = '"Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo';
+// Prefer an installed monospace font for terminal cell measurement. Nerd Font
+// fallbacks remain available for private-use glyphs without becoming the base font.
+const defaultTerminalFontFamily = `${cjkMonospaceFontFallback}, ${nerdFontFallback}, ${broadCjkFontFallback}, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
+const macosTerminalFontFamily = `"SF Mono", Menlo, ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
+const legacyTerminalFontFamily = `${nerdFontFallback}, "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "NanumGothicCoding", "BIZ UDGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
 // The complete set of supported user settings. This object is also used to
 // fill missing keys when a user provides a partial config.toml.
@@ -31,8 +38,8 @@ const defaultConfig = Object.freeze({
     fontFamily: defaultTerminalFontFamily,
     fontSize: 14,
     lineHeight: 1.12,
-    minimumContrastRatio: 4.5,
-    rescaleOverlappingGlyphs: true,
+    minimumContrastRatio: 1,
+    rescaleOverlappingGlyphs: false,
     backgroundOpacity: 0.8,
     scrollback: 1000,
     termName: 'xterm-256color',
@@ -123,9 +130,16 @@ function platformDefaultConfig(platform = process.platform, architecture = proce
   return defaultConfig;
 }
 
-// Safely migrates only the old shipped default, preserving custom font choices.
+// Safely migrates only previously shipped defaults, preserving custom font choices.
 function migrateLegacyMacosFontFamily(config, platform = process.platform) {
-  if (platform !== 'darwin' || config?.terminal?.fontFamily !== defaultTerminalFontFamily) {
+  const fontFamily = config?.terminal?.fontFamily;
+  if (platform === 'darwin' && (fontFamily === legacyTerminalFontFamily || fontFamily === defaultTerminalFontFamily)) {
+    return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
+  }
+  if (platform !== 'darwin' && fontFamily === legacyTerminalFontFamily) {
+    return mergeConfig(config, { terminal: { fontFamily: defaultTerminalFontFamily } });
+  }
+  if (platform !== 'darwin' || fontFamily !== defaultTerminalFontFamily) {
     return config;
   }
   return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
@@ -174,10 +188,10 @@ fontFamily = ${JSON.stringify(terminalDefaults.fontFamily)}
 fontSize = ${terminalDefaults.fontSize}
 # lineHeight leaves enough vertical room for underscores and descenders.
 lineHeight = 1.12
-# minimumContrastRatio raises foreground colors that are too close to the terminal background.
-minimumContrastRatio = 4.5
-# rescaleOverlappingGlyphs helps CJK and half-width kana glyphs fit terminal cells.
-rescaleOverlappingGlyphs = true
+# minimumContrastRatio = 1 preserves application-selected ANSI and RGB colors.
+minimumContrastRatio = 1
+# Keep this false for glyph fidelity in terminal applications. Enable only if needed for CJK overlap.
+rescaleOverlappingGlyphs = false
 # backgroundOpacity changes only the terminal background alpha, not text opacity.
 backgroundOpacity = 0.8
 scrollback = 1000

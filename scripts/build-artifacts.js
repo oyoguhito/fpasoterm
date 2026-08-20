@@ -31,12 +31,23 @@ const packageEntries = [
   'package-lock.json',
 ];
 
+// Resolves npm through its JavaScript entry point when available. This avoids
+// invoking npm.cmd through a shell on Windows, which Node deprecates (DEP0190).
+function npmInvocation(args) {
+  const bundledNpmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const npmCli = [process.env.npm_execpath, bundledNpmCli].find((candidate) => candidate && fs.existsSync(candidate));
+  if (npmCli) {
+    return { command: process.execPath, args: [npmCli, ...args] };
+  }
+  return { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args };
+}
+
 // Runs packaging commands from the repository root with an artifact-local npm cache.
 function run(command, args, options = {}) {
-  const result = childProcess.spawnSync(command, args, {
+  const invocation = command === 'npm' ? npmInvocation(args) : { command, args };
+  const result = childProcess.spawnSync(invocation.command, invocation.args, {
     cwd: root,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
     env: {
       ...process.env,
       npm_config_cache: npmCacheDir,

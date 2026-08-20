@@ -707,9 +707,15 @@ function closeRunningInstance(target) {
   }
 }
 
-// Selects the npm executable in a way that works on Windows and Unix.
-function npmCommand() {
-  return process.platform === 'win32' ? 'npm.cmd' : 'npm';
+// Resolves npm through its JavaScript entry point when available. This avoids
+// invoking npm.cmd through a shell on Windows, which Node deprecates (DEP0190).
+function npmInvocation(args) {
+  const bundledNpmCli = path.join(path.dirname(process.execPath), 'node_modules', 'npm', 'bin', 'npm-cli.js');
+  const npmCli = [process.env.npm_execpath, bundledNpmCli].find((candidate) => candidate && fs.existsSync(candidate));
+  if (npmCli) {
+    return { command: process.execPath, args: [npmCli, ...args] };
+  }
+  return { command: process.platform === 'win32' ? 'npm.cmd' : 'npm', args };
 }
 
 // Runs an update command and fails fast with a clear message.
@@ -718,7 +724,6 @@ function runChecked(command, args, options = {}) {
     cwd: options.cwd || root,
     env: process.env,
     stdio: 'inherit',
-    shell: process.platform === 'win32',
   });
   if (result.error) {
     throw result.error;
@@ -743,7 +748,6 @@ function ensureCleanGitCheckout() {
   const result = spawnSync('git', ['status', '--porcelain'], {
     cwd: root,
     encoding: 'utf8',
-    shell: process.platform === 'win32',
   });
   if (result.error) {
     throw result.error;
@@ -770,7 +774,8 @@ function selfUpdate() {
     return;
   }
 
-  runChecked(npmCommand(), ['install', '-g', 'fpasoterm@latest']);
+  const npm = npmInvocation(['install', '-g', 'fpasoterm@latest']);
+  runChecked(npm.command, npm.args);
   if (process.platform === 'linux' && fs.existsSync(path.join(root, 'scripts', 'install-linux-desktop.js'))) {
     updateDesktopIntegration();
   }
@@ -792,7 +797,8 @@ function selfUpdateCheckout() {
 
   ensureCleanGitCheckout();
   runChecked('git', ['pull', '--ff-only']);
-  runChecked(npmCommand(), ['install']);
+  const npm = npmInvocation(['install']);
+  runChecked(npm.command, npm.args);
   updateDesktopIntegration();
   console.log('checkout updated. Restart fpasoterm to use the updated app.');
 }

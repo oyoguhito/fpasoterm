@@ -10,8 +10,8 @@ titlebarColor = "#1565c0"
 [terminal]
 fontSize = 15
 lineHeight = 1.12
-minimumContrastRatio = 4.5
-rescaleOverlappingGlyphs = true
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.8
 scrollback = 3000
 termName = "xterm-256color"

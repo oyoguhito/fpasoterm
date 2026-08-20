@@ -10,10 +10,10 @@ titlebarColor = "#1565c0"
 [terminal]
 fontSize = 14
 lineHeight = 1.12
-minimumContrastRatio = 4.5
-rescaleOverlappingGlyphs = true
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.8
-fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 termName = "xterm-256color"
 # Leave empty for the platform default shell.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".

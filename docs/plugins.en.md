@@ -5,8 +5,19 @@ terminal renderer after the terminal is ready. Use them for small, personal
 behavior changes such as a startup message, terminal option adjustment, or
 diagnostic integration.
 
+Prefer a plugin for a new convenience workflow instead of adding it to the
+fpasoterm core. Core changes remain appropriate for terminal correctness,
+platform integration, security, and compatibility with shells, multiplexers,
+and TUI editors.
+
 Plugins are an advanced local customization feature. They are not a sandboxed
 extension format and are not downloaded by fpasoterm.
+
+For reviewed public plugins, use the
+[fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins).
+It owns the public catalog, port metadata, compatibility checks, local
+install/update/uninstall commands, and contribution process. This document
+defines the fpasoterm runtime contract and manual local plugin layout.
 
 ## Security
 
@@ -57,12 +68,11 @@ CLI reports their version as `(not declared)`.
 
 ## Enable plugins
 
-Create the directory and copy one or both public samples from this repository:
+For a manually maintained local plugin, create the directory and enable its
+trusted source in configuration:
 
 ```sh
 mkdir -p ~/.config/fpasoterm/User/plugins
-cp examples/plugins/welcome-banner.ts ~/.config/fpasoterm/User/plugins/
-cp examples/plugins/status-banner.ts ~/.config/fpasoterm/User/plugins/
 ```
 
 Enable the files in `~/.config/fpasoterm/User/config.toml`:
@@ -117,18 +127,11 @@ relative to `plugins`, such as `team/status-banner.ts`.
 
 ### Windows packaged binary
 
-The MSI/EXE does not copy public samples into your writable `User/plugins`
-directory. Obtain a sample from a source checkout or source archive, then use
-PowerShell to find the exact directory used by the installed binary and copy
-the reviewed source before enabling it:
-
-```powershell
-$pluginDir = & fpasoterm.exe --plugin-path
-New-Item -ItemType Directory -Force -Path $pluginDir
-Copy-Item .\examples\plugins\welcome-banner.ts $pluginDir
-fpasoterm.exe --plugin-enable-all
-fpasoterm.exe --plugin-list
-```
+The MSI/EXE does not copy public samples into the writable `User/plugins`
+directory. Use the Windows source-checkout instructions in
+[fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) to install
+a reviewed port, or use `fpasoterm.cmd --plugin-path` to locate the directory
+before manually placing trusted source.
 
 At startup, plugin scripts are loaded from the trusted `User/plugins` source or
 the generated TypeScript cache using Tauri's local asset protocol. The default
@@ -172,16 +175,10 @@ Registered commands use the existing menu's Tab and arrow-key navigation.
 `Ctrl+Shift+P` remains assigned to `Log Show`; a command palette can reuse the
 same command registry in a future release without changing plugin source.
 
-## Samples
+## Samples And Ports
 
-- [`examples/plugins/hello.ts`](../examples/plugins/hello.ts)
-  demonstrates the smallest startup-output plugin. It waits for `onReady()` so
-  the shell's startup control sequences cannot clear its message.
-- [`examples/plugins/welcome-banner.ts`](../examples/plugins/welcome-banner.ts)
-  prints a short startup banner and records a diagnostic message.
-- [`examples/plugins/status-banner.ts`](../examples/plugins/status-banner.ts)
-  adds `Show Plugin Status` to the `Plugins` menu section.
-- [`examples/plugins/theme.ts`](../examples/plugins/theme.ts)
-  applies a visible teal terminal palette and prints a confirmation after startup.
+The in-tree `examples/plugins/` files are minimal API references. Installable
+samples, appearance themes, metadata, compatibility validation, and updates are
+maintained in [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins).
 
 See [Configuration](config.en.md) for the full `config.toml` reference.

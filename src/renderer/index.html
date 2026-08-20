@@ -16,18 +16,39 @@
           <button id="window-menu-toggle" type="button" aria-label="Open window menu" aria-expanded="false" aria-keyshortcuts="Control+Shift+M Control+Shift+L">&#9776;</button>
           <div id="window-menu-items" role="menu" hidden>
             <div id="keybinding-prefix" role="note">Shortcut prefix: Ctrl+Shift</div>
-            <button id="terminal-log-toggle" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+S">Log Start (S)</button>
-            <button id="terminal-log-show" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+P">Log Show (P)</button>
-            <button id="sync-status" type="button" role="menuitem">Sync Status</button>
-            <button id="sync-clean" type="button" role="menuitem">Sync Clean</button>
-            <button id="terminal-broadcast" type="button" role="menuitem" aria-label="Send text to all fpasoterm windows" aria-keyshortcuts="Control+Shift+B">Broadcast (B)</button>
+            <div class="window-menu-submenu" data-menu-submenu="log">
+              <button id="log-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="log-menu-items" aria-expanded="false">Log</button>
+              <div id="log-menu-items" class="window-menu-submenu-items" role="menu" hidden>
+                <button id="terminal-log-toggle" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+S">Log Start (S)</button>
+                <button id="terminal-log-show" type="button" role="menuitem" aria-keyshortcuts="Control+Shift+P">Log Show (P)</button>
+              </div>
+            </div>
+            <div class="window-menu-submenu" data-menu-submenu="sync">
+              <button id="sync-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="sync-menu-items" aria-expanded="false">Sync</button>
+              <div id="sync-menu-items" class="window-menu-submenu-items" role="menu" hidden>
+                <button id="sync-status" type="button" role="menuitem">Sync Status</button>
+                <button id="sync-clean" type="button" role="menuitem">Sync Clean</button>
+              </div>
+            </div>
+            <div class="window-menu-submenu" data-menu-submenu="diagnostics">
+              <button id="diagnostics-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="diagnostics-menu-items" aria-expanded="false">Diagnostics</button>
+              <div id="diagnostics-menu-items" class="window-menu-submenu-items" role="menu" hidden>
+                <button id="font-glyph-test" type="button" role="menuitem" aria-label="Show font and glyph diagnostics">Font / Glyph Test</button>
+              </div>
+            </div>
             <button id="terminal-kill" type="button" role="menuitem" aria-label="Force-stop the current terminal process" aria-keyshortcuts="Control+Shift+K">Kill (K)</button>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (C)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (V)</button>
             <div id="plugin-command-items" role="group" aria-label="Plugin commands" hidden></div>
-            <button id="new-window" type="button" role="menuitem" aria-label="Open a new fpasoterm window" aria-keyshortcuts="Control+Shift+N">New (N)</button>
-            <button id="arrange-window" type="button" role="menuitem" aria-label="Arrange fpasoterm windows" aria-keyshortcuts="Control+Shift+T">Tile (T)</button>
-            <button id="close-all-windows" type="button" role="menuitem" aria-label="Close all fpasoterm windows" aria-keyshortcuts="Control+Shift+X">Close All (X)</button>
+            <div class="window-menu-submenu" data-menu-submenu="window">
+              <button id="window-actions-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="window-actions-menu-items" aria-expanded="false">Window</button>
+              <div id="window-actions-menu-items" class="window-menu-submenu-items" role="menu" hidden>
+                <button id="new-window" type="button" role="menuitem" aria-label="Open a new fpasoterm window" aria-keyshortcuts="Control+Shift+N">New (N)</button>
+                <button id="terminal-broadcast" type="button" role="menuitem" aria-label="Send text to all fpasoterm windows" aria-keyshortcuts="Control+Shift+B">Broadcast (B)</button>
+                <button id="arrange-window" type="button" role="menuitem" aria-label="Arrange fpasoterm windows" aria-keyshortcuts="Control+Shift+T">Tile (T)</button>
+                <button id="close-all-windows" type="button" role="menuitem" aria-label="Close all fpasoterm windows" aria-keyshortcuts="Control+Shift+X">Close All (X)</button>
+              </div>
+            </div>
             <button id="keyboard-shortcuts-help" type="button" role="menuitem" aria-label="Show keyboard shortcuts" aria-keyshortcuts="Control+Shift+H">Help (H)</button>
           </div>
         </div>
@@ -61,6 +82,7 @@
         </div>
       </div>
       <textarea id="diagnostics" readonly aria-label="Diagnostics"></textarea>
+      <pre id="font-glyph-preview" hidden tabindex="0" aria-label="Font and glyph diagnostics"></pre>
       <div id="diagnostics-path"></div>
       <div id="terminal-log-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-log-confirm-title">
         <div class="terminal-log-confirm-card">
