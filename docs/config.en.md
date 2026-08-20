@@ -225,8 +225,8 @@ profile. To use `fpasoterm --profile large-font` without `--config`, copy the
 Enable or disable plugins from the command line:
 
 ```sh
-fpasoterm --enable-plugin hello.ts,theme.ts
-fpasoterm --disable-plugin hello.ts,theme.ts
+fpasoterm --enable-plugin hello,theme
+fpasoterm --disable-plugin hello,theme
 ```
 
 Plugin commands select files below `User/plugins` by file name. Separate multiple

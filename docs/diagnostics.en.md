@@ -22,6 +22,19 @@ because fpasoterm can still use defaults for omitted settings. Checks include
 positive numeric settings, `plugins.enabled` entries that are invalid or
 missing, and unsupported keys that `--prune-config` would remove.
 
+## Doctor
+
+```sh
+fpasoterm --doctor
+```
+
+`--doctor` is read-only. The Node launcher validates the selected config,
+compares the installed version with npm `latest`, and runs `npm audit --omit=dev`.
+It never installs an update or changes configuration; follow its explicit
+`--self-update` suggestion only after reviewing the report. Standalone bundled
+binaries run the config and update checks but report npm audit as unavailable,
+because they do not include an npm package manifest.
+
 ## Diagnostics Report
 
 ```sh

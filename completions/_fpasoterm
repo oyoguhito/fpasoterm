@@ -17,6 +17,7 @@ _fpasoterm() {
     '(-h --help)'{-h,--help}'[show help]' \
     '(-v --version)'{-v,--version}'[show version and build commit]' \
     '--update-check[compare the installed version with npm latest]' \
+    '--doctor[check updates, npm audit, and config health]' \
     '--completion=[print a completion script]:shell:(bash zsh fish powershell)' \
     '--completion-install=[install persistent completion]:shell:(bash zsh fish powershell)' \
     '--completion-uninstall=[remove persistent completion]:shell:(bash zsh fish powershell)' \

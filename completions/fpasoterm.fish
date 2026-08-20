@@ -3,6 +3,7 @@
 complete -c fpasoterm -s h -l help -d 'Show help'
 complete -c fpasoterm -s v -l version -d 'Show version and build commit'
 complete -c fpasoterm -l update-check -d 'Compare installed version with npm latest'
+complete -c fpasoterm -l doctor -d 'Check updates, npm audit, and config health'
 complete -c fpasoterm -s l -l list -d 'List running windows'
 complete -c fpasoterm -s q -l close -r -d 'Close a PID, exact title, or all'
 complete -c fpasoterm -l broadcast -r -d 'Send text to local windows'

@@ -418,7 +418,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --doctor                   Check updates and configuration health, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 const COMPLETION_BASH: &str = include_str!("../../completions/fpasoterm.bash");
 const COMPLETION_ZSH: &str = include_str!("../../completions/_fpasoterm");
@@ -498,6 +498,10 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if cli_has_flag(&["--doctor"]) {
+        doctor_cli();
         return;
     }
     if cli_has_flag(&["--plugin-search"]) {
@@ -749,6 +753,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--version",
         "-v",
         "--update-check",
+        "--doctor",
         "--plugin-search",
         "--list",
         "-l",
@@ -2933,17 +2938,17 @@ fn validate_selected_profile_cli() -> Result<(), String> {
     }
 }
 
-// Validates the selected TOML file without changing it or creating a window.
-fn config_check_cli() {
+// Builds the selected TOML validation report without changing it or creating a window.
+fn config_check_report() -> (String, bool) {
     let runtime = default_runtime_config();
     let path = runtime.config_path;
     let config = match read_toml_config_or_empty(&path) {
         Ok(config) => config,
         Err(error) => {
-            print_cli_text(&format!(
-                "config: {path}\nstatus: error\n\nerrors:\n- {error}\n"
-            ));
-            std::process::exit(1);
+            return (
+                format!("config: {path}\nstatus: error\n\nerrors:\n- {error}\n"),
+                false,
+            );
         }
     };
     let mut warnings = Vec::new();
@@ -3010,12 +3015,22 @@ fn config_check_cli() {
                 .map(|key| format!("{key} is not a supported configuration key")),
         );
     }
-    print_cli_text(&format!("config: {path}\nstatus: ok\n"));
+    let mut report = format!("config: {path}\nstatus: ok\n");
     if !warnings.is_empty() {
-        print_cli_text("\nwarnings:\n");
+        report.push_str("\nwarnings:\n");
         for warning in warnings {
-            print_cli_text(&format!("- {warning}\n"));
+            report.push_str(&format!("- {warning}\n"));
         }
+    }
+    (report, true)
+}
+
+// Validates the selected TOML file without changing it or creating a window.
+fn config_check_cli() {
+    let (report, valid) = config_check_report();
+    print_cli_text(&report);
+    if !valid {
+        std::process::exit(1);
     }
 }
 
@@ -6824,6 +6839,50 @@ fn npm_update_check_text(status: &NpmUpdateCheck) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+// Prints a read-only maintenance summary for standalone native binaries.
+// npm audit needs the JavaScript package manifest, so it runs in the Node launcher
+// and is intentionally reported as unavailable for a bundled executable.
+fn doctor_cli() {
+    let (config_report, config_valid) = config_check_report();
+    print_cli_text("## fpasoterm doctor\n\n");
+    print_cli_text(&format!("- version: {}\n", app_version()));
+    for line in config_report.lines() {
+        if let Some(value) = line.strip_prefix("config: ") {
+            print_cli_text(&format!("- config: {value}\n"));
+        } else if let Some(value) = line.strip_prefix("status: ") {
+            print_cli_text(&format!("- config status: {value}\n"));
+        } else if line.starts_with("- ") {
+            print_cli_text(&format!("- config warning: {}\n", &line[2..]));
+        }
+    }
+    match npm_update_check() {
+        Ok(status) if status.update_available => {
+            print_cli_text(&format!(
+                "- npm latest: {}\n- update: available; run fpasoterm --self-update\n",
+                status.latest
+            ));
+        }
+        Ok(status) if status.local_build_newer => {
+            print_cli_text(&format!(
+                "- npm latest: {}\n- update: local build is newer\n",
+                status.latest
+            ));
+        }
+        Ok(status) => print_cli_text(&format!(
+            "- npm latest: {}\n- update: up to date\n",
+            status.latest
+        )),
+        Err(error) => print_cli_text(&format!("- update: unavailable ({error})\n")),
+    }
+    print_cli_text("- npm audit: unavailable (standalone binary has no npm package context)\n");
+    print_cli_text(
+        "\nDoctor is read-only. Review findings, then update or edit config.toml explicitly.\n",
+    );
+    if !config_valid {
+        std::process::exit(1);
+    }
+}
+
 #[tauri::command]
 // Exposes the explicit npm update status to the Help panel without auto-checking at startup.
 fn update_check() -> Result<NpmUpdateCheck, String> {
@@ -7391,6 +7450,7 @@ mod tests {
             "--version",
             "-v",
             "--update-check",
+            "--doctor",
             "--plugin-search",
             "--list",
             "-l",

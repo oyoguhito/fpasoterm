@@ -6,7 +6,7 @@ $fpasotermCompletion = {
 
   $shells = @('bash', 'zsh', 'fish', 'powershell')
   $options = @(
-    @('--help', 'Show help'), @('-h', 'Show help'), @('--version', 'Show version and build commit'), @('-v', 'Show version and build commit'), @('--update-check', 'Compare installed version with npm latest'),
+    @('--help', 'Show help'), @('-h', 'Show help'), @('--version', 'Show version and build commit'), @('-v', 'Show version and build commit'), @('--update-check', 'Compare installed version with npm latest'), @('--doctor', 'Check updates, npm audit, and config health'),
     @('--list', 'List running windows'), @('-l', 'List running windows'), @('--close', 'Close a PID, exact title, or all'), @('-q', 'Close a PID, exact title, or all'),
     @('--broadcast', 'Send text to local windows'), @('--broadcast-target', 'Limit Broadcast targets'), @('--broadcast-sync', 'Include the sync channel'),
     @('--dev', 'Rebuild local debug binary'), @('-d', 'Rebuild local debug binary'), @('--foreground', 'Keep launcher attached'), @('-F', 'Keep launcher attached'),

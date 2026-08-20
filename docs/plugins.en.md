@@ -91,8 +91,8 @@ The CLI, including packaged Windows/macOS/Linux binaries, can update the list
 by plugin filename:
 
 ```sh
-fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
-fpasoterm --disable-plugin status-banner.ts
+fpasoterm --enable-plugin welcome-banner,status-banner
+fpasoterm --disable-plugin status-banner
 fpasoterm --show-config
 ```
 

@@ -62,8 +62,8 @@ plugin list または plugin source を変更した後は fpasoterm を再起動
 CLIでは、packaged Windows/macOS/Linux binaryを含めて、file nameを指定してlistを更新できます。
 
 ```sh
-fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
-fpasoterm --disable-plugin status-banner.ts
+fpasoterm --enable-plugin welcome-banner,status-banner
+fpasoterm --disable-plugin status-banner
 fpasoterm --show-config
 ```
 
