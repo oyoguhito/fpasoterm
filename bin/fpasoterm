@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 const { spawn, spawnSync } = require('node:child_process');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
@@ -657,7 +658,7 @@ function broadcastTerminalInput(options) {
     throw new Error(`broadcast payload is too large: ${bytes} bytes > ${status.maxBytes} bytes`);
   }
   if (options.broadcastSync && !status.commandsEnabled) {
-    throw new Error('sync commands are disabled; set sync.commands = true');
+    throw new Error('sync commands are disabled or commandSecret is missing; run fpasoterm --setup-sync');
   }
   if (options.broadcastSync && !status.enabled) {
     throw new Error(status.message);
@@ -673,11 +674,34 @@ function broadcastTerminalInput(options) {
     text,
     targetInstanceIds: [...selected.keys()],
   };
+  if (options.broadcastSync) {
+    item.signature = signSyncBroadcastItem(item, status.commandSecret);
+  }
   writeBroadcastItem(localBroadcastCommandDirectory(), item);
   if (options.broadcastSync) {
     writeBroadcastItem(status.commandsPath, item);
   }
   console.log(`broadcast: sent id=${item.id} local_targets=${selected.size} synced=${options.broadcastSync}`);
+}
+
+// Keeps the HMAC payload stable across Node CLI and the Rust desktop runtime.
+function syncBroadcastSignaturePayload(item) {
+  return JSON.stringify({
+    schemaVersion: item.schemaVersion,
+    id: item.id,
+    sourceId: item.sourceId,
+    createdAt: item.createdAt,
+    expiresAt: item.expiresAt,
+    text: item.text,
+    targetInstanceIds: item.targetInstanceIds,
+  });
+}
+
+// Signs only commands intentionally sent to a trusted sync folder.
+function signSyncBroadcastItem(item, commandSecret) {
+  return crypto.createHmac('sha256', commandSecret)
+    .update(syncBroadcastSignaturePayload(item), 'utf8')
+    .digest('hex');
 }
 
 // Atomically broadcasts a graceful close request by PID, exact title, or all.
@@ -911,7 +935,14 @@ function showConfig(options) {
   console.log(`Active profile: ${runtimeConfig.activeProfile || '(none)'}`);
   console.log('');
   console.log('Resolved config:');
-  process.stdout.write(toml.stringify(runtimeConfig.config));
+  const displayConfig = {
+    ...runtimeConfig.config,
+    sync: {
+      ...runtimeConfig.config.sync,
+      commandSecret: '[redacted]',
+    },
+  };
+  process.stdout.write(toml.stringify(displayConfig));
   console.log('');
   printPluginList(runtimeConfig.configPath, enabled, runtimeConfig.pluginUrls);
 }
@@ -1391,6 +1422,9 @@ async function setupSync(options) {
   const currentLogging = userConfig.logging && typeof userConfig.logging === 'object' ? userConfig.logging : {};
   const defaultPath = currentSync.path || defaultSyncPath();
   const defaultChannel = currentSync.channel || 'default';
+  const generatedCommandSecret = typeof currentSync.commandSecret === 'string' && currentSync.commandSecret.length >= 32
+    ? currentSync.commandSecret
+    : crypto.randomBytes(32).toString('hex');
   const localDefaultLogDirectory = path.join(path.dirname(targetPath), 'logs');
   const syncDefaultLogDirectory = currentLogging.directory || path.join(defaultPath, 'logs');
 
@@ -1403,6 +1437,11 @@ async function setupSync(options) {
     const syncPath = await askSyncPath(rl, defaultPath);
     console.log('Use the same sync channel on devices that should share data. Press Enter for default.');
     const channel = await askQuestion(rl, 'Sync channel name', defaultChannel);
+    console.log('Remote Broadcast commands require a shared secret. Copy the same value to every trusted device.');
+    const commandSecret = await askQuestion(rl, 'Sync command secret', generatedCommandSecret);
+    if (commandSecret.length < 32) {
+      throw new Error('sync command secret must contain at least 32 characters');
+    }
     const createFolder = isYes(await askQuestion(rl, 'Create the folder if it does not exist? (Y/n)', 'Y'), true);
     console.log(`Terminal output logs stay local by default under ${localDefaultLogDirectory}.`);
     console.log('Answer y only when you want readable terminal output logs stored in the selected sync folder.');
@@ -1435,6 +1474,8 @@ async function setupSync(options) {
         diagnostics: currentSync.diagnostics ?? true,
         pasteRequiresConfirm: currentSync.pasteRequiresConfirm ?? true,
         maxBytes: currentSync.maxBytes ?? 1048576,
+        commands: true,
+        commandSecret,
         commandTtlSeconds: currentSync.commandTtlSeconds ?? 60,
       },
       logging: {
@@ -1450,6 +1491,7 @@ async function setupSync(options) {
     console.log(`updated ${targetPath}`);
     console.log(`sync path: ${syncPath}`);
     console.log(`sync channel: ${channel || 'default'}`);
+    console.log('sync command authentication: HMAC-SHA-256 enabled');
     console.log(`terminal logs: ${enableLogs ? logDirectory : 'local default unless configured later'}`);
   } finally {
     rl.close();
@@ -1549,7 +1591,8 @@ function syncStatusReport(options) {
   const commandsPath = rootPath ? path.join(rootPath, channel, 'commands') : '';
   const now = Date.now();
   const ttlMs = Math.min(Math.max(Number(sync.commandTtlSeconds) || 60, 1), 600) * 1000;
-  const commandsEnabled = sync.commands !== false;
+  const commandSecret = typeof sync.commandSecret === 'string' ? sync.commandSecret : '';
+  const commandsEnabled = sync.commands === true && commandSecret.length >= 32;
   const maxBytes = Number(sync.maxBytes) > 0 ? Number(sync.maxBytes) : 1048576;
   const rootExists = Boolean(rootPath) && fs.existsSync(rootPath);
   let rootReadable = false;
@@ -1592,6 +1635,7 @@ function syncStatusReport(options) {
   return {
     enabled,
     commandsEnabled,
+    commandSecret,
     maxBytes,
     provider,
     path: rootPath,

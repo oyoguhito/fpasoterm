@@ -113,7 +113,8 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `log(message)`: plugin prefix 付き diagnostics の出力。
 - `version`: 実行中の fpasoterm version と build identifier の参照。
 - `onReady(callback)`: terminal backend の起動成功後に一度だけ code を実行。
-- `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` section に action を追加。
+- `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` submenu配下へ
+  action buttonを追加する。loaded pluginが一つ以上commandを登録した場合だけsubmenuを表示する。
 
 plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
 

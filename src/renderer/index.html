@@ -34,12 +34,16 @@
               <button id="diagnostics-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="diagnostics-menu-items" aria-expanded="false">Diagnostics</button>
               <div id="diagnostics-menu-items" class="window-menu-submenu-items" role="menu" hidden>
                 <button id="font-glyph-test" type="button" role="menuitem" aria-label="Show font and glyph diagnostics">Font / Glyph Test</button>
+                <button id="terminal-capability-test" type="button" role="menuitem" aria-label="Show terminal capability diagnostics">Capability Test</button>
               </div>
             </div>
             <button id="terminal-kill" type="button" role="menuitem" aria-label="Force-stop the current terminal process" aria-keyshortcuts="Control+Shift+K">Kill (K)</button>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (C)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (V)</button>
-            <div id="plugin-command-items" role="group" aria-label="Plugin commands" hidden></div>
+            <div id="plugin-menu-section" class="window-menu-submenu" data-menu-submenu="plugins" hidden>
+              <button id="plugin-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="plugin-command-items" aria-expanded="false">Plugins</button>
+              <div id="plugin-command-items" class="window-menu-submenu-items" role="menu" hidden></div>
+            </div>
             <div class="window-menu-submenu" data-menu-submenu="window">
               <button id="window-actions-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="window-actions-menu-items" aria-expanded="false">Window</button>
               <div id="window-actions-menu-items" class="window-menu-submenu-items" role="menu" hidden>
@@ -68,7 +72,7 @@
     <div class="resize-corner resize-corner-bottom-right" data-resize-direction="southEast"></div>
     <div class="resize-corner resize-corner-bottom-left" data-resize-direction="southWest"></div>
     <section id="diagnostics-panel" hidden tabindex="-1">
-      <div class="diagnostics-toolbar">
+      <div class="diagnostics-toolbar" data-panel-drag-handle>
         <span id="diagnostics-title">Diagnostics</span>
         <div class="diagnostics-actions">
           <select id="terminal-log-select" hidden aria-label="Terminal log files"></select>
@@ -83,6 +87,7 @@
       </div>
       <textarea id="diagnostics" readonly aria-label="Diagnostics"></textarea>
       <pre id="font-glyph-preview" hidden tabindex="0" aria-label="Font and glyph diagnostics"></pre>
+      <pre id="terminal-capability-preview" hidden tabindex="0" aria-label="Terminal capability diagnostics"></pre>
       <div id="diagnostics-path"></div>
       <div id="terminal-log-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-log-confirm-title">
         <div class="terminal-log-confirm-card">
@@ -107,8 +112,23 @@
     </section>
     <section id="terminal-broadcast-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-broadcast-title">
       <div class="terminal-log-confirm-card terminal-broadcast-card">
-        <div id="terminal-broadcast-title">Broadcast Input</div>
+        <div id="terminal-broadcast-title" class="panel-drag-title" data-panel-drag-handle>Broadcast Input</div>
         <textarea id="terminal-broadcast-text" aria-label="Text to send to fpasoterm windows" spellcheck="false"></textarea>
+        <div id="terminal-broadcast-control-picker">
+          <label>Control byte
+            <select id="terminal-broadcast-control" aria-label="Control byte to insert">
+              <option value="">Select</option>
+              <option value="tab">Tab (0x09)</option>
+              <option value="ctrl-c">Ctrl+C (0x03)</option>
+              <option value="ctrl-d">Ctrl+D (0x04)</option>
+              <option value="ctrl-x">Ctrl+X (0x18)</option>
+              <option value="ctrl-z">Ctrl+Z (0x1A)</option>
+              <option value="alt-prefix">Alt prefix / Esc (0x1B)</option>
+            </select>
+          </label>
+          <button id="terminal-broadcast-control-insert" type="button">Insert</button>
+          <span id="terminal-broadcast-control-status" aria-live="polite"></span>
+        </div>
         <fieldset id="terminal-broadcast-targets">
           <legend>Local windows</legend>
           <div id="terminal-broadcast-target-list" aria-live="polite"></div>
@@ -121,6 +141,16 @@
         <div class="terminal-log-confirm-actions">
           <button id="terminal-broadcast-send" type="button">Send</button>
           <button id="terminal-broadcast-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </section>
+    <section id="terminal-broadcast-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-broadcast-confirm-title">
+      <div class="terminal-log-confirm-card">
+        <div id="terminal-broadcast-confirm-title">Confirm Broadcast</div>
+        <pre id="terminal-broadcast-confirm-message"></pre>
+        <div class="terminal-log-confirm-actions">
+          <button id="terminal-broadcast-confirm-ok" type="button">Send Anyway</button>
+          <button id="terminal-broadcast-confirm-cancel" type="button">Cancel</button>
         </div>
       </div>
     </section>

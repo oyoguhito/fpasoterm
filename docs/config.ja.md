@@ -417,6 +417,22 @@ hamburger menu の `Broadcast (^B)`、または `Ctrl+Shift+B` を押します�
 
 この機能は remote server、OAuth token、後から起動した instance での command 自動実行を使用しません。この機能を使う場合、shared sync folder は command channel になります。参加する全 machine で信頼できる folder と channel だけを使用してください。
 
+Broadcastは常にEnterを追加します。dialogの **Control byte** pickerでは、textareaのcursor位置へ表示可能な
+表記を挿入します。`Tab`は`\x09`、`Ctrl+C`は`\x03`、`Ctrl+D`は`\x04`、`Ctrl+X`は`\x18`、`Ctrl+Z`は
+`\x1A`です。FpasoTermはpickerが挿入したこれらの表記だけを、送信時にterminal byteへ変換します。単独の`Esc`は
+**Alt prefix / Esc**と同じ`\x1B`になるため、選択肢から除外しています。`Ctrl`と`Alt`はbyteではなくmodifierです。
+慣例上の`Alt+x`を送る場合は **Alt prefix / Esc** を挿入してから`x`を入力します。Escapeはclose、Tabはfocus移動に
+予約されているため、pickerを使うことでkey eventへの依存を避けます。
+
+Broadcastで危険性の高いpatternに一致するcommandを送る前には、追加確認を表示します。現在の対象は`rm`、
+`find -delete`、`git reset --hard`、force付き`git clean`、filesystem format、`dd of=`、`truncate`、
+`shred`、shutdown commandです。確認画面には一致したpattern、選択target、sync delivery、command textを
+表示します。これは利便性のための警告でありshell parserやsecurity boundaryではありません。**Send Anyway** を
+選ぶ前に、すべてのBroadcast commandを確認してください。
+
+BroadcastとDiagnostics panelは同じ右下位置に表示します。panelの見出しをdragするとwindow内で移動できます。
+この位置は一時的で、保存されずterminal windowの位置やsizeも変更しません。
+
 次の `printf` 例は POSIX shell (`bash`、`dash`、`fish` など) 向けです。Windows の PowerShell や cmd.exe ではそのまま使えません。
 
 ```sh

@@ -32,7 +32,7 @@ npm global install 済みの場合は、Windows でも次で実行できます�
 fpasoterm --setup-sync
 ```
 
-この command は質問に答えるだけで `~/.config/fpasoterm/User/config.toml` の `[sync]` と `[logging]` を生成または更新します。既存の window、terminal、plugin 設定は残します。
+この command はlocal sync folder、channel、生成したcommand secretを質問し、`~/.config/fpasoterm/User/config.toml` の `[sync]` と `[logging]` を生成または更新します。remote Broadcastが必要なtrusted deviceだけに同じsecretを設定してください。既存の window、terminal、plugin 設定は残します。
 
 ChromeOS で `shared` や `temp` など複数の folder を `Linux と共有` している場合、`--setup-sync` は書き込み可能な候補を一覧表示します。候補番号を入力するか、実際の path を直接入力してください。
 
@@ -164,6 +164,7 @@ channel = "work"
 diagnostics = true
 maxBytes = 1048576
 commands = true
+commandSecret = "trusted-device-only-32-characters-or-longer-secret"
 commandTtlSeconds = 60
 ```
 
@@ -193,7 +194,7 @@ path = "/mnt/chromeos/GoogleDrive/MyDrive/shared/fpasoterm-sync"
 
 `diagnostics.json` の JSON には `kind`、`channel`、`sourceId`、`updatedAt`、`text` が入ります。
 
-`commands` は Broadcast dialog で user が `Include synced channel` を明示選択した時だけ短寿命の broadcast-input request を保存します。`commandTtlSeconds` の既定値は 60 秒で、最大 600 秒です。diagnostics/log の同期は残したまま remote input command を拒否する場合は `commands = false` にしてください。
+`commands` は Broadcast dialog で user が `Include synced channel` を明示選択した時だけ短寿命の broadcast-input request を保存します。既定では無効です。trusted device間で共有する32文字以上の`commandSecret`とともに有効化してください。FpasoTermはcommand fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。`commandTtlSeconds` の既定値は 60 秒で、最大 600 秒です。diagnostics/log の同期は残したままremote input commandを拒否する場合は `commands = false` にしてください。
 
 ## 使用方法
 
@@ -227,9 +228,9 @@ fpasoterm --broadcast "uptime" --broadcast-target 1234,"Build-2"
 fpasoterm --broadcast "hostname" --broadcast-sync
 ```
 
-`--broadcast` は改行コードを正規化して Enter を末尾へ追加します。`--broadcast-target` は繰り返し指定または comma 区切りで使え、存在しない selector は error になります。target を指定しない場合は起動中の全 local window が対象です。`--broadcast-sync` は全 local window を選択している場合だけ使え、`[sync] enabled = true` と `commands = true` が必要です。別 machine の fpasoterm を起動する機能ではなく、同じ trusted folder と channel を使用して既に起動している instance だけが command を受信します。
+`--broadcast` は改行コードを正規化して Enter を末尾へ追加します。`--broadcast-target` は繰り返し指定または comma 区切りで使え、存在しない selector は error になります。target を指定しない場合は起動中の全 local window が対象です。`--broadcast-sync` は全 local window を選択している場合だけ使え、`[sync] enabled = true`、`commands = true`、32文字以上の`commandSecret`が必要です。別 machine の fpasoterm を起動する機能ではなく、同じtrusted folder、channel、secretを使用して既に起動しているinstanceだけがcommandを受信します。
 
-これは trusted folder を前提にした機能です。この folder に command JSON を書き込める人は参加中の terminal へ command を入力できます。暗号化、認証、remote 起動、遅延実行は行いません。shared または信頼できない folder では synced command を有効にしないでください。
+これは trusted folder を前提にした機能です。command JSONにはHMAC-SHA-256署名が必要ですが、secretを持つdeviceは参加中terminalへcommandを入力できます。暗号化、remote起動、遅延実行は行いません。sharedまたは信頼できないfolderではsynced commandを有効にしないでください。
 
 ## Terminal Output Logs
 

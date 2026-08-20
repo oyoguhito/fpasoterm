@@ -32,7 +32,7 @@ After a global npm install, the normal command works on Windows too:
 fpasoterm --setup-sync
 ```
 
-It asks for the local sync folder and channel, then creates or updates `[sync]` and `[logging]` in `~/.config/fpasoterm/User/config.toml`. Existing window, terminal, and plugin settings are preserved.
+It asks for the local sync folder, channel, and a generated command secret, then creates or updates `[sync]` and `[logging]` in `~/.config/fpasoterm/User/config.toml`. Copy the same secret only to trusted devices that need remote Broadcast. Existing window, terminal, and plugin settings are preserved.
 
 On ChromeOS, if folders such as `shared` and `temp` are shared with Linux, `--setup-sync` lists writable candidates. Enter a candidate number or type the exact path.
 
@@ -164,6 +164,7 @@ channel = "work"
 diagnostics = true
 maxBytes = 1048576
 commands = true
+commandSecret = "paste-the-same-32-character-or-longer-secret-on-trusted-devices"
 commandTtlSeconds = 60
 ```
 
@@ -193,7 +194,7 @@ For `channel = "work"`, fpasoterm writes:
 
 `diagnostics.json` contains a JSON payload with `kind`, `channel`, `sourceId`, `updatedAt`, and `text`.
 
-`commands` contains short-lived broadcast-input requests only when a user explicitly selects `Include synced channel` in the Broadcast dialog. `commandTtlSeconds` defaults to 60 and is capped at 600 seconds. Set `commands = false` to keep diagnostics/log sync while refusing remote input commands.
+`commands` contains short-lived broadcast-input requests only when a user explicitly selects `Include synced channel` in the Broadcast dialog. It is disabled by default. Enable it only with a `commandSecret` of at least 32 characters shared by trusted devices. FpasoTerm signs command files with HMAC-SHA-256 and ignores unsigned or invalid files. `commandTtlSeconds` defaults to 60 and is capped at 600 seconds. Set `commands = false` to keep diagnostics/log sync while refusing remote input commands.
 
 ## Usage
 
@@ -227,9 +228,9 @@ fpasoterm --broadcast "uptime" --broadcast-target 1234,"Build-2"
 fpasoterm --broadcast "hostname" --broadcast-sync
 ```
 
-`--broadcast` normalizes line endings and appends Enter. `--broadcast-target` can be repeated or comma-separated; an unmatched selector is an error. If no target is specified, all currently running local windows are selected. `--broadcast-sync` requires all local windows to be selected, and requires `[sync] enabled = true` and `commands = true`. It does not start fpasoterm on another machine: only already-running instances sharing the same trusted folder and channel can receive the command.
+`--broadcast` normalizes line endings and appends Enter. `--broadcast-target` can be repeated or comma-separated; an unmatched selector is an error. If no target is specified, all currently running local windows are selected. `--broadcast-sync` requires all local windows to be selected, and requires `[sync] enabled = true`, `commands = true`, and a 32-character-or-longer `commandSecret`. It does not start fpasoterm on another machine: only already-running instances sharing the same trusted folder, channel, and secret can receive the command.
 
-This is intentionally a trusted-folder feature: anyone able to write command JSON in that folder can cause a command to be typed into participating terminals. It provides no encryption, authentication, remote launch, or delayed execution. Do not enable synced commands for a shared or untrusted folder.
+This is intentionally a trusted-folder feature. Command JSON requires an HMAC-SHA-256 signature, but any device holding the secret can type a command into participating terminals. It provides no encryption, remote launch, or delayed execution. Do not enable synced commands for a shared or untrusted folder.
 
 ## Terminal Output Logs
 

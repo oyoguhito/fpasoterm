@@ -3,6 +3,7 @@ const diagnosticsPanel = document.getElementById('diagnostics-panel');
 const diagnosticsTitleElement = document.getElementById('diagnostics-title');
 const diagnosticsElement = document.getElementById('diagnostics');
 const fontGlyphPreviewElement = document.getElementById('font-glyph-preview');
+const terminalCapabilityPreviewElement = document.getElementById('terminal-capability-preview');
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const terminalLogSelectElement = document.getElementById('terminal-log-select');
@@ -43,15 +44,22 @@ const syncCleanButton = document.getElementById('sync-clean');
 const diagnosticsMenuToggleButton = document.getElementById('diagnostics-menu-toggle');
 const diagnosticsMenuItems = document.getElementById('diagnostics-menu-items');
 const fontGlyphTestButton = document.getElementById('font-glyph-test');
+const terminalCapabilityTestButton = document.getElementById('terminal-capability-test');
 const windowActionsMenuToggleButton = document.getElementById('window-actions-menu-toggle');
 const windowActionsMenuItems = document.getElementById('window-actions-menu-items');
+const pluginMenuSection = document.getElementById('plugin-menu-section');
+const pluginMenuToggleButton = document.getElementById('plugin-menu-toggle');
 const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
 const pluginCommandItems = document.getElementById('plugin-command-items');
 const terminalBroadcastButton = document.getElementById('terminal-broadcast');
 const terminalBroadcastDialog = document.getElementById('terminal-broadcast-dialog');
+const terminalBroadcastTitle = document.getElementById('terminal-broadcast-title');
 const terminalBroadcastText = document.getElementById('terminal-broadcast-text');
+const terminalBroadcastControl = document.getElementById('terminal-broadcast-control');
+const terminalBroadcastControlInsertButton = document.getElementById('terminal-broadcast-control-insert');
+const terminalBroadcastControlStatus = document.getElementById('terminal-broadcast-control-status');
 const terminalBroadcastTargetList = document.getElementById('terminal-broadcast-target-list');
 const terminalBroadcastSelectAllButton = document.getElementById('terminal-broadcast-select-all');
 const terminalBroadcastSelectNoneButton = document.getElementById('terminal-broadcast-select-none');
@@ -59,12 +67,17 @@ const terminalBroadcastSync = document.getElementById('terminal-broadcast-sync')
 const terminalBroadcastSyncLabel = document.getElementById('terminal-broadcast-sync-label');
 const terminalBroadcastSendButton = document.getElementById('terminal-broadcast-send');
 const terminalBroadcastCancelButton = document.getElementById('terminal-broadcast-cancel');
+const terminalBroadcastConfirmElement = document.getElementById('terminal-broadcast-confirm');
+const terminalBroadcastConfirmMessageElement = document.getElementById('terminal-broadcast-confirm-message');
+const terminalBroadcastConfirmOkButton = document.getElementById('terminal-broadcast-confirm-ok');
+const terminalBroadcastConfirmCancelButton = document.getElementById('terminal-broadcast-confirm-cancel');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
 let terminalMirrorText = '';
 let closeAllConfirmResolver = null;
+let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {
   window: {
     backgroundColor: 'rgba(0, 0, 0, 0)',
@@ -348,6 +361,7 @@ function installTauriApiAdapter() {
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
     getAppVersion: () => invoke('app_version'),
+    getTerminalCapabilities: () => invoke('terminal_capabilities'),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
     syncStatus: () => invoke('sync_status'),
@@ -587,6 +601,9 @@ function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   if (fontGlyphPreviewElement) {
     fontGlyphPreviewElement.hidden = true;
+  }
+  if (terminalCapabilityPreviewElement) {
+    terminalCapabilityPreviewElement.hidden = true;
   }
 }
 
@@ -1566,7 +1583,7 @@ function registerPluginCommand(id, title, handler) {
   if (pluginCommands.has(commandId)) {
     throw new Error(`plugin command is already registered: ${commandId}`);
   }
-  if (!pluginCommandItems) {
+  if (!pluginMenuSection || !pluginCommandItems) {
     throw new Error('plugin command menu is unavailable');
   }
 
@@ -1578,7 +1595,7 @@ function registerPluginCommand(id, title, handler) {
   button.addEventListener('click', () => runPluginCommand(commandId));
   pluginCommands.set(commandId, { handler, button });
   pluginCommandItems.appendChild(button);
-  pluginCommandItems.hidden = false;
+  pluginMenuSection.hidden = false;
   showDiagnostic(`plugin command registered id=${commandId}`);
 }
 
@@ -1600,6 +1617,12 @@ async function runPluginCommand(commandId) {
 function syncEnabled() {
   const sync = appConfig.sync || {};
   return sync.enabled === true && sync.provider === 'folder' && Boolean(String(sync.path || '').trim());
+}
+
+// Remote Broadcast needs both an explicit opt-in and a secret shared by trusted devices.
+function syncCommandsEnabled() {
+  const sync = appConfig.sync || {};
+  return syncEnabled() && sync.commands === true && String(sync.commandSecret || '').length >= 32;
 }
 
 // Publishes the backend diagnostics ring buffer without creating a feedback loop.
@@ -1669,6 +1692,7 @@ function windowMenuSubmenus() {
     { name: 'log', toggle: logMenuToggleButton, items: logMenuItems },
     { name: 'sync', toggle: syncMenuToggleButton, items: syncMenuItems },
     { name: 'diagnostics', toggle: diagnosticsMenuToggleButton, items: diagnosticsMenuItems },
+    { name: 'plugins', toggle: pluginMenuToggleButton, items: pluginCommandItems },
     { name: 'window', toggle: windowActionsMenuToggleButton, items: windowActionsMenuItems },
   ].filter((submenu) => submenu.toggle && submenu.items);
 }
@@ -1730,6 +1754,44 @@ function fitWindowMenuToViewport() {
   windowMenuItems.style.maxHeight = `${maximumHeight}px`;
 }
 
+// Lets a panel move within the current window without changing its saved bounds.
+function enableFloatingPanelDrag(panel, handle) {
+  if (!panel || !handle) {
+    return;
+  }
+  handle.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0 || event.target.closest('button, input, select, textarea, label')) {
+      return;
+    }
+    const bounds = panel.getBoundingClientRect();
+    const offsetX = event.clientX - bounds.left;
+    const offsetY = event.clientY - bounds.top;
+    panel.style.right = 'auto';
+    panel.style.bottom = 'auto';
+    panel.style.left = `${Math.max(0, bounds.left)}px`;
+    panel.style.top = `${Math.max(0, bounds.top)}px`;
+    const move = (moveEvent) => {
+      const current = panel.getBoundingClientRect();
+      const left = Math.max(0, Math.min(window.innerWidth - current.width, moveEvent.clientX - offsetX));
+      const top = Math.max(0, Math.min(window.innerHeight - current.height, moveEvent.clientY - offsetY));
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+    };
+    const stop = () => {
+      window.removeEventListener('pointermove', move);
+      window.removeEventListener('pointerup', stop);
+      window.removeEventListener('pointercancel', stop);
+    };
+    window.addEventListener('pointermove', move);
+    window.addEventListener('pointerup', stop, { once: true });
+    window.addEventListener('pointercancel', stop, { once: true });
+    event.preventDefault();
+  });
+}
+
+enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
+enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
+
 // Returns focusable controls in the visible diagnostics/log panel.
 function diagnosticsPanelFocusItems() {
   if (!diagnosticsPanel || diagnosticsPanel.hidden) {
@@ -1751,6 +1813,7 @@ function diagnosticsPanelFocusItems() {
     closeDiagnosticsButton,
     diagnosticsElement,
     fontGlyphPreviewElement,
+    terminalCapabilityPreviewElement,
   ].filter((element) => element && !element.hidden && !element.disabled);
 }
 
@@ -2001,15 +2064,17 @@ function selectedTerminalBroadcastTargetIds() {
 function refreshTerminalBroadcastSyncOption() {
   const selectedCount = terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]:checked').length;
   const allSelected = terminalBroadcastTargets.length > 0 && selectedCount === terminalBroadcastTargets.length;
-  const canSync = syncEnabled() && allSelected;
+  const canSync = syncCommandsEnabled() && allSelected;
   terminalBroadcastSync.disabled = !canSync;
   terminalBroadcastSyncLabel.hidden = !syncEnabled();
   if (!canSync) {
     terminalBroadcastSync.checked = false;
   }
-  terminalBroadcastSyncLabel.title = allSelected
-    ? ''
-    : 'Select all local windows before including the synced channel.';
+  terminalBroadcastSyncLabel.title = !syncCommandsEnabled()
+    ? 'Run fpasoterm --setup-sync to configure a shared command secret.'
+    : allSelected
+      ? ''
+      : 'Select all local windows before including the synced channel.';
 }
 
 // Shows a focused input dialog for selecting local targets and sending one command.
@@ -2020,6 +2085,8 @@ async function openTerminalBroadcastDialog() {
   }
   setWindowMenuOpen(false);
   terminalBroadcastSync.checked = false;
+  terminalBroadcastControl.value = '';
+  terminalBroadcastControlStatus.textContent = '';
   terminalBroadcastTargetList.textContent = 'Loading local windows...';
   terminalBroadcastDialog.hidden = false;
   terminalBroadcastText.focus({ preventScroll: true });
@@ -2040,10 +2107,101 @@ function closeTerminalBroadcastDialog() {
   focusTerminalInput();
 }
 
+// Converts visible Broadcast control notation back into its terminal byte.
+function decodeTerminalBroadcastControls(text) {
+  const controls = {
+    '\\x1b': '\x1b',
+    '\\x09': '\t',
+    '\\x03': '\x03',
+    '\\x04': '\x04',
+    '\\x18': '\x18',
+    '\\x1a': '\x1a',
+  };
+  return String(text || '').replace(/\\x(?:1b|09|03|04|18|1a)/gi, (match) => controls[match.toLowerCase()] || match);
+}
+
+// Inserts visible notation for a terminal control byte, avoiding browser keys
+// such as Escape and Tab while keeping pending Broadcast text inspectable.
+function insertTerminalBroadcastControl() {
+  const control = String(terminalBroadcastControl?.value || '');
+  const controls = {
+    tab: { text: '\\x09', label: 'Tab (0x09)' },
+    'ctrl-c': { text: '\\x03', label: 'Ctrl+C (0x03)' },
+    'ctrl-d': { text: '\\x04', label: 'Ctrl+D (0x04)' },
+    'ctrl-x': { text: '\\x18', label: 'Ctrl+X (0x18)' },
+    'ctrl-z': { text: '\\x1A', label: 'Ctrl+Z (0x1A)' },
+    'alt-prefix': { text: '\\x1B', label: 'Alt prefix / Esc (0x1B)' },
+  };
+  const selected = controls[control];
+  if (!selected || !terminalBroadcastText) {
+    terminalBroadcastControlStatus.textContent = 'Select a control byte first.';
+    return;
+  }
+  terminalBroadcastText.setRangeText(
+    selected.text,
+    terminalBroadcastText.selectionStart,
+    terminalBroadcastText.selectionEnd,
+    'end',
+  );
+  terminalBroadcastControlStatus.textContent = `Inserted ${selected.label}.`;
+  terminalBroadcastControl.value = '';
+  terminalBroadcastText.focus({ preventScroll: true });
+}
+
+// Identifies commands that are destructive enough to warrant a second click.
+// This is a convenience warning, not a shell parser or a security boundary.
+function dangerousBroadcastCommandLabels(text) {
+  const command = String(text || '');
+  const checks = [
+    ['rm', /(?:^|[;|&\n]\s*)(?:sudo\s+)?(?:\S+\/)?rm(?:\s|$)/im],
+    ['find -delete', /\bfind\b[^\r\n;|&]*\s-delete\b/i],
+    ['git reset --hard', /\bgit\s+reset\s+(?:--hard|-H)\b/i],
+    ['git clean -f', /\bgit\s+clean\b[^\r\n;|&]*(?:\s-f|--force)\b/i],
+    ['filesystem formatting', /\b(?:mkfs(?:\.[A-Za-z0-9_-]+)?|wipefs)\b/i],
+    ['dd output device', /\bdd\b[^\r\n;|&]*\bof=/i],
+    ['truncate or shred', /\b(?:truncate|shred)\b/i],
+    ['system shutdown', /\b(?:shutdown|poweroff|reboot|halt)\b/i],
+  ];
+  return checks.filter(([, pattern]) => pattern.test(command)).map(([label]) => label);
+}
+
+// Presents a focused confirmation before a potentially destructive Broadcast.
+function confirmDangerousBroadcast(labels, text, targetCount, includesSync) {
+  if (!terminalBroadcastConfirmElement || !terminalBroadcastConfirmMessageElement || !terminalBroadcastConfirmOkButton) {
+    showDiagnostic('broadcast confirmation UI is unavailable');
+    return Promise.resolve(false);
+  }
+  terminalBroadcastConfirmMessageElement.textContent = [
+    'Potentially destructive command detected.',
+    `Matches: ${labels.join(', ')}`,
+    `Targets: ${targetCount} local window${targetCount === 1 ? '' : 's'}${includesSync ? ' and the synced channel' : ''}`,
+    '',
+    'Command:',
+    text,
+  ].join('\n');
+  terminalBroadcastConfirmElement.hidden = false;
+  terminalBroadcastConfirmOkButton.focus({ preventScroll: true });
+  return new Promise((resolve) => {
+    terminalBroadcastConfirmResolver = resolve;
+  });
+}
+
+// Closes the Broadcast confirmation and returns focus to its editable command.
+function resolveDangerousBroadcastConfirmation(confirmed) {
+  if (!terminalBroadcastConfirmElement || terminalBroadcastConfirmElement.hidden) {
+    return;
+  }
+  terminalBroadcastConfirmElement.hidden = true;
+  const resolver = terminalBroadcastConfirmResolver;
+  terminalBroadcastConfirmResolver = null;
+  terminalBroadcastText?.focus({ preventScroll: true });
+  resolver?.(confirmed);
+}
+
 // Writes the dialog text to local windows and optionally the configured sync channel.
 async function sendTerminalBroadcast() {
   const rawText = String(terminalBroadcastText?.value || '');
-  const text = rawText ? `${normalizePasteText(rawText).replace(/\r+$/, '')}\r` : '';
+  const text = rawText ? `${decodeTerminalBroadcastControls(normalizePasteText(rawText)).replace(/\r+$/, '')}\r` : '';
   if (!text) {
     showDiagnostic('terminal broadcast skipped: input is empty');
     terminalBroadcastText?.focus({ preventScroll: true });
@@ -2053,6 +2211,19 @@ async function sendTerminalBroadcast() {
   if (!selectedCount) {
     showDiagnostic('terminal broadcast skipped: select at least one local window');
     return;
+  }
+  const warnings = dangerousBroadcastCommandLabels(rawText);
+  if (warnings.length > 0) {
+    const confirmed = await confirmDangerousBroadcast(
+      warnings,
+      rawText,
+      selectedCount,
+      Boolean(terminalBroadcastSync?.checked),
+    );
+    if (!confirmed) {
+      showDiagnostic(`terminal broadcast cancelled: potentially destructive command (${warnings.join(', ')})`);
+      return;
+    }
   }
   const targetInstanceIds = selectedTerminalBroadcastTargetIds();
   const result = await window.fpasoterm.broadcastTerminal(
@@ -2115,6 +2286,9 @@ function showFontGlyphTest() {
   diagnosticsTitleElement.textContent = 'Font / Glyph Diagnostics';
   diagnosticsElement.hidden = true;
   fontGlyphPreviewElement.hidden = false;
+  if (terminalCapabilityPreviewElement) {
+    terminalCapabilityPreviewElement.hidden = true;
+  }
   fontGlyphPreviewElement.style.fontFamily = fontFamily;
   fontGlyphPreviewElement.style.fontSize = `${fontSize}px`;
   fontGlyphPreviewElement.style.lineHeight = String(lineHeight);
@@ -2135,6 +2309,42 @@ function showFontGlyphTest() {
   diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
   diagnosticsPanel.hidden = false;
   fontGlyphPreviewElement.focus({ preventScroll: true });
+}
+
+// Shows the terminal environment and documented protocol behavior without
+// emitting control sequences into the user's active shell session.
+async function showTerminalCapabilityTest() {
+  if (!terminalCapabilityPreviewElement) {
+    showDiagnostic('terminal capability diagnostics panel is unavailable');
+    return;
+  }
+  const capabilities = await window.fpasoterm.getTerminalCapabilities();
+  diagnosticsPanelMode = 'terminal-capability-test';
+  setTerminalLogPickerVisible(false);
+  setWindowMenuOpen(false);
+  diagnosticsTitleElement.textContent = 'Terminal Capability Diagnostics';
+  diagnosticsElement.hidden = true;
+  fontGlyphPreviewElement.hidden = true;
+  terminalCapabilityPreviewElement.hidden = false;
+  terminalCapabilityPreviewElement.textContent = [
+    'Terminal environment',
+    `TERM: ${capabilities.term}`,
+    `COLORTERM: ${capabilities.colorterm}`,
+    `locale: ${capabilities.locale}`,
+    `shell: ${capabilities.shell}`,
+    '',
+    'Truecolor: advertised (xterm.js renderer)',
+    "Test in terminal: printf '\\033[38;2;255;80;80mred \\033[38;2;80;220;140mgreen \\033[38;2;90;150;255mblue\\033[0m\\n'",
+    'Expected: three visibly different RGB color words.',
+    '',
+    'OSC 52 clipboard: supported for received OSC 52 text payloads; writes OS clipboard.',
+    'OSC 8 hyperlink: passed through to xterm.js; rendering and opening behavior depend on the webview.',
+    'Bracketed paste: xterm.js input supports bracketed paste; shell/TUI enables it with DECSET 2004.',
+    'Bell: BEL is passed to xterm.js; audible/visual feedback depends on OS and webview settings.',
+  ].join('\n');
+  diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
+  diagnosticsPanel.hidden = false;
+  terminalCapabilityPreviewElement.focus({ preventScroll: true });
 }
 
 // Displays the application keyboard shortcuts in the existing accessible panel.
@@ -2369,6 +2579,10 @@ fontGlyphTestButton.addEventListener('click', () => {
   showFontGlyphTest();
 });
 
+terminalCapabilityTestButton.addEventListener('click', () => {
+  showTerminalCapabilityTest().catch((error) => showDiagnostic(`terminal capability diagnostics failed: ${error}`));
+});
+
 logMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('log', logMenuItems.hidden);
 });
@@ -2379,6 +2593,10 @@ syncMenuToggleButton.addEventListener('click', () => {
 
 diagnosticsMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('diagnostics', diagnosticsMenuItems.hidden);
+});
+
+pluginMenuToggleButton.addEventListener('click', () => {
+  setWindowMenuSubmenuOpen('plugins', pluginCommandItems.hidden);
 });
 
 windowActionsMenuToggleButton.addEventListener('click', () => {
@@ -2478,6 +2696,10 @@ terminalBroadcastSelectAllButton.addEventListener('click', () => {
   refreshTerminalBroadcastSyncOption();
 });
 
+terminalBroadcastControlInsertButton.addEventListener('click', () => {
+  insertTerminalBroadcastControl();
+});
+
 terminalBroadcastSelectNoneButton.addEventListener('click', () => {
   terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]').forEach((checkbox) => {
     checkbox.checked = false;
@@ -2494,6 +2716,21 @@ terminalBroadcastSendButton.addEventListener('click', () => {
 
 terminalBroadcastCancelButton.addEventListener('click', () => {
   closeTerminalBroadcastDialog();
+});
+
+terminalBroadcastConfirmOkButton.addEventListener('click', () => {
+  resolveDangerousBroadcastConfirmation(true);
+});
+
+terminalBroadcastConfirmCancelButton.addEventListener('click', () => {
+  resolveDangerousBroadcastConfirmation(false);
+});
+
+terminalBroadcastConfirmElement.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    resolveDangerousBroadcastConfirmation(false);
+  }
 });
 
 terminalBroadcastDialog.addEventListener('keydown', (event) => {

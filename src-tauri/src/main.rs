@@ -1,7 +1,9 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
+use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::{HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -255,6 +257,21 @@ struct TerminalBroadcastItem {
     expires_at: u128,
     text: String,
     target_instance_ids: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    signature: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+// Canonical signed fields shared with the Node launcher implementation.
+struct TerminalBroadcastSignaturePayload<'a> {
+    schema_version: u8,
+    id: &'a str,
+    source_id: &'a str,
+    created_at: u128,
+    expires_at: u128,
+    text: &'a str,
+    target_instance_ids: &'a [String],
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -648,6 +665,7 @@ fn main() {
             clipboard_read,
             clipboard_write,
             app_version,
+            terminal_capabilities,
             config_get,
             config_apply_path,
             sync_status,
@@ -2445,13 +2463,31 @@ fn print_cli_text(text: &str) {
 
 // Prints the resolved direct-binary config without opening the application window.
 fn print_show_config() {
-    match serde_json::to_string_pretty(&runtime_config()) {
+    match serde_json::to_string_pretty(&redacted_runtime_config()) {
         Ok(config) => print_cli_text(&(config + "\n")),
         Err(error) => {
             print_cli_error(&format!("fpasoterm: failed to serialize config: {error}\n"));
             std::process::exit(2);
         }
     }
+}
+
+// Returns a display-safe config snapshot that never exposes the sync command key.
+fn redacted_runtime_config() -> RuntimeConfig {
+    redact_runtime_config(runtime_config())
+}
+
+// Removes values that must never appear in CLI or diagnostics output.
+fn redact_runtime_config(mut runtime: RuntimeConfig) -> RuntimeConfig {
+    if let Some(sync) = runtime.config.sync.as_object_mut() {
+        if sync.contains_key("commandSecret") {
+            sync.insert(
+                "commandSecret".to_string(),
+                serde_json::Value::String("[redacted]".to_string()),
+            );
+        }
+    }
+    runtime
 }
 
 // Lists profile tables from the selected TOML without starting the desktop app.
@@ -4125,6 +4161,33 @@ fn terminal_write(state: State<AppState>, data: String) -> Result<(), String> {
 }
 
 #[tauri::command]
+// Reports the environment that fpasoterm provides to its PTY and documents the
+// renderer-mediated terminal capabilities exposed by the diagnostics panel.
+fn terminal_capabilities() -> serde_json::Value {
+    let locale = env::var("LC_ALL")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .or_else(|| {
+            env::var("LC_CTYPE")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .or_else(|| {
+            env::var("LANG")
+                .ok()
+                .filter(|value| !value.trim().is_empty())
+        })
+        .unwrap_or_else(|| "(not set)".to_string());
+    let config = runtime_config();
+    serde_json::json!({
+        "term": "xterm-256color",
+        "colorterm": "truecolor",
+        "locale": locale,
+        "shell": shell_command(&config.config),
+    })
+}
+
+#[tauri::command]
 // Terminates the foreground terminal job while preserving the interactive shell.
 fn terminal_kill(state: State<AppState>) -> Result<(), String> {
     #[cfg(unix)]
@@ -4277,7 +4340,7 @@ fn terminal_broadcast(
     }
 
     let created_at = now_millis();
-    let item = TerminalBroadcastItem {
+    let mut item = TerminalBroadcastItem {
         schema_version: 1,
         id: format!("{}-{created_at}", state.source_id),
         source_id: state.source_id.clone(),
@@ -4285,7 +4348,14 @@ fn terminal_broadcast(
         expires_at: created_at.saturating_add(sync_command_ttl_millis()),
         text,
         target_instance_ids: request.target_instance_ids,
+        signature: None,
     };
+    if request.include_sync {
+        item.signature = Some(sign_terminal_broadcast_item(
+            &item,
+            &sync_command_key_material()?,
+        )?);
+    }
     write_terminal_broadcast_item(&local_broadcast_directory(), &item)?;
     if request.include_sync {
         let directory = sync_command_directory()?;
@@ -4383,7 +4453,7 @@ fn broadcast_terminal_input_cli() -> Result<String, String> {
     }
 
     let created_at = now_millis();
-    let item = TerminalBroadcastItem {
+    let mut item = TerminalBroadcastItem {
         schema_version: 1,
         id: format!("cli-{}-{created_at}", std::process::id()),
         source_id: format!("cli-{}", std::process::id()),
@@ -4394,7 +4464,14 @@ fn broadcast_terminal_input_cli() -> Result<String, String> {
             .iter()
             .map(|target| target.id.clone())
             .collect(),
+        signature: None,
     };
+    if include_sync {
+        item.signature = Some(sign_terminal_broadcast_item(
+            &item,
+            &sync_command_key_material()?,
+        )?);
+    }
     write_terminal_broadcast_item(&local_broadcast_directory(), &item)?;
     if include_sync {
         write_terminal_broadcast_item(&sync_command_directory()?, &item)?;
@@ -4427,12 +4504,13 @@ fn start_terminal_broadcast_listener(app: AppHandle, state: &AppState) {
     std::thread::spawn(move || {
         let mut seen = HashSet::new();
         loop {
-            let mut directories = vec![local_broadcast_directory()];
+            let mut directories = vec![(local_broadcast_directory(), false)];
             if let Ok(directory) = sync_command_directory() {
-                directories.push(directory);
+                directories.push((directory, true));
             }
-            for directory in directories {
-                for item in read_terminal_broadcast_items(&directory, started_at) {
+            for (directory, require_signature) in directories {
+                for item in read_terminal_broadcast_items(&directory, started_at, require_signature)
+                {
                     if !seen.insert(item.id.clone()) {
                         continue;
                     }
@@ -4529,6 +4607,90 @@ fn sync_command_ttl_millis() -> u128 {
         .unwrap_or(60)
         .min(600) as u128
         * 1_000
+}
+
+// Returns the per-channel signing material required for remote Broadcast commands.
+fn sync_command_key_material() -> Result<String, String> {
+    let signing_key = sync_string("commandSecret", "");
+    if signing_key.chars().count() < 32 {
+        return Err(
+            "sync command authentication is not configured; run fpasoterm --setup-sync on every trusted device"
+                .to_string(),
+        );
+    }
+    Ok(signing_key)
+}
+
+// Serializes only immutable command fields so both Rust and Node sign the same bytes.
+fn terminal_broadcast_signature_payload(item: &TerminalBroadcastItem) -> Result<Vec<u8>, String> {
+    serde_json::to_vec(&TerminalBroadcastSignaturePayload {
+        schema_version: item.schema_version,
+        id: &item.id,
+        source_id: &item.source_id,
+        created_at: item.created_at,
+        expires_at: item.expires_at,
+        text: &item.text,
+        target_instance_ids: &item.target_instance_ids,
+    })
+    .map_err(|error| error.to_string())
+}
+
+// Produces an HMAC-SHA-256 signature for one shared-folder command file.
+fn sign_terminal_broadcast_item(
+    item: &TerminalBroadcastItem,
+    signing_key: &str,
+) -> Result<String, String> {
+    let mut mac = Hmac::<Sha256>::new_from_slice(signing_key.as_bytes())
+        .map_err(|error| error.to_string())?;
+    mac.update(&terminal_broadcast_signature_payload(item)?);
+    Ok(hex_encode(&mac.finalize().into_bytes()))
+}
+
+// Verifies that a shared-folder command originated from a device with the signing key.
+fn terminal_broadcast_signature_valid(item: &TerminalBroadcastItem) -> bool {
+    let Some(signature) = item.signature.as_deref() else {
+        return false;
+    };
+    let Ok(signing_key) = sync_command_key_material() else {
+        return false;
+    };
+    verify_terminal_broadcast_signature(item, &signing_key, signature)
+}
+
+// Checks a signature with supplied signing material; separated for deterministic tests.
+fn verify_terminal_broadcast_signature(
+    item: &TerminalBroadcastItem,
+    signing_key: &str,
+    signature: &str,
+) -> bool {
+    let Ok(payload) = terminal_broadcast_signature_payload(item) else {
+        return false;
+    };
+    let Ok(bytes) = hex_decode(signature) else {
+        return false;
+    };
+    let Ok(mut mac) = Hmac::<Sha256>::new_from_slice(signing_key.as_bytes()) else {
+        return false;
+    };
+    mac.update(&payload);
+    mac.verify_slice(&bytes).is_ok()
+}
+
+// Avoids adding another encoding dependency for the fixed-size HMAC output.
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn hex_decode(value: &str) -> Result<Vec<u8>, String> {
+    if value.len() % 2 != 0 {
+        return Err("hex value must have an even length".to_string());
+    }
+    (0..value.len())
+        .step_by(2)
+        .map(|index| {
+            u8::from_str_radix(&value[index..index + 2], 16).map_err(|error| error.to_string())
+        })
+        .collect()
 }
 
 // Returns a file modification timestamp in milliseconds, or zero when metadata
@@ -4689,7 +4851,11 @@ fn write_terminal_broadcast_item(
 }
 
 // Loads unexpired requests created after this instance started and removes expired files.
-fn read_terminal_broadcast_items(directory: &Path, started_at: u128) -> Vec<TerminalBroadcastItem> {
+fn read_terminal_broadcast_items(
+    directory: &Path,
+    started_at: u128,
+    require_signature: bool,
+) -> Vec<TerminalBroadcastItem> {
     let Ok(entries) = fs::read_dir(directory) else {
         return Vec::new();
     };
@@ -4714,7 +4880,11 @@ fn read_terminal_broadcast_items(directory: &Path, started_at: u128) -> Vec<Term
             let _ = fs::remove_file(path);
             continue;
         }
-        if item.schema_version == 1 && item.created_at >= started_at && !item.text.is_empty() {
+        if item.schema_version == 1
+            && item.created_at >= started_at
+            && !item.text.is_empty()
+            && (!require_signature || terminal_broadcast_signature_valid(&item))
+        {
             items.push(item);
         }
     }
@@ -5939,7 +6109,7 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
     if kind == "diagnostics" && !sync_bool("diagnostics", true) {
         return Err("sync diagnostics is disabled; set sync.diagnostics = true".to_string());
     }
-    if kind == "commands" && !sync_bool("commands", true) {
+    if kind == "commands" && !sync_bool("commands", false) {
         return Err("sync commands are disabled; set sync.commands = true".to_string());
     }
 
@@ -6576,8 +6746,21 @@ mod tests {
         assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
         assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("N"));
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
-        assert_eq!(config["sync"]["commands"].as_bool(), Some(true));
+        assert_eq!(config["sync"]["commands"].as_bool(), Some(false));
+        assert_eq!(config["sync"]["commandSecret"].as_str(), Some(""));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn redacted_runtime_config_hides_sync_command_key() {
+        let mut runtime = default_runtime_config();
+        runtime.config.sync["commandSecret"] = serde_json::Value::String("test-key".repeat(8));
+
+        let display = redact_runtime_config(runtime);
+        assert_eq!(
+            display.config.sync["commandSecret"].as_str(),
+            Some("[redacted]")
+        );
     }
 
     #[test]
@@ -6604,6 +6787,34 @@ mod tests {
     fn terminal_output_decoder_preserves_utf8() {
         let mut decoder = TerminalOutputDecoder::new();
         assert_eq!(decoder.decode("半角ｶﾀｶﾅ ±".as_bytes()), "半角ｶﾀｶﾅ ±");
+    }
+
+    #[test]
+    fn sync_broadcast_signature_rejects_tampered_commands() {
+        let signing_key = "0123456789abcdef0123456789abcdef";
+        let mut item = TerminalBroadcastItem {
+            schema_version: 1,
+            id: "test-1".to_string(),
+            source_id: "test-source".to_string(),
+            created_at: 100,
+            expires_at: 200,
+            text: "git status\r".to_string(),
+            target_instance_ids: vec!["window-1".to_string()],
+            signature: None,
+        };
+        let signature = sign_terminal_broadcast_item(&item, signing_key).expect("sign command");
+        item.signature = Some(signature.clone());
+        assert!(verify_terminal_broadcast_signature(
+            &item,
+            signing_key,
+            &signature
+        ));
+        item.text = "rm -rf /\r".to_string();
+        assert!(!verify_terminal_broadcast_signature(
+            &item,
+            signing_key,
+            &signature
+        ));
     }
 
     #[test]
