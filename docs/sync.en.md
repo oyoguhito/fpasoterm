@@ -42,6 +42,22 @@ On ChromeOS, if folders such as `shared` and `temp` are shared with Linux, `--se
 
 Only fpasoterm instances with the same `path` and the same `channel` share diagnostics and logs in the same location. If ChromeOS and Windows should share the same sync area, use the same channel name on both machines.
 
+### Status, Health, and Cleanup
+
+Use these commands before troubleshooting a sync folder or after a device was offline for a long time:
+
+```bash
+fpasoterm --sync-status
+fpasoterm --sync-diagnostics
+fpasoterm --sync-clean
+```
+
+`--sync-status` is read-only. It reports the resolved local path, current channel, root existence/read/write checks, diagnostics file size, short-lived command counts, and every discovered channel below the sync root. `--sync-diagnostics` prints the same Markdown report so it can be pasted into a GitHub Issue.
+
+`--sync-clean` scans every channel in the configured sync root. It removes only command JSON files whose expiry has passed, plus malformed or temporary command files older than `commandTtlSeconds`. It never removes `diagnostics.json`, terminal logs, or valid pending commands. A disabled or missing sync folder is not created by status or cleanup.
+
+The hamburger menu also provides **Sync Status** and **Sync Clean**. Sync Status opens the same health information in the diagnostics panel. Sync Clean performs the same safe stale-file cleanup, then refreshes that panel.
+
 Examples:
 
 ```text
@@ -197,6 +213,21 @@ In short, `sync.enabled = false` is the setting for a local-only session with no
 ## Broadcast Input
 
 `Ctrl+Shift+B` opens the Broadcast dialog. Select the target local windows by title and PID, then use `Send` to deliver the entered command only to those windows. With every local window selected, `Include synced channel` additionally writes a temporary request under `<sync path>/<channel>/commands`. Every already-running fpasoterm using that same folder and channel receives it once and writes it to its own PTY. Partial local selection never sends to the sync channel.
+
+The same operation is available without opening a window:
+
+```sh
+# Send to every currently running local fpasoterm window.
+fpasoterm --broadcast "git status"
+
+# Select one or more local targets by PID or exact title.
+fpasoterm --broadcast "uptime" --broadcast-target 1234,"Build-2"
+
+# Send to all local windows and to the configured trusted sync channel.
+fpasoterm --broadcast "hostname" --broadcast-sync
+```
+
+`--broadcast` normalizes line endings and appends Enter. `--broadcast-target` can be repeated or comma-separated; an unmatched selector is an error. If no target is specified, all currently running local windows are selected. `--broadcast-sync` requires all local windows to be selected, and requires `[sync] enabled = true` and `commands = true`. It does not start fpasoterm on another machine: only already-running instances sharing the same trusted folder and channel can receive the command.
 
 This is intentionally a trusted-folder feature: anyone able to write command JSON in that folder can cause a command to be typed into participating terminals. It provides no encryption, authentication, remote launch, or delayed execution. Do not enable synced commands for a shared or untrusted folder.
 

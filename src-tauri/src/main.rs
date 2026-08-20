@@ -192,6 +192,43 @@ struct SyncStatus {
     path: String,
     channel: String,
     diagnostics_path: String,
+    commands_path: String,
+    health: String,
+    root_exists: bool,
+    root_readable: bool,
+    root_writable: bool,
+    diagnostics_exists: bool,
+    diagnostics_bytes: u64,
+    diagnostics_updated_at: u128,
+    active_commands: usize,
+    stale_commands: usize,
+    invalid_commands: usize,
+    temporary_files: usize,
+    channels: Vec<SyncChannelStatus>,
+    message: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One discovered sync channel and its short-lived command-file state.
+struct SyncChannelStatus {
+    name: String,
+    diagnostics_exists: bool,
+    active_commands: usize,
+    stale_commands: usize,
+    invalid_commands: usize,
+    temporary_files: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Summary returned after deleting only expired or abandoned sync command files.
+struct SyncCleanupResult {
+    path: String,
+    channel: String,
+    removed_expired_commands: usize,
+    removed_invalid_commands: usize,
+    removed_temporary_files: usize,
     message: String,
 }
 
@@ -383,13 +420,18 @@ fn cli_help_text() -> String {
             1,
         )
         .replacen(
+            "  -d, --dev",
+            "      --broadcast <text>        Send text plus Enter to running local terminal windows.\n      --broadcast-target <pid|title>\n                                Limit Broadcast targets (comma-separated/repeatable).\n      --broadcast-sync          Also send Broadcast through the trusted sync channel.\n  -d, --dev",
+            1,
+        )
+        .replacen(
             "  -R, --reset-config            Back up config.toml and restore all defaults, then exit.",
             "  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.",
             1,
         )
         .replacen(
             "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.",
-            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nProfile usage:\n  1. Find config: fpasoterm --config-path\n  2. Add to config.toml:\n       [profiles.large-font.terminal]\n       fontSize = 18\n  3. Launch: fpasoterm --profile large-font\n  List names: fpasoterm --profile-list\n  Sample file: --config examples/config/profiles.toml --profile large-font\n  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile",
+            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nSync commands:\n  --sync-status       Report folder health, commands, and discovered channels\n  --sync-clean        Remove only expired or abandoned command files\n  --sync-diagnostics  Print the Markdown sync health report\n\nProfile usage:\n  1. Find config: fpasoterm --config-path\n  2. Add to config.toml:\n       [profiles.large-font.terminal]\n       fontSize = 18\n  3. Launch: fpasoterm --profile large-font\n  List names: fpasoterm --profile-list\n  Sample file: --config examples/config/profiles.toml --profile large-font\n  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile",
             1,
         )
 }
@@ -397,7 +439,7 @@ fn cli_help_text() -> String {
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
-        print_cli_error(&format!("fpasoterm: {error}\n{}", cli_help_text()));
+        print_cli_error(&format!("fpasoterm: {error}\n"));
         std::process::exit(2);
     }
 
@@ -433,6 +475,16 @@ fn main() {
         }
         return;
     }
+    if cli_option_value("--broadcast").is_some() {
+        match broadcast_terminal_input_cli() {
+            Ok(message) => print_cli_text(&message),
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     if cli_has_flag(&["--show-config"]) {
         print_show_config();
         return;
@@ -451,6 +503,10 @@ fn main() {
     }
     if cli_has_flag(&["--config-path"]) {
         print_cli_text(&format!("{}\n", default_runtime_config().config_path));
+        return;
+    }
+    if cli_has_flag(&["--sync-status", "--sync-clean", "--sync-diagnostics"]) {
+        sync_cli();
         return;
     }
     if plugin_cli_requested() {
@@ -595,6 +651,7 @@ fn main() {
             config_get,
             config_apply_path,
             sync_status,
+            sync_clean,
             sync_write_diagnostics,
             window_close,
             window_minimize,
@@ -634,6 +691,10 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
+        "--sync-status",
+        "--sync-clean",
+        "--sync-diagnostics",
+        "--broadcast-sync",
         "--config-check",
         "--config-path",
         "--config-example",
@@ -678,6 +739,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-H",
         "--size",
         "-z",
+        "--broadcast",
+        "--broadcast-target",
     ];
 
     let mut index = 0;
@@ -716,6 +779,19 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         } else {
             format!("unexpected argument: {argument}")
         });
+    }
+    let has_broadcast = args
+        .iter()
+        .any(|argument| argument == "--broadcast" || argument.starts_with("--broadcast="));
+    let has_broadcast_option = args.iter().any(|argument| {
+        argument == "--broadcast-target"
+            || argument.starts_with("--broadcast-target=")
+            || argument == "--broadcast-sync"
+    });
+    if has_broadcast_option && !has_broadcast {
+        return Err(
+            "--broadcast-target and --broadcast-sync require --broadcast <text>".to_string(),
+        );
     }
     Ok(())
 }
@@ -4230,6 +4306,102 @@ fn terminal_broadcast(
     })
 }
 
+// Sends a CLI command through the same short-lived JSON files used by the Broadcast dialog.
+fn broadcast_terminal_input_cli() -> Result<String, String> {
+    let raw_text =
+        cli_option_value("--broadcast").ok_or_else(|| "--broadcast requires text".to_string())?;
+    let normalized = raw_text.replace("\r\n", "\n").replace('\r', "\n");
+    let text = format!(
+        "{}\r",
+        normalized.trim_end_matches('\n').replace('\n', "\r")
+    );
+    if text == "\r" {
+        return Err("broadcast text is empty".to_string());
+    }
+    let max_bytes = sync_max_bytes();
+    if text.len() > max_bytes {
+        return Err(format!(
+            "broadcast payload is too large: {} bytes > {max_bytes} bytes",
+            text.len()
+        ));
+    }
+
+    let all_targets = live_terminal_broadcast_targets();
+    if all_targets.is_empty() {
+        return Err("no running fpasoterm windows were found".to_string());
+    }
+    let selectors = cli_option_values_any(&["--broadcast-target"])
+        .into_iter()
+        .flat_map(|value| {
+            value
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_string)
+                .collect::<Vec<_>>()
+        })
+        .collect::<Vec<_>>();
+    let selected_targets = if selectors.is_empty() {
+        all_targets.clone()
+    } else {
+        let mut selected_ids = HashSet::new();
+        for selector in selectors {
+            let matching = all_targets.iter().filter(|target| {
+                selector
+                    .parse::<u32>()
+                    .map(|pid| target.pid == pid)
+                    .unwrap_or_else(|_| target.title == selector)
+            });
+            let mut matched = false;
+            for target in matching {
+                selected_ids.insert(target.id.clone());
+                matched = true;
+            }
+            if !matched {
+                return Err(format!(
+                    "no running window matches Broadcast target {}",
+                    serde_json::to_string(&selector).unwrap_or_else(|_| "<invalid>".to_string())
+                ));
+            }
+        }
+        all_targets
+            .iter()
+            .filter(|target| selected_ids.contains(&target.id))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    let include_sync = cli_has_flag(&["--broadcast-sync"]);
+    if include_sync && selected_targets.len() != all_targets.len() {
+        return Err(
+            "--broadcast-sync requires every running local window to be selected".to_string(),
+        );
+    }
+
+    let created_at = now_millis();
+    let item = TerminalBroadcastItem {
+        schema_version: 1,
+        id: format!("cli-{}-{created_at}", std::process::id()),
+        source_id: format!("cli-{}", std::process::id()),
+        created_at,
+        expires_at: created_at.saturating_add(sync_command_ttl_millis()),
+        text,
+        target_instance_ids: selected_targets
+            .iter()
+            .map(|target| target.id.clone())
+            .collect(),
+    };
+    write_terminal_broadcast_item(&local_broadcast_directory(), &item)?;
+    if include_sync {
+        write_terminal_broadcast_item(&sync_command_directory()?, &item)?;
+    }
+    Ok(format!(
+        "broadcast: sent id={} local_targets={} synced={}\n",
+        item.id,
+        selected_targets.len(),
+        include_sync
+    ))
+}
+
 #[tauri::command]
 // Lists live local terminal instances for the broadcast target selector.
 fn terminal_broadcast_targets() -> Vec<TerminalBroadcastTarget> {
@@ -4352,6 +4524,150 @@ fn sync_command_ttl_millis() -> u128 {
         .unwrap_or(60)
         .min(600) as u128
         * 1_000
+}
+
+// Returns a file modification timestamp in milliseconds, or zero when metadata
+// cannot be read. Zero is treated as old during explicit cleanup only.
+fn file_modified_millis(path: &Path) -> u128 {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0)
+}
+
+// Inspects command files for one channel without creating or changing anything.
+fn inspect_sync_channel(
+    channel_dir: &Path,
+    name: String,
+    now: u128,
+    ttl: u128,
+) -> SyncChannelStatus {
+    let commands_dir = channel_dir.join("commands");
+    let mut status = SyncChannelStatus {
+        name,
+        diagnostics_exists: channel_dir.join("diagnostics.json").is_file(),
+        active_commands: 0,
+        stale_commands: 0,
+        invalid_commands: 0,
+        temporary_files: 0,
+    };
+    let Ok(entries) = fs::read_dir(commands_dir) else {
+        return status;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
+        if name.starts_with("command-") && name.ends_with(".json") {
+            match fs::read_to_string(&path)
+                .ok()
+                .and_then(|text| serde_json::from_str::<TerminalBroadcastItem>(&text).ok())
+            {
+                Some(item) if item.expires_at > now => status.active_commands += 1,
+                Some(_) => status.stale_commands += 1,
+                None => status.invalid_commands += 1,
+            }
+        } else if name.starts_with("command-") && name.ends_with(".tmp") {
+            if file_modified_millis(&path).saturating_add(ttl) <= now {
+                status.temporary_files += 1;
+            }
+        }
+    }
+    status
+}
+
+// Lists channel directories below a configured sync root without treating logs
+// or arbitrary files as channels.
+fn inspect_sync_channels(root: &Path, now: u128, ttl: u128) -> Vec<SyncChannelStatus> {
+    let Ok(entries) = fs::read_dir(root) else {
+        return Vec::new();
+    };
+    let mut channels = entries
+        .flatten()
+        .filter_map(|entry| {
+            let path = entry.path();
+            if !path.is_dir() {
+                return None;
+            }
+            let name = entry.file_name().to_string_lossy().to_string();
+            Some(inspect_sync_channel(&path, name, now, ttl))
+        })
+        .collect::<Vec<_>>();
+    channels.sort_by(|left, right| left.name.cmp(&right.name));
+    channels
+}
+
+// Deletes only commands which are already expired and abandoned temporary or
+// malformed files older than the configured TTL. It never removes diagnostics
+// or still-valid broadcast commands.
+fn clean_sync_commands(root: &Path, now: u128, ttl: u128) -> SyncCleanupResult {
+    let mut result = SyncCleanupResult {
+        path: root.display().to_string(),
+        channel: sync_channel(),
+        removed_expired_commands: 0,
+        removed_invalid_commands: 0,
+        removed_temporary_files: 0,
+        message: String::new(),
+    };
+    let Ok(channels) = fs::read_dir(root) else {
+        result.message = "sync root does not exist; nothing to clean".to_string();
+        return result;
+    };
+    for channel in channels.flatten() {
+        let command_dir = channel.path().join("commands");
+        let Ok(entries) = fs::read_dir(command_dir) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("");
+            let old_enough = file_modified_millis(&path).saturating_add(ttl) <= now;
+            let removal = if name.starts_with("command-") && name.ends_with(".json") {
+                match fs::read_to_string(&path)
+                    .ok()
+                    .and_then(|text| serde_json::from_str::<TerminalBroadcastItem>(&text).ok())
+                {
+                    Some(item) if item.expires_at <= now => Some("expired"),
+                    None if old_enough => Some("invalid"),
+                    _ => None,
+                }
+            } else if name.starts_with("command-") && name.ends_with(".tmp") && old_enough {
+                Some("temporary")
+            } else {
+                None
+            };
+            let Some(removal) = removal else {
+                continue;
+            };
+            if fs::remove_file(&path).is_ok() {
+                match removal {
+                    "expired" => result.removed_expired_commands += 1,
+                    "invalid" => result.removed_invalid_commands += 1,
+                    _ => result.removed_temporary_files += 1,
+                }
+            }
+        }
+    }
+    result.message = format!(
+        "removed expired={} invalid={} temporary={}",
+        result.removed_expired_commands,
+        result.removed_invalid_commands,
+        result.removed_temporary_files
+    );
+    result
 }
 
 // Atomically publishes a command file so readers never observe partial JSON.
@@ -5603,7 +5919,8 @@ fn expand_sync_path(path: &str) -> std::path::PathBuf {
     std::path::PathBuf::from(expanded)
 }
 
-// Resolves and creates the sync channel directory for a specific operation.
+// Resolves the sync channel directory. Mutating operations create missing paths;
+// status checks intentionally do not change the folder being inspected.
 fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
     if !sync_bool("enabled", false) {
         return Err("sync folder is disabled; set sync.enabled = true".to_string());
@@ -5636,8 +5953,10 @@ fn sync_folder_paths(kind: &str) -> Result<SyncFolderPaths, String> {
     };
     let root = expand_sync_path(&root_text);
     let channel_dir = root.join(&channel);
-    fs::create_dir_all(&channel_dir).map_err(|error| error.to_string())?;
     let commands = channel_dir.join("commands");
+    if kind != "status" {
+        fs::create_dir_all(&channel_dir).map_err(|error| error.to_string())?;
+    }
     if kind == "commands" {
         fs::create_dir_all(&commands).map_err(|error| error.to_string())?;
     }
@@ -5704,22 +6023,200 @@ fn write_sync_item(kind: &str, text: String, source_id: &str) -> Result<SyncItem
 // Returns where sync-folder files would be read and written.
 fn sync_status() -> SyncStatus {
     match sync_folder_paths("status") {
-        Ok(paths) => SyncStatus {
-            enabled: true,
-            provider: paths.provider,
-            path: paths.root.display().to_string(),
-            channel: paths.channel,
-            diagnostics_path: paths.diagnostics.display().to_string(),
-            message: "sync folder is enabled".to_string(),
-        },
+        Ok(paths) => {
+            let now = now_millis();
+            let ttl = sync_command_ttl_millis();
+            let root_metadata = fs::metadata(&paths.root).ok();
+            let root_exists = root_metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.is_dir());
+            let root_readable = root_exists && fs::read_dir(&paths.root).is_ok();
+            let root_writable = root_metadata
+                .as_ref()
+                .is_some_and(|metadata| !metadata.permissions().readonly());
+            let diagnostics_metadata = fs::metadata(&paths.diagnostics).ok();
+            let diagnostics_exists = diagnostics_metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.is_file());
+            let diagnostics_bytes = diagnostics_metadata.as_ref().map_or(0, fs::Metadata::len);
+            let diagnostics_updated_at = diagnostics_metadata
+                .as_ref()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+                .map(|duration| duration.as_millis())
+                .unwrap_or(0);
+            let channels = inspect_sync_channels(&paths.root, now, ttl);
+            let current = channels.iter().find(|item| item.name == paths.channel);
+            let active_commands = current.map_or(0, |item| item.active_commands);
+            let stale_commands = current.map_or(0, |item| item.stale_commands);
+            let invalid_commands = current.map_or(0, |item| item.invalid_commands);
+            let temporary_files = current.map_or(0, |item| item.temporary_files);
+            let health = if !root_exists {
+                "missing".to_string()
+            } else if !root_readable {
+                "unreadable".to_string()
+            } else if !root_writable {
+                "read-only".to_string()
+            } else if stale_commands + invalid_commands + temporary_files > 0 {
+                "cleanup recommended".to_string()
+            } else {
+                "ok".to_string()
+            };
+            let message = if health == "ok" {
+                "sync folder is healthy".to_string()
+            } else {
+                format!("sync folder health: {health}")
+            };
+            SyncStatus {
+                enabled: true,
+                provider: paths.provider,
+                path: paths.root.display().to_string(),
+                channel: paths.channel,
+                diagnostics_path: paths.diagnostics.display().to_string(),
+                commands_path: paths.commands.display().to_string(),
+                health,
+                root_exists,
+                root_readable,
+                root_writable,
+                diagnostics_exists,
+                diagnostics_bytes,
+                diagnostics_updated_at,
+                active_commands,
+                stale_commands,
+                invalid_commands,
+                temporary_files,
+                channels,
+                message,
+            }
+        }
         Err(message) => SyncStatus {
             enabled: false,
             provider: sync_string("provider", "folder"),
             path: sync_string("path", ""),
             channel: sync_channel(),
             diagnostics_path: String::new(),
+            commands_path: String::new(),
+            health: "disabled".to_string(),
+            root_exists: false,
+            root_readable: false,
+            root_writable: false,
+            diagnostics_exists: false,
+            diagnostics_bytes: 0,
+            diagnostics_updated_at: 0,
+            active_commands: 0,
+            stale_commands: 0,
+            invalid_commands: 0,
+            temporary_files: 0,
+            channels: Vec::new(),
             message,
         },
+    }
+}
+
+#[tauri::command]
+// Removes stale command files after an explicit user request.
+fn sync_clean() -> Result<SyncCleanupResult, String> {
+    let paths = sync_folder_paths("status")?;
+    Ok(clean_sync_commands(
+        &paths.root,
+        now_millis(),
+        sync_command_ttl_millis(),
+    ))
+}
+
+// Formats the sync inspection result for terminals and issue reports.
+fn sync_status_text(status: &SyncStatus) -> String {
+    let mut lines = vec![
+        "## fpasoterm sync status".to_string(),
+        String::new(),
+        format!(
+            "- status: {}",
+            if status.enabled {
+                "enabled"
+            } else {
+                "disabled"
+            }
+        ),
+        format!("- health: {}", status.health),
+        format!("- provider: {}", status.provider),
+        format!(
+            "- path: {}",
+            if status.path.is_empty() {
+                "(not configured)"
+            } else {
+                &status.path
+            }
+        ),
+        format!(
+            "- channel: {}",
+            if status.channel.is_empty() {
+                "(not configured)"
+            } else {
+                &status.channel
+            }
+        ),
+        format!("- root exists: {}", status.root_exists),
+        format!("- root readable: {}", status.root_readable),
+        format!("- root writable: {}", status.root_writable),
+        format!(
+            "- diagnostics: {} ({} bytes)",
+            status.diagnostics_exists, status.diagnostics_bytes
+        ),
+        format!(
+            "- command directory: {}",
+            if status.commands_path.is_empty() {
+                "(not available)"
+            } else {
+                &status.commands_path
+            }
+        ),
+        format!(
+            "- commands: active={} stale={} invalid={} temporary={}",
+            status.active_commands,
+            status.stale_commands,
+            status.invalid_commands,
+            status.temporary_files
+        ),
+        format!("- message: {}", status.message),
+        String::new(),
+        "### Channels".to_string(),
+    ];
+    if status.channels.is_empty() {
+        lines.push("- (none found)".to_string());
+    } else {
+        for channel in &status.channels {
+            lines.push(format!(
+                "- {}: diagnostics={} active={} stale={} invalid={} temporary={}",
+                channel.name,
+                channel.diagnostics_exists,
+                channel.active_commands,
+                channel.stale_commands,
+                channel.invalid_commands,
+                channel.temporary_files
+            ));
+        }
+    }
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+// Handles sync-only CLI operations without starting a Tauri window.
+fn sync_cli() {
+    if cli_has_flag(&["--sync-status", "--sync-diagnostics"]) {
+        print_cli_text(&sync_status_text(&sync_status()));
+        return;
+    }
+    if cli_has_flag(&["--sync-clean"]) {
+        match sync_clean() {
+            Ok(result) => print_cli_text(&format!(
+                "sync clean: {}\npath: {}\nchannel: {}\n",
+                result.message, result.path, result.channel
+            )),
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+        }
     }
 }
 
@@ -5851,6 +6348,9 @@ mod tests {
             "--plugin-path",
             "--plugin-enable-all",
             "--plugin-disable-all",
+            "--sync-status",
+            "--sync-clean",
+            "--sync-diagnostics",
             "--reset-window-state",
             "-r",
             "--reset-config",

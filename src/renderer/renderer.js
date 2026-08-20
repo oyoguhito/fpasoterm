@@ -33,6 +33,8 @@ const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
+const syncStatusButton = document.getElementById('sync-status');
+const syncCleanButton = document.getElementById('sync-clean');
 const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
@@ -339,6 +341,7 @@ function installTauriApiAdapter() {
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
     syncStatus: () => invoke('sync_status'),
+    syncClean: () => invoke('sync_clean'),
     syncWriteDiagnostics: () => invoke('sync_write_diagnostics'),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
@@ -1608,10 +1611,16 @@ function scheduleSyncDiagnosticsWrite(delayMs = 1200) {
 async function installSyncControls() {
   syncDiagnosticsEnabled = false;
   if (!syncEnabled()) {
+    if (syncCleanButton) {
+      syncCleanButton.disabled = true;
+    }
     return;
   }
 
   const status = await window.fpasoterm.syncStatus();
+  if (syncCleanButton) {
+    syncCleanButton.disabled = !status.enabled;
+  }
   if (!status.enabled) {
     showDiagnostic(`sync disabled: ${status.message}`);
     return;
@@ -2058,6 +2067,50 @@ async function showKeyboardShortcutsHelp() {
   closeDiagnosticsButton.focus({ preventScroll: true });
 }
 
+// Displays the configured sync folder, health checks, and discovered channels
+// in the existing keyboard-accessible diagnostics panel.
+async function showSyncStatus() {
+  const status = await window.fpasoterm.syncStatus();
+  diagnosticsPanelMode = 'sync-status';
+  setTerminalLogPickerVisible(false);
+  setWindowMenuOpen(false);
+  diagnosticsTitleElement.textContent = 'Sync Status';
+  const lines = [
+    `Status: ${status.enabled ? 'enabled' : 'disabled'}`,
+    `Health: ${status.health || 'unknown'}`,
+    `Provider: ${status.provider || 'folder'}`,
+    `Path: ${status.path || '(not configured)'}`,
+    `Channel: ${status.channel || '(not configured)'}`,
+    `Root: exists=${Boolean(status.rootExists)} readable=${Boolean(status.rootReadable)} writable=${Boolean(status.rootWritable)}`,
+    `Diagnostics: ${Boolean(status.diagnosticsExists)} (${Number(status.diagnosticsBytes || 0)} bytes)`,
+    `Command directory: ${status.commandsPath || '(not available)'}`,
+    `Commands: active=${Number(status.activeCommands || 0)} stale=${Number(status.staleCommands || 0)} invalid=${Number(status.invalidCommands || 0)} temporary=${Number(status.temporaryFiles || 0)}`,
+    `Message: ${status.message || ''}`,
+    '',
+    'Channels:',
+  ];
+  const channels = Array.isArray(status.channels) ? status.channels : [];
+  if (channels.length === 0) {
+    lines.push('  (none found)');
+  } else {
+    channels.forEach((item) => lines.push(
+      `  ${item.name}: diagnostics=${Boolean(item.diagnosticsExists)} active=${Number(item.activeCommands || 0)} stale=${Number(item.staleCommands || 0)} invalid=${Number(item.invalidCommands || 0)} temporary=${Number(item.temporaryFiles || 0)}`,
+    ));
+  }
+  diagnosticsElement.value = lines.join('\n');
+  diagnosticsElement.scrollTop = 0;
+  diagnosticsPathElement.textContent = status.path || '';
+  diagnosticsPanel.hidden = false;
+  closeDiagnosticsButton.focus({ preventScroll: true });
+}
+
+// Removes only stale sync command files, then refreshes the visible health view.
+async function cleanSyncFolder() {
+  const result = await window.fpasoterm.syncClean();
+  showDiagnostic(`sync clean ${result.message}`);
+  await showSyncStatus();
+}
+
 // Formats one log item for the selector dropdown.
 function terminalLogOptionLabel(item) {
   const size = Number(item.bytes || 0);
@@ -2196,6 +2249,14 @@ terminalLogToggleButton.addEventListener('click', () => {
 
 terminalLogShowButton.addEventListener('click', () => {
   showTerminalOutputLogFromMenu();
+});
+
+syncStatusButton.addEventListener('click', () => {
+  showSyncStatus().catch((error) => showDiagnostic(`sync status failed: ${error}`));
+});
+
+syncCleanButton.addEventListener('click', () => {
+  cleanSyncFolder().catch((error) => showDiagnostic(`sync clean failed: ${error}`));
 });
 
 terminalLogShowSelectedButton.addEventListener('click', () => {

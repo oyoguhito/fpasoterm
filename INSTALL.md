@@ -23,12 +23,13 @@ On Windows, run `fpasoterm --version` after installing a newer `.exe` or `.msi`.
 
 Windows builds place `fpasoterm.cmd` beside the release executable. Use this
 console wrapper for `--version`, `--plugin-path`, `--plugin-info`, and other
-CLI-only operations; it waits for the GUI-subsystem executable to exit so
-PowerShell immediately redraws its prompt. Normal launches remain detached:
+CLI-only operations; it runs the executable directly so stdout, stderr, and
+the exit code return to PowerShell or cmd. Normal launches remain detached:
 
 ```powershell
 .\src-tauri\target\release\fpasoterm.cmd --version
 .\src-tauri\target\release\fpasoterm.cmd --plugin-path
+.\src-tauri\target\release\fpasoterm.cmd --help
 .\src-tauri\target\release\fpasoterm.cmd
 ```
 

@@ -262,9 +262,10 @@ api.terminal.options.cursorBlink = true;
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin の設定方法、security 上の注意、CLI 管理、対応 API の declaration は [プラグイン](docs/plugins.ja.md) と [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、公開 plugin sample は [examples/plugins](examples/plugins) にあります。
 
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
-Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+B` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
+Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+B` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。`fpasoterm --broadcast "command"` でも同じ操作を実行でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
+`fpasoterm --sync-status` で folder health と channel を確認でき、`fpasoterm --sync-clean` は期限切れの sync command file だけを削除します。
 terminal output log は hamburger menu の `Log Start (^S)` / `Log Stop (^S)` または `Ctrl+Shift+S` で取得し、`Log Show (^P)` または `Ctrl+Shift+P` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
 log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
@@ -335,7 +336,7 @@ desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 npm run audit:prod
 ```
 
-GitHub Actions は push と pull request で同じ check を実行します。
+GitHub Actions は push と pull request で同じ check と Linux artifact build を実行します。正式な cross-platform artifact は tag-based Release workflow で生成します。
 
 ## ドキュメント
 

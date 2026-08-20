@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.5.7
+
+- Added sync-folder status, cleanup, and Markdown diagnostics commands: `--sync-status`, `--sync-clean`, and `--sync-diagnostics`.
+- Added CLI Broadcast: `--broadcast <text>`, repeatable/comma-separated `--broadcast-target <pid|title>`, and guarded `--broadcast-sync` delivery through a trusted sync folder.
+- Added Rust build caching to pull-request and release GitHub Actions jobs while retaining the existing full checks and artifact builds.
+
 ## 1.5.6
 
 - Added configuration inspection commands: `--config-check`, `--config-path`, and `--config-example`.
