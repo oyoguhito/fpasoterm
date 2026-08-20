@@ -11,7 +11,9 @@ platform integration, security, and compatibility with shells, multiplexers,
 and TUI editors.
 
 Plugins are an advanced local customization feature. They are not a sandboxed
-extension format and are not downloaded by fpasoterm.
+extension format. fpasoterm downloads a public port only when the user
+explicitly invokes `--plugin-install`; it never downloads plugins at startup
+or automatically from a renderer plugin.
 
 For reviewed public plugins, use the
 [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins).
@@ -99,36 +101,79 @@ The explicit plugin-management spellings are also available from every CLI:
 ```sh
 fpasoterm --plugin-path
 fpasoterm --plugin-list
-fpasoterm --plugin-info welcome-banner.ts
-fpasoterm --plugin-enable welcome-banner.ts
-fpasoterm --plugin-disable welcome-banner.ts
+fpasoterm --plugin-info welcome-banner
+fpasoterm --plugin-uninstall welcome-banner
+fpasoterm --plugin-enable welcome-banner
+fpasoterm --plugin-disable welcome-banner
 fpasoterm --plugin-enable-all
 fpasoterm --plugin-disable-all
 ```
 
-`--plugin-list` prints discovered files with their declared versions and the `enabled` entries. The
+`--plugin-list` is a local-only view of the active `User/plugins` directory. It does not query
+GitHub or the public port catalog; use `--plugin-search [query]` for that remote catalog. It
+prints discovered files with their declared versions and the `enabled` entries. The
 `--plugin-enable` and `--plugin-disable` options are aliases for the existing
 `--enable-plugin` and `--disable-plugin` options.
 `--plugin-info <file>` prints the resolved source path, enabled state, declared
 version, description, load status, and renderer URL without opening a window. Pass a
-`.js` or `.ts` filename such as `welcome-banner.ts`; an extensionless name is
-not a valid selector.
+`.js` or `.ts` filename such as `welcome-banner.ts`. For all local
+`--plugin-*` selectors, the leading `plugins/` and the `.js`/`.ts` suffix are
+optional: use `welcome-banner` or `appearance/teal`. If both `.js` and `.ts`
+would match, provide an extension or a more specific path.
+`--plugin-uninstall <file>` removes one or comma-separated local plugin source
+files from `User/plugins`, removes their generated cache files, and removes the
+same entries from `plugins.enabled`. It never contacts the public catalog and
+refuses ambiguous names, traversal, and symlinked plugin files. Restart open
+fpasoterm windows after removal. It cannot be combined with other plugin
+mutation options.
 `--plugin-enable-all` enables every discovered `.js`/`.ts` file. It reports an
 error when `User/plugins` contains no plugin source; it never silently creates
 or enables an empty list.
 `--plugin-disable-all` clears only `plugins.enabled`; it does not delete any
 plugin source or cache file.
 
+## Public Port Install
+
+Search the public metadata index before selecting a port. This requests only
+the official `INDEX`; it does not download or execute plugin source:
+
+```sh
+fpasoterm --plugin-search
+fpasoterm --plugin-search teal
+```
+
+`--plugin-search` is a **remote** search and prints its source as the official
+GitHub `INDEX`. For a local checkout that you want to review or modify, use
+`npm run ports -- search <query>` from `fpasoterm-plugins`; its `install` and
+`update` commands copy only from that local checkout. This keeps remote direct
+install and local reviewed-copy workflows distinct.
+
+Download one selected port from the official
+[`oyoguhito/fpasoterm-plugins`](https://github.com/oyoguhito/fpasoterm-plugins)
+repository without cloning its full checkout or installing Node.js:
+
+```sh
+fpasoterm --plugin-install appearance/teal
+fpasoterm --plugin-install appearance/teal --enable
+fpasoterm --plugin-uninstall appearance/teal
+```
+
+The first command copies only the requested source into `User/plugins` and
+leaves it disabled for review. `--enable` explicitly adds it to
+`plugins.enabled`. Existing files are preserved unless
+`--plugin-install-force` is supplied. The installer connects over HTTPS only to
+the fixed official repository, validates port/source paths, manifest metadata,
+source size, and the expected fpasoterm plugin header. Downloaded plugins still
+run in the renderer, so review and trust them before enabling them.
+
 When duplicate filenames exist in different subdirectories, use a path
 relative to `plugins`, such as `team/status-banner.ts`.
 
 ### Windows packaged binary
 
-The MSI/EXE does not copy public samples into the writable `User/plugins`
-directory. Use the Windows source-checkout instructions in
-[fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) to install
-a reviewed port, or use `fpasoterm.cmd --plugin-path` to locate the directory
-before manually placing trusted source.
+MSI/EXE supports `fpasoterm.exe --plugin-install <category/name>` directly;
+Node.js and a source checkout are not required. Use `fpasoterm.cmd` only when
+running from a Windows source checkout.
 
 At startup, plugin scripts are loaded from the trusted `User/plugins` source or
 the generated TypeScript cache using Tauri's local asset protocol. The default

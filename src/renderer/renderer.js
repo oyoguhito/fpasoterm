@@ -13,6 +13,7 @@ const terminalLogSearchStatusElement = document.getElementById('terminal-log-sea
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
+const checkForUpdatesButton = document.getElementById('check-for-updates');
 const terminalLogConfirmElement = document.getElementById('terminal-log-confirm');
 const terminalLogConfirmMessageElement = document.getElementById('terminal-log-confirm-message');
 const terminalLogConfirmOkButton = document.getElementById('terminal-log-confirm-ok');
@@ -361,6 +362,7 @@ function installTauriApiAdapter() {
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
     getAppVersion: () => invoke('app_version'),
+    checkForUpdate: () => invoke('update_check'),
     getTerminalCapabilities: () => invoke('terminal_capabilities'),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
@@ -599,6 +601,9 @@ function appendDiagnosticLine(message) {
 // Restores the shared panel's regular text body after another diagnostics view.
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
+  if (checkForUpdatesButton) {
+    checkForUpdatesButton.hidden = true;
+  }
   if (fontGlyphPreviewElement) {
     fontGlyphPreviewElement.hidden = true;
   }
@@ -1827,6 +1832,7 @@ function diagnosticsPanelFocusItems() {
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
+    checkForUpdatesButton,
     closeDiagnosticsButton,
     diagnosticsElement,
     fontGlyphPreviewElement,
@@ -2388,12 +2394,20 @@ async function showKeyboardShortcutsHelp() {
     `${keybindingLabel('kill')}  Kill the running terminal command and keep its shell open`,
     `${keybindingLabel('tile')}  Tile all fpasoterm windows`,
     `${keybindingLabel('closeAll')}  Close all fpasoterm windows after confirmation`,
+    'Check for Updates  Compare this build with the npm latest release',
     'Escape        Close the current menu or panel',
   ].join('\n');
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = '';
   diagnosticsPanel.hidden = false;
-  closeDiagnosticsButton.focus({ preventScroll: true });
+  if (checkForUpdatesButton) {
+    checkForUpdatesButton.hidden = false;
+    checkForUpdatesButton.disabled = false;
+    checkForUpdatesButton.textContent = 'Check for Updates';
+    checkForUpdatesButton.focus({ preventScroll: true });
+  } else {
+    closeDiagnosticsButton.focus({ preventScroll: true });
+  }
 }
 
 // Displays the configured sync folder, health checks, and discovered channels
@@ -2923,6 +2937,36 @@ closeAllWindowsButton.addEventListener('click', () => {
 // Opens the keyboard shortcut reference from the window menu.
 keyboardShortcutsHelpButton.addEventListener('click', () => {
   showKeyboardShortcutsHelp().catch((error) => showDiagnostic(`help failed: ${error}`));
+});
+
+// Queries npm only after an explicit Help-panel action, preserving offline startup behavior.
+checkForUpdatesButton?.addEventListener('click', async () => {
+  checkForUpdatesButton.disabled = true;
+  checkForUpdatesButton.textContent = 'Checking...';
+  try {
+    const status = await window.fpasoterm.checkForUpdate();
+    const result = status.updateAvailable
+      ? 'Status: update available. Run: fpasoterm --self-update'
+      : status.localBuildNewer
+        ? 'Status: local build is newer than npm latest.'
+        : 'Status: up to date.';
+    diagnosticsElement.value = [
+      diagnosticsElement.value,
+      '',
+      `Installed: ${status.installed}`,
+      `Latest npm release: ${status.latest}`,
+      result,
+    ].join('\n');
+    diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+    checkForUpdatesButton.textContent = status.updateAvailable ? 'Update Available' : 'Up to Date';
+  } catch (error) {
+    diagnosticsElement.value = `${diagnosticsElement.value}\n\nUpdate check failed: ${error}`;
+    diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+    checkForUpdatesButton.textContent = 'Check Failed';
+    showDiagnostic(`update check failed: ${error}`);
+  } finally {
+    checkForUpdatesButton.disabled = false;
+  }
 });
 
 // Reports the logical work area so ChromeOS shelf and display scaling are not

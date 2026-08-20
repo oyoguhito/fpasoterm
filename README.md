@@ -123,7 +123,17 @@ Check the installed version without opening a window:
 ```sh
 fpasoterm --version
 fpasoterm -v
+fpasoterm --update-check
 ```
+
+`--update-check` explicitly queries npm for the `latest` release and prints
+whether an update is available. It is not run automatically at startup, from
+`--help`, or by `--version`.
+
+In the GUI, open the hamburger menu, choose **Help**, then select **Check for
+Updates**. The same panel shows the installed build, npm latest version, and
+update status. This is also an explicit request; opening Help does not contact
+the network.
 
 On Windows, run the same check against the installed executable after replacing an older installer build. If the old UI is still visible but `fpasoterm --version` prints the older version, the previous executable is still the one being launched from `Path` or the Start menu.
 
@@ -175,7 +185,8 @@ source <(fpasoterm --completion bash)
 ```
 
 See [Command Completion](docs/completion.en.md) for persistent installation and
-Windows PowerShell instructions.
+Windows PowerShell instructions. Reinstall persistent completion after an app
+update only when you want newly added CLI options to appear in Tab completion.
 
 List running fpasoterm windows without opening another window:
 
@@ -396,11 +407,26 @@ Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) 
 
 Plugins can read `version`, run post-startup work through `onReady()`, and add
 actions to the hamburger menu's `Plugins` submenu through `registerCommand()`.
-Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins, or
+Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins in the
+local `User/plugins` directory, or
 `--plugin-enable` / `--plugin-disable` to update the enabled list. Use
 `fpasoterm --plugin-info welcome-banner.ts` for a plugin's source, enabled
 state, description, and load status. Restart the affected window after an
 enable or source change.
+
+Remove a reviewed local plugin and its enabled entry with
+`fpasoterm --plugin-uninstall <file>`. This is a local-only operation; it does
+not contact the public port catalog.
+
+To download one reviewed public plugin without cloning the ports repository or
+installing Node.js, use `fpasoterm --plugin-install appearance/teal`. Add
+`--enable` only after review to enable it. See [Plugins](docs/plugins.en.md)
+for the fixed repository, validation, and overwrite rules.
+
+Use `fpasoterm --plugin-search [query]` to search official public port metadata
+without installing a plugin or downloading plugin source. The output includes a
+copyable `--plugin-install` command for every matching port. The command labels
+its source as the remote official INDEX, while `--plugin-list` is local-only.
 
 Minimal TypeScript plugin:
 

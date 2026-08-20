@@ -13,11 +13,12 @@ if not exist "%FPASOTERM_EXE%" (
 :scan
 if "%~1"=="" goto run
 for %%F in (
-  --help -h --version -v --list -l --close -q --show-config
+  --help -h --version -v --update-check --list -l --close -q --show-config
   --completion --completion-install --completion-uninstall
   --profile-list --config-check --config-path --config-example
   --diagnostics --open-log-dir --copy-diagnostics
-  --plugin-list --plugin-path --plugin-info
+  --plugin-list --plugin-path --plugin-info --plugin-uninstall --plugin-search --plugin-install
+  --plugin-install-force --enable
   --enable-plugin --disable-plugin --plugin-enable --plugin-disable
   --plugin-enable-all --plugin-disable-all
   --reset-window-state -r --reset-config -R --update-config --prune-config
