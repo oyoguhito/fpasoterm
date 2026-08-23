@@ -2,7 +2,7 @@
 
 ## Purpose
 
-fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes. Multiple application windows can be tiled from the titlebar.
+fpasoterm is a desktop terminal application focused on Japanese input in ChromeOS Linux while keeping the architecture portable to other operating systems. It is intended to be used alongside terminal multiplexers such as screen / tmux / byobu / herdr rather than implementing split panes. Multiple application windows can be tiled from the titlebar. It deliberately avoids reimplementing features supplied by the shell, multiplexer, or TUI editor, including session/pane management, shell commands, job control, multiplexer configuration, and editor features provided by Vim, Emacs, Fresh, Helix, and similar tools. Compatibility with those tools is a maintenance priority.
 
 ## Architecture
 
@@ -76,11 +76,11 @@ Supported config sections:
 - `ime`: duplicate input guard options: `duplicateGuard`, `duplicateWindowMs`, and `repeatedTextWindowMs`.
 - `plugins.enabled`: relative plugin paths under the config directory.
 
-Plugins must be placed under `~/.config/fpasoterm/User/plugins/`. `.js` and `.ts` plugins are supported. TypeScript plugins are transpiled to `~/.config/fpasoterm/User/cache/plugins/` at launch and then loaded into the renderer.
+Plugins must be placed under `~/.config/fpasoterm/User/plugins/`. `.js` and `.ts` plugins are supported. TypeScript plugins are transpiled to `~/.config/fpasoterm/User/cache/plugins/` at launch and then loaded into the renderer. New convenience behavior should normally be implemented as a plugin rather than added to the core application.
 
 Renderer plugins access `window.fpasotermPluginApi`, which exposes the terminal, fit addon, resolved config, and a diagnostics logger.
 
-The full default configuration is documented in `docs/config.en.md`. See `examples/config/` for sample configs and `examples/plugins/` for sample plugins.
+The full default configuration is documented in `docs/config.en.md`. See `examples/config/` for sample configs. The runtime plugin API is documented in `docs/plugins.en.md`; reviewed installable plugins and their ports workflow are maintained in [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins).
 
 Known platform limitations are tracked in `docs/known-issues.en.md`.
 
@@ -102,3 +102,6 @@ The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as
 - fpasoterm does not implement split panes; use screen, tmux, byobu, or herdr.
 - fpasoterm does not emulate OS-level Japanese input switching.
 - fpasoterm does not implement terminal shell behavior itself; that is delegated to the user's shell through portable-pty.
+- fpasoterm does not reproduce terminal multiplexer features such as pane/session lifecycle, layout management, command orchestration, or multiplexer-specific configuration.
+- fpasoterm does not reproduce TUI editor features such as buffers, editing commands, language tooling, or editor-specific configuration; it maintains compatibility with Vim, Emacs, Fresh, Helix, and similar tools.
+- fpasoterm does not add general convenience workflows to the core when they can be implemented as a local plugin.

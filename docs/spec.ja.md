@@ -2,7 +2,7 @@
 
 ## 目的
 
-fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割はアプリ側で行いません。複数 window は titlebar の操作で並べられます。
+fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクトップ Terminal アプリです。将来的に他 OS へ展開しやすい構成を採用します。screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提で、画面分割はアプリ側で行いません。複数 window は titlebar の操作で並べられます。session/pane管理、shell command、job control、multiplexer設定に加え、Vim、Emacs、Fresh、Helix などの TUI editor が提供する編集機能は意図して再実装しません。これらの tool を問題なく利用できる互換性の維持・改善を優先します。
 
 ## 構成
 
@@ -69,11 +69,11 @@ shell 付き PTY が終了した場合、fpasoterm は対応するアプリケ�
 - `ime`: 二重入力 guard の `duplicateGuard`、`duplicateWindowMs`、`repeatedTextWindowMs`。
 - `plugins.enabled`: config directory からの相対 plugin path。
 
-プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。`.js` と `.ts` に対応します。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換してから renderer に読み込みます。
+プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。`.js` と `.ts` に対応します。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換してから renderer に読み込みます。追加すると便利な挙動は、原則として本体ではなく plugin として実装します。
 
 renderer plugin は `window.fpasotermPluginApi` から terminal、fit addon、解決済み config、diagnostics logger を利用できます。
 
-全デフォルト設定は `docs/config.ja.md` に記載しています。設定サンプルは `examples/config/`、plugin sample は `examples/plugins/` を参照してください。
+全デフォルト設定は `docs/config.ja.md` に記載しています。設定sampleは `examples/config/` を参照してください。plugin runtime APIは `docs/plugins.ja.md` に記載し、review済みinstall可能pluginとports workflowは [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) で管理します。
 
 現時点の platform 制約は `docs/known-issues.ja.md` に記録します。
 
@@ -95,3 +95,6 @@ diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shif
 - fpasoterm は画面分割を実装しません。screen、tmux、byobu、herdr などを使用してください。
 - fpasoterm は OS レベルの日本語入力切替を独自実装しません。
 - fpasoterm は shell の挙動を独自実装しません。shell との接続は portable-pty に任せます。
+- fpasoterm はpane/session lifecycle、layout管理、command orchestration、multiplexer固有設定などのterminal multiplexer機能を再実装しません。
+- fpasoterm はbuffer、編集command、language tooling、editor固有設定などのTUI editor機能を再実装しません。Vim、Emacs、Fresh、Helix などとの互換性を維持します。
+- fpasoterm は local plugin として実装できる一般的な便利機能を、本体へ追加しません。

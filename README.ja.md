@@ -8,7 +8,11 @@ fpasoterm は Tauri、xterm.js、Rust PTY bridge を使った Terminal アプリ
 
 screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身では画面分割を行いませんが、titlebar の `Tile` button で複数 window を並べられます。
 
+これは意図した責務境界です。pane / session管理、shell command、job control、multiplexer設定に加え、Vim、Emacs、Fresh、Helix などの TUI editor が提供する編集機能も、原則として再実装しません。これらの workflow は shell、multiplexer、TUI editor へ委ね、fpasoterm は terminal surface、OS integration、local customization hook を担当します。追加すると便利な挙動は、原則として本体を肥大化させず plugin として提供します。一方で、これらの multiplexer と TUI editor を問題なく利用できる互換性の維持・改善は優先します。
+
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
+
+window menu の `Font / Glyph Test` では、使用中のterminal font設定とCJK、半角カナ、罫線、記号、Nerd Font glyphを確認できます。詳細は[Font / Glyph Diagnostics](docs/font-diagnostics.ja.md)を参照してください。
 
 ## 必要な環境
 
@@ -259,7 +263,7 @@ api.terminal.options.cursorBlink = true;
 
 二重入力が残る環境では、`config.toml` の `ime.duplicateWindowMs` または `ime.repeatedTextWindowMs` を少し大きくしてください。
 
-全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin の設定方法、security 上の注意、CLI 管理、対応 API の declaration は [プラグイン](docs/plugins.ja.md) と [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、公開 plugin sample は [examples/plugins](examples/plugins) にあります。
+全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
 Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+B` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。`fpasoterm --broadcast "command"` でも同じ操作を実行でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。

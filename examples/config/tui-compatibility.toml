@@ -1,0 +1,7 @@
+# Preserve application-selected ANSI/RGB colors and tightly spaced glyph art.
+# Launch once with:
+#   fpasoterm --config examples/config/tui-compatibility.toml
+
+[terminal]
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false

@@ -252,12 +252,12 @@ frame = false
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # When omitted, the default is 12 on Intel macOS and 14 on other platforms.
 lineHeight = 1.12
-minimumContrastRatio = 4.5
-rescaleOverlappingGlyphs = true
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.8
 scrollback = 1000
 termName = "xterm-256color"
@@ -385,7 +385,22 @@ maxBytes = 10485760
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. On macOS, the default `fontFamily` starts with `SF Mono` and `Menlo`, then falls back to Hiragino for Japanese. This keeps ASCII cell measurement monospace; do not put proportional `Hiragino Sans` before those fonts. Other platforms place Japanese-capable fonts first so half-width kana and CJK characters are preferred during rendering. `minimumContrastRatio` is enabled by default so ANSI foreground colors that are too close to the dark terminal background remain readable. `rescaleOverlappingGlyphs` is enabled by default to reduce CJK glyph clipping and overlap. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` so terminal multiplexers such as tmux can use terminfo. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+
+### TUI compatibility check
+
+Terminal applications that intentionally use tightly spaced block glyphs or
+low-contrast RGB colors can be distorted by contrast or glyph-rescaling
+overrides. The default values preserve those applications. To compare an
+existing configuration with the compatibility values, either set the following
+in its `[terminal]` section and restart, or launch the partial
+`examples/config/tui-compatibility.toml` configuration for a one-off test:
+
+```toml
+[terminal]
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
+```
 - `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Restart or apply a runtime config file to refresh the menu labels and bindings.
 - `ime`: duplicate input guard settings for IME composition.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.

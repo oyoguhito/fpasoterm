@@ -244,12 +244,12 @@ frame = false
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # 省略時の既定値はmacOS Intelで12、その他のOSで14です。
 lineHeight = 1.12
-minimumContrastRatio = 4.5
-rescaleOverlappingGlyphs = true
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.8
 scrollback = 1000
 termName = "xterm-256color"
@@ -373,7 +373,20 @@ maxBytes = 10485760
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。macOSでは既定の `fontFamily` を `SF Mono`、`Menlo`、日本語用Hiraginoの順にします。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`をこれらより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語対応フォントを先頭にしています。`minimumContrastRatio` は既定で有効で、暗い terminal background と近すぎる ANSI foreground 色も読めるように補正します。`rescaleOverlappingGlyphs` は CJK glyph の欠けや重なりを抑えるため既定で有効です。`terminal.termName` は既定で `xterm-256color` です。backend PTY も `TERM=xterm-256color` を設定するため、tmux などの terminal multiplexer が terminfo を利用できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+
+### TUI互換性の確認
+
+block glyphを詰めて使うterminal applicationや、意図して低contrastなRGB色を使うapplicationでは、
+contrastまたはglyph rescalingの上書きにより表示が崩れることがあります。既定値はこれらの
+applicationをそのまま表示する値です。既存設定と比較する場合は、`[terminal]`へ次を設定して
+再起動するか、一度だけ`examples/config/tui-compatibility.toml`を指定して起動してください。
+
+```toml
+[terminal]
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
+```
 - `keybindings`: application shortcut の設定。`prefix = "Mod+Shift"` はWindows/Linuxでは`Ctrl+Shift`、macOSでは`Cmd+Shift`を表します。Windowsでkeyboard layoutまたは他applicationが`Ctrl+Shift`を捕捉する場合は、`prefix = "Ctrl+Alt"`へ変更してください。この変更は共通modifierを置換するため、従来の`Ctrl+Shift` application shortcutは実行されなくなります。prefix tokenは大文字小文字を区別しませんが、`Ctrl`/`Control`、`Alt`/`Option`、`Shift`、`Meta`/`Cmd`/`Command`、`Mod`だけが使用できます。`Ctrl+Esc`は`Esc`がmodifierではなくaction keyのため無効です。無効なprefixは`Mod+Shift`へfallbackし、menuのtooltipで確認できます。一文字のaction valueは`prefix`を継承し、full shortcut はそのactionだけを上書きします。action keyには`Escape`、`F1`、`ArrowUp`、`KeyN`/`Digit1`などを使用できます。例: `newWindow = "Ctrl+Alt+KeyN"`、`kill = "Ctrl+Alt+Escape"`。`KeyN`のような値はphysical keyboard keyで照合するため、keyboard layoutによる`event.key`の違いを避けられます。window menuの先頭には有効なprefixを表示し、各actionはキーだけを表示します。再起動またはruntime config fileの適用でmenu labelとbindingを更新します。
 - `ime`: IME composition 向けの二重入力 guard 設定。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。

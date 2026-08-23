@@ -146,6 +146,32 @@ body {
   white-space: nowrap;
 }
 
+.window-menu-submenu {
+  display: grid;
+  gap: 4px;
+}
+
+#window-menu-items .window-menu-submenu-toggle::after {
+  content: ">";
+  float: right;
+}
+
+#window-menu-items .window-menu-submenu-toggle[aria-expanded="true"]::after {
+  content: "v";
+}
+
+.window-menu-submenu-items {
+  display: grid;
+  gap: 4px;
+  margin-left: 8px;
+  padding-left: 6px;
+  border-left: 1px solid rgba(255, 255, 255, 0.24);
+}
+
+.window-menu-submenu-items[hidden] {
+  display: none;
+}
+
 #plugin-command-items {
   display: grid;
   gap: 4px;
@@ -459,6 +485,28 @@ body {
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   resize: none;
   white-space: pre;
+}
+
+#font-glyph-preview {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  border-top: 1px solid #252b33;
+  border-bottom: 1px solid #252b33;
+  background: #171b21;
+  color: #e8edf2;
+  outline: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+#font-glyph-preview:focus,
+#font-glyph-preview:focus-visible {
+  outline: 3px solid #f5d76e;
+  outline-offset: -5px;
 }
 
 #diagnostics::selection {
