@@ -431,6 +431,28 @@ When every local window is selected and sync is enabled, the dialog exposes `Inc
 
 This feature deliberately has no remote server, OAuth token, or automatic command execution for later launches. A shared sync folder becomes a command channel when this option is used. Use it only with a folder and channel trusted by every participating machine.
 
+Broadcast always appends Enter. Its **Control byte** picker inserts visible
+notation at the textarea cursor: `\x09` for `Tab`, `\x03` for `Ctrl+C`,
+`\x04` for `Ctrl+D`, `\x18` for `Ctrl+X`, and `\x1A` for `Ctrl+Z`.
+FpasoTerm converts only these picker-inserted notations to terminal bytes when
+you send them. The standalone `Esc` option is intentionally omitted because
+**Alt prefix / Esc** inserts the same `\x1B`. `Ctrl` and `Alt` are modifiers,
+not bytes. For the conventional `Alt+x` terminal sequence, insert **Alt prefix
+/ Esc**, then type `x`. The picker avoids relying on Escape and Tab key events,
+which the dialog reserves for close and focus movement.
+
+Before Broadcast sends a command matching a high-risk pattern, it asks for a
+second confirmation. Current patterns include `rm`, `find -delete`, `git reset
+--hard`, forced `git clean`, filesystem formatting, `dd of=`, `truncate`,
+`shred`, and shutdown commands. The confirmation shows matched patterns,
+selected targets, sync delivery, and the command text. This is a convenience
+warning only: it is not a shell parser or a security boundary, so review every
+Broadcast command before selecting **Send Anyway**.
+
+Broadcast and Diagnostics panels open at the same lower-right position. Drag a
+panel heading to move that panel within the window. The temporary position is
+not saved and does not change the terminal window position or size.
+
 The following `printf` examples are for POSIX shells such as `bash`, `dash`, and `fish`. They do not run as-is in Windows PowerShell or cmd.exe.
 
 ```sh

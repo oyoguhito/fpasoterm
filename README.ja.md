@@ -14,6 +14,8 @@ fpasoterm は `かな` / `英数` キーを横取りしません。日本語入�
 
 window menu の `Font / Glyph Test` では、使用中のterminal font設定とCJK、半角カナ、罫線、記号、Nerd Font glyphを確認できます。詳細は[Font / Glyph Diagnostics](docs/font-diagnostics.ja.md)を参照してください。
 
+window menu の `Diagnostics > Capability Test` では、terminal environmentとtruecolor、OSC 52、OSC 8、bracketed paste、bellの対応状況を確認できます。詳細は[Terminal Capability Diagnostics](docs/capability-diagnostics.ja.md)を参照してください。
+
 ## 必要な環境
 
 詳細な導入手順は [INSTALL.ja.md](INSTALL.ja.md) を参照してください。ChromeOS Linux で開発する場合は、Node.js、Rust、および Tauri/WebKitGTK 用の system package が必要です。
@@ -247,9 +249,9 @@ repeatedTextWindowMs = 140
 enabled = ["plugins/example.ts"]
 ```
 
-プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。plugin は renderer context で動作するため、内容を確認した信頼できるローカル file だけを有効にしてください。
+プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。plugin は renderer context で動作するため、内容を確認した信頼できるローカル file だけを有効にしてください。pluginとsync folderの信頼境界は[セキュリティ](docs/security.ja.md)を参照してください。
 
-plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` section に action を追加できます。`fpasoterm --plugin-list` で検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`fpasoterm --plugin-info welcome-banner.ts`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
+plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list` で検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`fpasoterm --plugin-info welcome-banner.ts`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
 
 最小の TypeScript plugin:
 

@@ -127,6 +127,8 @@ for (const file of [
   'docs/pr-review.ja.md',
   'docs/spec.en.md',
   'docs/spec.ja.md',
+  'docs/security.en.md',
+  'docs/security.ja.md',
   'docs/sync.en.md',
   'docs/sync.ja.md',
   'examples/apply-default-appearance.sh',
@@ -359,6 +361,9 @@ fs.writeFileSync(cliConfigPath, [
   '[profiles.large-font.terminal]',
   'fontSize = 18',
   '',
+  '[sync]',
+  `commandSecret = "${'x'.repeat(32)}"`,
+  '',
 ].join('\n'));
 const profileListResult = runCli('--profile-list');
 assert.equal(profileListResult.status, 0, profileListResult.stderr);
@@ -367,6 +372,8 @@ const selectedProfileResult = runCli('--profile', 'large-font', '--show-config')
 assert.equal(selectedProfileResult.status, 0, selectedProfileResult.stderr);
 assert.match(selectedProfileResult.stdout, /Active profile: large-font/);
 assert.match(selectedProfileResult.stdout, /fontSize = 18/);
+assert.match(selectedProfileResult.stdout, /commandSecret = "\[redacted\]"/);
+assert.doesNotMatch(selectedProfileResult.stdout, /x{32}/);
 const missingProfileResult = runCli('--profile', 'missing', '--show-config');
 assert.equal(missingProfileResult.status, 1);
 assert.match(missingProfileResult.stderr, /profile 'missing' does not exist/);
@@ -783,6 +790,8 @@ assert.match(rustMain, /terminal_resize/);
 assert.match(rustMain, /diagnostics:event/);
 assert.match(rustMain, /command\.env\("TERM", "xterm-256color"\)/);
 assert.match(rustMain, /command\.env\("COLORTERM", "truecolor"\)/);
+assert.match(rustMain, /fn terminal_capabilities\(\)/);
+assert.match(rustMain, /"term": "xterm-256color"/);
 assert.match(rustMain, /TERM_PROGRAM/);
 assert.match(rustMain, /config_apply_path/);
 assert.match(rustMain, /runtime_config_from_path/);
@@ -994,6 +1003,17 @@ assert.match(rustMain, /diagnostics\.json/);
 
 const indexHtml = read('src/renderer/index.html');
 assert.match(indexHtml, /id="terminal-broadcast-target-list"/);
+assert.match(indexHtml, /id="terminal-broadcast-control"/);
+assert.match(indexHtml, /id="terminal-broadcast-control-insert"/);
+assert.match(indexHtml, /id="terminal-broadcast-confirm"/);
+assert.match(indexHtml, /id="terminal-broadcast-confirm-ok"/);
+assert.match(indexHtml, />Send Anyway</);
+assert.match(indexHtml, /Ctrl\+C \(0x03\)/);
+assert.match(indexHtml, /Ctrl\+X \(0x18\)/);
+assert.doesNotMatch(indexHtml, /value="escape"/);
+assert.match(indexHtml, /id="terminal-capability-test"/);
+assert.match(indexHtml, /id="terminal-capability-preview"/);
+assert.match(indexHtml, /data-panel-drag-handle/);
 assert.match(indexHtml, /Select All/);
 assert.match(indexHtml, /Select None/);
 const confirmHtml = read('src/renderer/confirm.html');
@@ -1081,6 +1101,8 @@ assert.match(indexHtml, /id="keyboard-shortcuts-help"/);
 assert.match(indexHtml, />Help \(H\)</);
 assert.match(indexHtml, /aria-keyshortcuts="Control\+Shift\+H"/);
 assert.match(indexHtml, /id="window-menu-items"/);
+assert.match(indexHtml, /id="plugin-menu-section"/);
+assert.match(indexHtml, /id="plugin-menu-toggle"/);
 assert.match(indexHtml, /id="plugin-command-items"/);
 assert.match(indexHtml, /id="close-window"/);
 assert.match(indexHtml, /id="terminal"/);
@@ -1378,13 +1400,16 @@ function runSamplePlugin(relativePath) {
 const helloPluginRun = runSamplePlugin('examples/plugins/hello.ts');
 assert.deepEqual(helloPluginRun.output, ['', '[fpasoterm plugin] hello.ts loaded']);
 assert.deepEqual(helloPluginRun.logs, ['hello.ts loaded']);
+assert.equal(helloPluginRun.commands.get('hello.show').title, 'Show Hello Banner');
 
 const themePluginRun = runSamplePlugin('examples/plugins/theme.ts');
 assert.equal(themePluginRun.api.terminal.options.theme.background, 'rgba(8, 42, 48, 0.86)');
 assert.match(themePluginRun.output.join('\n'), /theme\.ts applied the teal sample palette/);
+assert.equal(themePluginRun.commands.get('theme.apply-teal').title, 'Apply Teal Theme');
 
 const welcomePluginRun = runSamplePlugin('examples/plugins/welcome-banner.ts');
 assert.match(welcomePluginRun.output.join('\n'), /Welcome banner plugin is active/);
+assert.equal(welcomePluginRun.commands.get('welcome-banner.show').title, 'Show Welcome Banner');
 
 const statusPluginRun = runSamplePlugin('examples/plugins/status-banner.ts');
 assert.equal(statusPluginRun.commands.get('status-banner.show').title, 'Show Plugin Status');
@@ -1451,6 +1476,8 @@ assert.match(syncDocsEn, /--sync-diagnostics/);
 assert.match(syncDocsEn, /fpasoterm --broadcast "git status"/);
 assert.match(syncDocsEn, /--broadcast-target/);
 assert.match(syncDocsEn, /--broadcast-sync/);
+assert.match(syncDocsEn, /commandSecret/);
+assert.match(syncDocsEn, /HMAC-SHA-256/);
 assert.match(syncDocsEn, /candidate number/);
 assert.match(syncDocsEn, /Sync Channel/);
 assert.match(syncDocsEn, /same `path` and the same `channel`/);
@@ -1506,6 +1533,8 @@ assert.match(syncDocsJa, /--sync-diagnostics/);
 assert.match(syncDocsJa, /fpasoterm --broadcast "git status"/);
 assert.match(syncDocsJa, /--broadcast-target/);
 assert.match(syncDocsJa, /--broadcast-sync/);
+assert.match(syncDocsJa, /commandSecret/);
+assert.match(syncDocsJa, /HMAC-SHA-256/);
 assert.match(syncDocsJa, /候補番号/);
 assert.match(syncDocsJa, /Sync channel/);
 assert.match(syncDocsJa, /同じ `path` と同じ `channel`/);
@@ -1548,6 +1577,15 @@ assert.match(syncDocsJa, /Windows 上のローカル path/);
 assert.match(syncDocsJa, /%USERPROFILE%/);
 assert.match(syncDocsJa, /各 OS ごとの実 path/);
 assert.match(syncDocsJa, /log=start/);
+
+const securityDocsEn = read('docs/security.en.md');
+const securityDocsJa = read('docs/security.ja.md');
+assert.match(securityDocsEn, /HMAC-SHA-256/);
+assert.match(securityDocsEn, /Local plugins/);
+assert.match(securityDocsEn, /cargo audit/);
+assert.match(securityDocsJa, /HMAC-SHA-256/);
+assert.match(securityDocsJa, /Local plugin/);
+assert.match(securityDocsJa, /cargo audit/);
 
 const runtimeConfig = read('examples/config/runtime-appearance.toml');
 assert.match(runtimeConfig, /title = "RUNTIME SAMPLE ACTIVE"/);
@@ -1934,6 +1972,39 @@ assert.match(styles, /outline: 3px solid #f5d76e/);
 assert.match(styles, /box-shadow: 0 0 0 2px/);
 assert.match(styles, /#diagnostics::selection/);
 assert.match(styles, /#font-glyph-preview/);
+assert.match(styles, /#terminal-broadcast-dialog/);
+assert.match(styles, /position: fixed/);
+assert.match(styles, /100dvw/);
+assert.match(styles, /right: 8px/);
+assert.match(styles, /#terminal-broadcast-confirm\s*\{[\s\S]*position: fixed[\s\S]*z-index: 10040/);
+assert.match(styles, /cursor: move/);
+assert.match(styles, /#terminal-broadcast-control-picker/);
+
+const broadcastControlDocsEn = read('docs/config.en.md');
+const broadcastControlDocsJa = read('docs/config.ja.md');
+assert.match(broadcastControlDocsEn, /Its \*\*Control byte\*\* picker inserts visible/);
+assert.match(broadcastControlDocsEn, /`\\x03`/);
+assert.match(broadcastControlDocsEn, /second confirmation/);
+assert.match(broadcastControlDocsEn, /git reset/);
+assert.match(broadcastControlDocsJa, /dialogの \*\*Control byte\*\* pickerでは/);
+assert.match(broadcastControlDocsJa, /`\\x03`/);
+assert.match(broadcastControlDocsJa, /追加確認/);
+assert.match(renderer, /function insertTerminalBroadcastControl/);
+assert.match(renderer, /function decodeTerminalBroadcastControls/);
+assert.match(renderer, /function dangerousBroadcastCommandLabels/);
+assert.match(renderer, /'git reset --hard'/);
+assert.match(renderer, /function confirmDangerousBroadcast/);
+assert.match(renderer, /function resolveDangerousBroadcastConfirmation/);
+assert.match(renderer, /'ctrl-x': \{ text: '\\\\x18'/);
+assert.match(renderer, /pluginMenuToggleButton\.addEventListener\('click'/);
+assert.match(renderer, /setRangeText/);
+
+const capabilityDiagnosticsEn = read('docs/capability-diagnostics.en.md');
+const capabilityDiagnosticsJa = read('docs/capability-diagnostics.ja.md');
+assert.match(capabilityDiagnosticsEn, /OSC 52/);
+assert.match(capabilityDiagnosticsEn, /Bracketed paste/);
+assert.match(capabilityDiagnosticsJa, /truecolor/);
+assert.match(capabilityDiagnosticsJa, /OSC 8/);
 assert.match(styles, /\.window-menu-submenu-items/);
 assert.match(styles, /white-space: pre-wrap/);
 assert.match(styles, /padding: 0 2px 8px/);

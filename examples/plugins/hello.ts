@@ -7,6 +7,10 @@
 const api = window.fpasotermPluginApi;
 
 api.log('hello.ts loaded');
+api.registerCommand('hello.show', 'Show Hello Banner', () => {
+  api.terminal.writeln('[fpasoterm plugin] hello.ts loaded');
+  api.terminal.focus();
+});
 api.onReady(() => {
   api.terminal.writeln('');
   api.terminal.writeln('[fpasoterm plugin] hello.ts loaded');

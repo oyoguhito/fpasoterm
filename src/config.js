@@ -105,7 +105,9 @@ const defaultConfig = Object.freeze({
     channel: 'default',
     diagnostics: true,
     maxBytes: 1048576,
-    commands: true,
+    commands: false,
+    // Shared-folder command delivery requires this secret on every participant.
+    commandSecret: '',
     commandTtlSeconds: 60,
   },
   logging: {
@@ -269,7 +271,9 @@ channel = "default"
 diagnostics = true
 maxBytes = 1048576
 # commands enables explicitly requested broadcast input through this folder.
-commands = true
+commands = false
+# Leave empty until --setup-sync generates a secret shared only with trusted devices.
+commandSecret = ""
 # Command files expire quickly so they are not executed after a delayed sync.
 commandTtlSeconds = 60
 
@@ -506,6 +510,11 @@ function validateUserConfig(targetPath = configPath(), profileName = process.env
         result.warnings.push(`plugins.enabled includes ${plugin} but file does not exist`);
       }
     }
+  }
+
+  const sync = userConfig.sync;
+  if (sync?.commands === true && (typeof sync.commandSecret !== 'string' || sync.commandSecret.length < 32)) {
+    result.warnings.push('sync.commands requires sync.commandSecret with at least 32 characters; run fpasoterm --setup-sync');
   }
 
   const unsupported = pruneUnsupportedConfig(writableConfigDefaults(), userConfig).removed;

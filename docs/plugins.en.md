@@ -164,7 +164,9 @@ provides:
 - `log(message)`: write a plugin-prefixed diagnostic entry.
 - `version`: read the running fpasoterm version and build identifier.
 - `onReady(callback)`: run code once after the terminal backend has started.
-- `registerCommand(id, title, handler)`: add an action to the `Plugins` section
+- `registerCommand(id, title, handler)`: add an action button under the
+  hamburger menu's `Plugins` submenu. The submenu is shown only when at least
+  one loaded plugin registers a command.
   of the existing hamburger menu.
 
 Keep plugins small and defensive. A plugin load error is reported in diagnostics

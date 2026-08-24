@@ -25,6 +25,9 @@ Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.lo
 Use `Font / Glyph Test` in the window menu to inspect the active terminal font
 settings and representative CJK, half-width kana, box drawing, symbol, and
 Nerd Font glyphs. See [Font and Glyph Diagnostics](docs/font-diagnostics.en.md).
+Use `Diagnostics > Capability Test` to inspect the terminal environment and
+verify truecolor, OSC 52, OSC 8, bracketed-paste, and bell behavior. See
+[Terminal Capability Diagnostics](docs/capability-diagnostics.en.md).
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 
@@ -379,10 +382,10 @@ repeatedTextWindowMs = 140
 enabled = ["plugins/example.ts"]
 ```
 
-Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) and TypeScript (`.ts`) plugins are supported. TypeScript plugins are transpiled into `~/.config/fpasoterm/User/cache/plugins/` at launch. They run in the renderer context, so enable only trusted local files that you have reviewed.
+Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) and TypeScript (`.ts`) plugins are supported. TypeScript plugins are transpiled into `~/.config/fpasoterm/User/cache/plugins/` at launch. They run in the renderer context, so enable only trusted local files that you have reviewed. See [Security](docs/security.en.md) for plugin and sync-folder trust boundaries.
 
 Plugins can read `version`, run post-startup work through `onReady()`, and add
-actions to the hamburger menu's `Plugins` section through `registerCommand()`.
+actions to the hamburger menu's `Plugins` submenu through `registerCommand()`.
 Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins, or
 `--plugin-enable` / `--plugin-disable` to update the enabled list. Use
 `fpasoterm --plugin-info welcome-banner.ts` for a plugin's source, enabled

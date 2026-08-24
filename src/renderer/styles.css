@@ -172,25 +172,6 @@ body {
   display: none;
 }
 
-#plugin-command-items {
-  display: grid;
-  gap: 4px;
-  padding: 4px 0;
-  border-top: 1px solid rgba(255, 255, 255, 0.24);
-}
-
-#plugin-command-items[hidden] {
-  display: none;
-}
-
-#plugin-command-items::before {
-  content: "Plugins";
-  padding: 0 8px;
-  color: #c7d3df;
-  font-size: 11px;
-  line-height: 16px;
-}
-
 #keybinding-prefix {
   padding: 1px 8px 5px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.24);
@@ -231,7 +212,28 @@ body {
 }
 
 .terminal-broadcast-card {
-  width: min(560px, calc(100vw - 32px));
+  width: 100%;
+  max-width: 100%;
+  max-height: calc(100dvh - 32px);
+  overflow: auto;
+}
+
+/* Keep Broadcast out of body's grid flow. Without this fixed overlay, WebKit on
+ * macOS can place the dialog in an implicit grid column beyond the right edge. */
+#terminal-broadcast-dialog {
+  position: fixed;
+  right: 8px;
+  bottom: 8px;
+  z-index: 10030;
+  width: min(760px, calc(100dvw - 16px));
+  max-height: calc(100dvh - var(--titlebar-height) - 16px);
+  overflow: visible;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#terminal-broadcast-dialog[hidden] {
+  display: none;
 }
 
 #terminal-broadcast-text {
@@ -244,6 +246,36 @@ body {
   color: #e8edf2;
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   padding: 8px;
+}
+
+#terminal-broadcast-control-picker {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: #d8e4f0;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-broadcast-control-picker label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+#terminal-broadcast-control,
+#terminal-broadcast-control-insert {
+  height: 24px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: inherit;
+}
+
+#terminal-broadcast-control-status {
+  color: #f5d76e;
 }
 
 #terminal-broadcast-sync-label {
@@ -403,6 +435,16 @@ body {
   padding: 4px 8px;
   color: #f5d76e;
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: move;
+  touch-action: none;
+}
+
+.panel-drag-title {
+  margin-bottom: 10px;
+  color: #f5d76e;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  cursor: move;
+  touch-action: none;
 }
 
 .diagnostics-actions {
@@ -487,7 +529,8 @@ body {
   white-space: pre;
 }
 
-#font-glyph-preview {
+#font-glyph-preview,
+#terminal-capability-preview {
   width: 100%;
   min-width: 0;
   min-height: 0;
@@ -504,7 +547,9 @@ body {
 }
 
 #font-glyph-preview:focus,
-#font-glyph-preview:focus-visible {
+#font-glyph-preview:focus-visible,
+#terminal-capability-preview:focus,
+#terminal-capability-preview:focus-visible {
   outline: 3px solid #f5d76e;
   outline-offset: -5px;
 }
@@ -519,7 +564,8 @@ body {
 }
 
 #terminal-log-confirm,
-#close-all-confirm {
+#close-all-confirm,
+#terminal-broadcast-confirm {
   position: absolute;
   inset: 0;
   z-index: 2;
@@ -531,6 +577,20 @@ body {
 
 #close-all-confirm[hidden] {
   display: none;
+}
+
+#terminal-broadcast-confirm[hidden] {
+  display: none;
+}
+
+/* Broadcast is a fixed overlay, so its destructive-command confirmation must
+ * use a higher fixed layer instead of the ordinary in-panel confirmation layer. */
+#terminal-broadcast-confirm {
+  position: fixed;
+  inset: 0;
+  z-index: 10040;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
 }
 
 .terminal-log-confirm-card {
@@ -553,8 +613,23 @@ body {
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
+#terminal-broadcast-confirm-title {
+  color: #f5d76e;
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
 #terminal-log-confirm-message {
   max-height: 140px;
+  overflow: auto;
+  margin: 8px 0 12px;
+  color: #e8edf2;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-broadcast-confirm-message {
+  max-height: 180px;
   overflow: auto;
   margin: 8px 0 12px;
   color: #e8edf2;
@@ -570,7 +645,9 @@ body {
 }
 
 #terminal-log-confirm-ok,
-#terminal-log-confirm-cancel {
+#terminal-log-confirm-cancel,
+#terminal-broadcast-confirm-ok,
+#terminal-broadcast-confirm-cancel {
   height: 24px;
   min-width: 72px;
   border: 1px solid #3b4652;
