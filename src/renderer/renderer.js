@@ -91,14 +91,14 @@ const fallbackConfig = {
     cursorStyle: 'block',
     fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "NanumGothicCoding", "BIZ UDGothic", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 14,
-    lineHeight: 1.12,
+    lineHeight: 0.92,
     minimumContrastRatio: 1,
     rescaleOverlappingGlyphs: false,
-    backgroundOpacity: 0.8,
+    backgroundOpacity: 0.65,
     scrollback: 1000,
     termName: 'xterm-256color',
     theme: {
-      background: 'rgba(16, 19, 23, 0.80)',
+      background: 'rgba(16, 19, 23, 0.65)',
       foreground: '#e8edf2',
       cursor: '#f5d76e',
       selectionBackground: '#35506b',
@@ -1497,12 +1497,14 @@ async function loadPlugins() {
 
   for (const plugin of pluginUrls) {
     await new Promise((resolve) => {
+      const commandCountBeforeLoad = pluginCommands.size;
       const script = document.createElement('script');
       const source = pluginScriptSource(plugin);
       script.src = source;
       script.async = false;
       script.onload = () => {
-        showDiagnostic(`plugin loaded ${plugin.name} source=${source}`);
+        const registeredCommandCount = pluginCommands.size - commandCountBeforeLoad;
+        showDiagnostic(`plugin loaded ${plugin.name} commands=${registeredCommandCount} source=${source}`);
         resolve();
       };
       script.onerror = () => {
@@ -1513,6 +1515,21 @@ async function loadPlugins() {
       };
       document.head.appendChild(script);
     });
+  }
+  updatePluginMenuVisibility();
+}
+
+// Shows Plugins only when at least one enabled plugin registered a command.
+// Loading a plugin alone does not create a menu action because it has no handler.
+function updatePluginMenuVisibility() {
+  if (!pluginMenuSection || !pluginCommandItems) {
+    return;
+  }
+  const hasCommands = pluginCommands.size > 0;
+  pluginMenuSection.hidden = !hasCommands;
+  if (!hasCommands) {
+    pluginCommandItems.hidden = true;
+    pluginMenuToggleButton?.setAttribute('aria-expanded', 'false');
   }
 }
 
@@ -1595,7 +1612,7 @@ function registerPluginCommand(id, title, handler) {
   button.addEventListener('click', () => runPluginCommand(commandId));
   pluginCommands.set(commandId, { handler, button });
   pluginCommandItems.appendChild(button);
-  pluginMenuSection.hidden = false;
+  updatePluginMenuVisibility();
   showDiagnostic(`plugin command registered id=${commandId}`);
 }
 

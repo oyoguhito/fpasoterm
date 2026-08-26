@@ -167,6 +167,16 @@ Show available options:
 fpasoterm --help
 ```
 
+Shell completion is available for Bash, Zsh, Fish, and PowerShell. For example,
+enable Bash completion in the current shell with:
+
+```bash
+source <(fpasoterm --completion bash)
+```
+
+See [Command Completion](docs/completion.en.md) for persistent installation and
+Windows PowerShell instructions.
+
 List running fpasoterm windows without opening another window:
 
 ```sh
@@ -366,11 +376,11 @@ rememberBounds = true
 frame = false
 [terminal]
 fontSize = 15
-lineHeight = 1.12
+lineHeight = 0.92
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 
 [ime]

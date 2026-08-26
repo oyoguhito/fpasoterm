@@ -6,7 +6,7 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 14
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 
 # Profiles override normal config sections for one launch. They do not modify
 # config.toml or User/window-state.json.

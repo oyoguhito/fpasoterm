@@ -1,6 +1,6 @@
 # セキュリティ
 
-FpasoTerm はuserが選択したshellを起動するため、そのuser accountと同じ権限を持ちます。terminal input、plugin、sync command deliveryはsecurity-sensitiveな機能として扱ってください。
+fpasoterm はuserが選択したshellを起動するため、そのuser accountと同じ権限を持ちます。terminal input、plugin、sync command deliveryはsecurity-sensitiveな機能として扱ってください。
 
 ## 信頼境界
 
@@ -10,7 +10,7 @@ FpasoTerm はuserが選択したshellを起動するため、そのuser account�
 
 ### Sync folder Broadcast
 
-remote Broadcastは既定で無効です。`fpasoterm --setup-sync`は32文字以上の`sync.commandSecret`を生成します。同じsecretは信頼できるdeviceとuser accountだけに設定してください。FpasoTermはsync command fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。
+remote Broadcastは既定で無効です。`fpasoterm --setup-sync`は32文字以上の`sync.commandSecret`を生成します。同じsecretは信頼できるdeviceとuser accountだけに設定してください。fpasotermはsync command fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。
 
 secretはdeviceごとのlocal `config.toml`に保存され、shared folderには保存しません。Git commit、screenshot、Issue、公開設定fileへ含めないでください。secretをrotateする場合は`--setup-sync`を再実行し、trusted deviceのすべてを更新してからsync Broadcastを再開してください。
 
@@ -24,4 +24,4 @@ Broadcast dialogは`rm`や`git reset --hard`など一部の破壊的patternで�
 
 secret、private log内容、sync path、command secretをpublic Issueへ掲載しないでください。GitHubのprivate vulnerability reportingが利用できる場合はそれを使い、利用できない場合はrepository ownerへprivateに連絡してください。
 
-CIではrepository secret scan、`npm audit --omit=dev`、JavaScript/RustのCodeQL、Rust dependency向けの`cargo audit`を実行します。これらは既知riskを減らすものであり、FpasoTerm、plugin、OSを最新に保つ代わりにはなりません。
+CIではrepository secret scan、`npm audit --omit=dev`、JavaScript/RustのCodeQL、Rust dependency向けの`cargo audit`を実行します。これらは既知riskを減らすものであり、fpasoterm、plugin、OSを最新に保つ代わりにはなりません。

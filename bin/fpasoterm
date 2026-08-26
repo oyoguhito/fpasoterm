@@ -43,6 +43,11 @@ const helpText = `Usage: fpasoterm [options]
 Options:
   -h, --help                    Show this help.
   -v, --version                 Show the version and source commit.
+      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.
+      --completion-install <shell>
+                                Install persistent command completion for a shell.
+      --completion-uninstall <shell>
+                                Remove fpasoterm's persistent command completion.
   -l, --list                    List running fpasoterm windows, then exit.
   -q, --close <pid|title|all>   Close windows by PID, exact title, or all.
       --broadcast <text>        Send text plus Enter to running local terminal windows.
@@ -98,6 +103,11 @@ Normal launches build and run the local Tauri binary when needed, then detach
 from the console so the shell prompt is available again.
 Use --foreground when you want the command to wait for the app process.
 
+Completion usage:
+  fpasoterm --completion-install bash
+  fpasoterm --completion-uninstall bash
+  Supported shell values: bash, zsh, fish, powershell
+
 Profile usage:
   1. Find config: fpasoterm --config-path
   2. Add to config.toml:
@@ -143,6 +153,9 @@ function parseArgs(argv) {
   let disableAllPlugins = false;
   let foreground = false;
   let dev = false;
+  let completionShell = '';
+  let completionInstallShell = '';
+  let completionUninstallShell = '';
   let showConfig = false;
   let configCheck = false;
   let profileList = false;
@@ -182,6 +195,24 @@ function parseArgs(argv) {
 
     if (arg === '--dev' || arg === '-d') {
       dev = true;
+      continue;
+    }
+
+    if (arg === '--completion') {
+      completionShell = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--completion-install') {
+      completionInstallShell = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--completion-uninstall') {
+      completionUninstallShell = requireValue(argv, index, arg);
+      index += 1;
       continue;
     }
 
@@ -449,6 +480,9 @@ function parseArgs(argv) {
     version: false,
     foreground,
     dev,
+    completionShell,
+    completionInstallShell,
+    completionUninstallShell,
     showConfig,
     configCheck,
     profileList,
@@ -503,7 +537,8 @@ function validateArgs(argv) {
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--width', '-W',
-    '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target',
+    '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
+    '--completion-install', '--completion-uninstall',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -529,12 +564,163 @@ function printVersion() {
 
 // Returns one stable build identifier for CLI output and diagnostics reports.
 function versionText() {
-  const result = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+  if (fs.existsSync(path.join(root, '.jj'))) {
+    const jjResult = spawnSync('jj', ['-R', root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id.short(12)'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (jjResult.status === 0 && jjResult.stdout.trim()) {
+      return `fpasoterm ${packageJson.version} (commit ${jjResult.stdout.trim()})`;
+    }
+  }
+  const gitResult = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
     encoding: 'utf8',
     windowsHide: true,
   });
-  const commit = result.status === 0 ? result.stdout.trim() : 'unknown';
+  const commit = gitResult.status === 0 ? gitResult.stdout.trim() : 'unknown';
   return `fpasoterm ${packageJson.version} (commit ${commit})`;
+}
+
+// Prints a shell-specific completion script without resolving or launching the app runtime.
+function printCompletion(shell) {
+  const fileNames = {
+    bash: 'fpasoterm.bash',
+    zsh: '_fpasoterm',
+    fish: 'fpasoterm.fish',
+    powershell: 'fpasoterm.ps1',
+  };
+  const normalized = String(shell || '').toLowerCase();
+  const fileName = fileNames[normalized];
+  if (!fileName) {
+    throw new Error(`unsupported completion shell: ${shell} (expected bash, zsh, fish, or powershell)`);
+  }
+  process.stdout.write(fs.readFileSync(path.join(root, 'completions', fileName), 'utf8'));
+}
+
+// Normalizes and validates shell names shared by completion output and file management.
+function completionFileName(shell) {
+  const fileNames = {
+    bash: 'fpasoterm.bash',
+    zsh: '_fpasoterm',
+    fish: 'fpasoterm.fish',
+    powershell: 'fpasoterm.ps1',
+  };
+  const normalized = String(shell || '').toLowerCase();
+  if (!fileNames[normalized]) {
+    throw new Error(`unsupported completion shell: ${shell} (expected bash, zsh, fish, or powershell)`);
+  }
+  return { shell: normalized, fileName: fileNames[normalized] };
+}
+
+// Resolves a user-owned location so install and uninstall never alter system completion files.
+function completionInstallPath(shell) {
+  const normalized = completionFileName(shell).shell;
+  if (normalized === 'bash') {
+    return path.join(process.env.XDG_DATA_HOME || path.join(os.homedir(), '.local', 'share'), 'bash-completion', 'completions', 'fpasoterm');
+  }
+  if (normalized === 'zsh') {
+    return path.join(os.homedir(), '.zfunc', '_fpasoterm');
+  }
+  if (normalized === 'fish') {
+    return path.join(process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config'), 'fish', 'completions', 'fpasoterm.fish');
+  }
+  if (process.platform !== 'win32') {
+    throw new Error('powershell completion installation is supported on Windows only');
+  }
+  return path.join(path.dirname(configPath()), 'completions', 'fpasoterm.ps1');
+}
+
+// Decodes the UTF-16LE profile path represented as ASCII-safe Base64 by PowerShell.
+function decodePowerShellProfilePath(encodedPath) {
+  const bytes = Buffer.from(encodedPath, 'base64');
+  if (bytes.length === 0 || bytes.length % 2 !== 0) {
+    return '';
+  }
+  return bytes.toString('utf16le').replace(/^\uFEFF/, '');
+}
+
+// Asks every available Windows PowerShell host for its profile path rather than assuming Documents is not redirected.
+function powershellProfilePaths() {
+  const profiles = new Map();
+  for (const command of ['pwsh.exe', 'powershell.exe']) {
+    const result = spawnSync(command, ['-NoProfile', '-Command', '[Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($PROFILE.CurrentUserCurrentHost))'], {
+      encoding: 'utf8',
+      windowsHide: true,
+    });
+    if (result.status === 0 && result.stdout.trim()) {
+      const profilePath = decodePowerShellProfilePath(result.stdout.trim());
+      if (profilePath) {
+        profiles.set(profilePath.toLowerCase(), profilePath);
+      }
+    }
+  }
+  if (profiles.size > 0) {
+    return [...profiles.values()];
+  }
+  throw new Error('PowerShell was not found; install it or use --completion powershell manually');
+}
+
+const powershellCompletionStart = '# >>> fpasoterm completion >>>';
+const powershellCompletionEnd = '# <<< fpasoterm completion <<<';
+
+// Escapes marker text before using it to identify fpasoterm's profile block.
+function escapeRegularExpression(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Removes only the managed block, preserving every other user PowerShell profile setting.
+function updatePowershellProfile(profilePath, scriptPath) {
+  const existing = fs.existsSync(profilePath) ? fs.readFileSync(profilePath, 'utf8') : '';
+  const block = new RegExp(`\\r?\\n?${escapeRegularExpression(powershellCompletionStart)}[\\s\\S]*?${escapeRegularExpression(powershellCompletionEnd)}\\r?\\n?`, 'g');
+  const hadManagedBlock = existing.includes(powershellCompletionStart);
+  const withoutExistingBlock = existing.replace(block, '').replace(/\n{3,}/g, '\n\n').trimEnd();
+  if (scriptPath === null) {
+    if (hadManagedBlock && !withoutExistingBlock) {
+      fs.unlinkSync(profilePath);
+    } else if (hadManagedBlock) {
+      fs.writeFileSync(profilePath, withoutExistingBlock ? `${withoutExistingBlock}\n` : '', 'utf8');
+    }
+    return;
+  }
+  fs.mkdirSync(path.dirname(profilePath), { recursive: true });
+  const escapedPath = scriptPath.replace(/'/g, "''");
+  const managedBlock = `${powershellCompletionStart}\n. '${escapedPath}'\n${powershellCompletionEnd}\n`;
+  fs.writeFileSync(profilePath, `${withoutExistingBlock}${withoutExistingBlock ? '\n\n' : ''}${managedBlock}`, 'utf8');
+}
+
+// Installs a completion file for later shell sessions without launching the app runtime.
+function installCompletion(shell) {
+  const { shell: normalized, fileName } = completionFileName(shell);
+  const targetPath = completionInstallPath(normalized);
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+  fs.copyFileSync(path.join(root, 'completions', fileName), targetPath);
+  if (normalized === 'powershell') {
+    const profilePaths = powershellProfilePaths();
+    for (const profilePath of profilePaths) {
+      updatePowershellProfile(profilePath, targetPath);
+    }
+    console.log(`updated PowerShell profile${profilePaths.length === 1 ? '' : 's'}: ${profilePaths.join(', ')}`);
+    console.log('restart PowerShell, or run: . $PROFILE');
+    console.log('if scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned');
+  }
+  console.log(`installed ${normalized} completion: ${targetPath}`);
+}
+
+// Deletes just fpasoterm's installed completion and its managed PowerShell profile block.
+function uninstallCompletion(shell) {
+  const { shell: normalized } = completionFileName(shell);
+  const targetPath = completionInstallPath(normalized);
+  if (normalized === 'powershell') {
+    for (const profilePath of powershellProfilePaths()) {
+      updatePowershellProfile(profilePath, null);
+    }
+  }
+  if (fs.existsSync(targetPath)) {
+    fs.unlinkSync(targetPath);
+    console.log(`removed ${normalized} completion: ${targetPath}`);
+  } else {
+    console.log(`${normalized} completion is not installed: ${targetPath}`);
+  }
 }
 
 // Returns the runtime marker directory shared with the native application.
@@ -831,6 +1017,9 @@ function selfUpdateCheckout() {
 function requireValue(argv, index, flag) {
   const value = argv[index + 1];
   if (!value || value.startsWith('--')) {
+    if (['--completion', '--completion-install', '--completion-uninstall'].includes(flag)) {
+      throw new Error(`${flag} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm ${flag} bash)`);
+    }
     throw new Error(`${flag} requires a value`);
   }
   return value;
@@ -1942,6 +2131,7 @@ function latestRuntimeSourceMtime() {
     'src-tauri/tauri.conf.json',
     'src-tauri/capabilities',
     'src/renderer',
+    'completions',
     'extra/logo/fpasoterm.png',
     'package.json',
   ]
@@ -2143,6 +2333,12 @@ try {
     process.stdout.write(helpText);
   } else if (options.version) {
     printVersion();
+  } else if (options.completionShell) {
+    printCompletion(options.completionShell);
+  } else if (options.completionInstallShell) {
+    installCompletion(options.completionInstallShell);
+  } else if (options.completionUninstallShell) {
+    uninstallCompletion(options.completionUninstallShell);
   } else if (options.listInstances) {
     printRunningInstances();
   } else if (options.closeTarget) {

@@ -45,11 +45,7 @@ plugin source の comment に version と description を宣言できます。ma
 
 ## plugin の有効化
 
-手動管理するlocal pluginの場合は、directoryを作成して信頼できるsourceを設定で有効化します。
-
-```sh
-mkdir -p ~/.config/fpasoterm/User/plugins
-```
+fpasoterm は最初の通常起動時に `User/plugins` を作成します。手動管理するlocal pluginの場合は、そこへ信頼できるsourceを配置して設定で有効化します。
 
 `~/.config/fpasoterm/User/config.toml` で有効にします。
 
@@ -114,7 +110,13 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `version`: 実行中の fpasoterm version と build identifier の参照。
 - `onReady(callback)`: terminal backend の起動成功後に一度だけ code を実行。
 - `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` submenu配下へ
-  action buttonを追加する。loaded pluginが一つ以上commandを登録した場合だけsubmenuを表示する。
+  action buttonを追加する。loaded pluginが一つ以上commandを登録した場合だけsubmenuを表示する。pluginを
+  有効化しただけでは実行するhandlerがないため、buttonは追加しない。
+
+現在のrepository内sampleはすべて一つのcommandを登録します。最新版の`hello.ts`、`status-banner.ts`、
+`theme.ts`、`welcome-banner.ts`を有効化すると、4つのbuttonが表示されるのが正しい動作です。古いlocal sampleが
+commandを登録しない場合もplugin自体は有効で起動時処理を実行できますが、意図してmenuには表示しません。sourceと
+versionは`--plugin-info <file>`で確認し、local plugin fileを差し替えた後はwindowを再起動してください。
 
 plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
 

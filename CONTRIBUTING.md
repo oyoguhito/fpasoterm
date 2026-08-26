@@ -1,6 +1,6 @@
 # Contributing
 
-Thank you for improving FpasoTerm.
+Thank you for improving fpasoterm.
 
 ## Development
 

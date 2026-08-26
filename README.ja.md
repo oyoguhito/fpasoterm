@@ -56,6 +56,15 @@ source checkoutまたはnpm packageの初回起動でlocal Cargo buildが必要�
 fpasoterm --help
 ```
 
+Bash、Zsh、Fish、PowerShellではcommand completionを使えます。例えば現在の
+Bash shellで有効にするには次を実行します。
+
+```bash
+source <(fpasoterm --completion bash)
+```
+
+永続的な導入とWindows PowerShellの手順は[コマンド補完](docs/completion.ja.md)を参照してください。
+
 起動せずに version を確認:
 
 ```sh
@@ -237,7 +246,7 @@ fpasoterm は以下の設定を読み込みます。
 ```toml
 [terminal]
 fontSize = 15
-lineHeight = 1.12
+lineHeight = 0.92
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [ime]

@@ -247,10 +247,10 @@ cursorStyle = "block"
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # 省略時の既定値はmacOS Intelで12、その他のOSで14です。
-lineHeight = 1.12
+lineHeight = 0.92
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
-backgroundOpacity = 0.8
+backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
 shell = ""
@@ -259,7 +259,7 @@ shell = ""
 # 現在の build はこの section を無視します。config.toml へ追加しないでください。
 
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
@@ -360,7 +360,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
-commands = true
+commands = false
+commandSecret = ""
 commandTtlSeconds = 60
 
 [logging]
@@ -370,10 +371,14 @@ autoStart = false
 maxBytes = 10485760
 ```
 
+`lineHeight` の既定値はLinux/Windowsでは`0.92`、macOSでは`0.80`です。macOSではWebKitのdevice-pixel丸めを補正し、terminal artやTUI logoの隣接行がつながるようにします。fpasoterm同梱のxterm.jsは`0.5`以上を受け付けます。macOSで以前の既定値`0.92`、`1`、`1.12`と一致する既存設定はruntimeで移行します。明示したcustom値は保持します。
+
+macOSではbox/block glyphのmetricsがmacOS Terminalに近い`Menlo`を既定fontの先頭にします。`SF Mono`はfallbackとして維持します。
+
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`lineHeight` の既定値はterminal artやTUI logoの隣接行がつながるように `1` です。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。Windows では PowerShell 7 (`pwsh.exe`) が利用可能な場合に既定 shell として使われます。`pwsh.exe` が `PATH` に無い場合、fpasoterm は `C:\Program Files\PowerShell\7\pwsh.exe` などの一般的な PowerShell 7 install path も確認します。full path も指定できます。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
 
 ### TUI互換性の確認
 
@@ -419,7 +424,7 @@ hamburger menu の `Broadcast (^B)`、または `Ctrl+Shift+B` を押します�
 
 Broadcastは常にEnterを追加します。dialogの **Control byte** pickerでは、textareaのcursor位置へ表示可能な
 表記を挿入します。`Tab`は`\x09`、`Ctrl+C`は`\x03`、`Ctrl+D`は`\x04`、`Ctrl+X`は`\x18`、`Ctrl+Z`は
-`\x1A`です。FpasoTermはpickerが挿入したこれらの表記だけを、送信時にterminal byteへ変換します。単独の`Esc`は
+`\x1A`です。fpasotermはpickerが挿入したこれらの表記だけを、送信時にterminal byteへ変換します。単独の`Esc`は
 **Alt prefix / Esc**と同じ`\x1B`になるため、選択肢から除外しています。`Ctrl`と`Alt`はbyteではなくmodifierです。
 慣例上の`Alt+x`を送る場合は **Alt prefix / Esc** を挿入してから`x`を入力します。Escapeはclose、Tabはfocus移動に
 予約されているため、pickerを使うことでkey eventへの依存を避けます。

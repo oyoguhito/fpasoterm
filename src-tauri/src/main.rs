@@ -1,5 +1,7 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
+#[cfg(windows)]
+use base64::Engine;
 use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -416,7 +418,12 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+
+const COMPLETION_BASH: &str = include_str!("../../completions/fpasoterm.bash");
+const COMPLETION_ZSH: &str = include_str!("../../completions/_fpasoterm");
+const COMPLETION_FISH: &str = include_str!("../../completions/fpasoterm.fish");
+const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps1");
 
 // Adds the instance-list command to the shared direct-binary help text.
 fn cli_help_text() -> String {
@@ -448,7 +455,7 @@ fn cli_help_text() -> String {
         )
         .replacen(
             "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.",
-            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nSync commands:\n  --sync-status       Report folder health, commands, and discovered channels\n  --sync-clean        Remove only expired or abandoned command files\n  --sync-diagnostics  Print the Markdown sync health report\n\nProfile usage:\n  1. Find config: fpasoterm --config-path\n  2. Add to config.toml:\n       [profiles.large-font.terminal]\n       fontSize = 18\n  3. Launch: fpasoterm --profile large-font\n  List names: fpasoterm --profile-list\n  Sample file: --config examples/config/profiles.toml --profile large-font\n  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile",
+            "      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nCompletion usage:\n  fpasoterm --completion-install bash\n  fpasoterm --completion-uninstall bash\n  Supported shell values: bash, zsh, fish, powershell\n\nSync commands:\n  --sync-status       Report folder health, commands, and discovered channels\n  --sync-clean        Remove only expired or abandoned command files\n  --sync-diagnostics  Print the Markdown sync health report\n\nProfile usage:\n  1. Find config: fpasoterm --config-path\n  2. Add to config.toml:\n       [profiles.large-font.terminal]\n       fontSize = 18\n  3. Launch: fpasoterm --profile large-font\n  List names: fpasoterm --profile-list\n  Sample file: --config examples/config/profiles.toml --profile large-font\n  Docs: docs/config.en.md#profiles and docs/config.ja.md#profile",
             1,
         )
 }
@@ -476,6 +483,24 @@ fn main() {
     }
     if cli_has_flag(&["--version", "-v"]) {
         print_cli_text(&format!("fpasoterm {}\n", app_version()));
+        return;
+    }
+    if let Some(shell) = cli_option_value("--completion") {
+        print_completion_cli(&shell);
+        return;
+    }
+    if let Some(shell) = cli_option_value("--completion-install") {
+        if let Err(error) = install_completion_cli(&shell) {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(1);
+        }
+        return;
+    }
+    if let Some(shell) = cli_option_value("--completion-uninstall") {
+        if let Err(error) = uninstall_completion_cli(&shell) {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(1);
+        }
         return;
     }
     if cli_has_flag(&["--list", "-l"]) {
@@ -759,6 +784,9 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "-z",
         "--broadcast",
         "--broadcast-target",
+        "--completion",
+        "--completion-install",
+        "--completion-uninstall",
     ];
 
     let mut index = 0;
@@ -786,7 +814,18 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
             let value = args
                 .get(index + 1)
                 .filter(|value| !value.starts_with('-'))
-                .ok_or_else(|| format!("{argument} requires a value"))?;
+                .ok_or_else(|| {
+                    if matches!(
+                        argument.as_str(),
+                        "--completion" | "--completion-install" | "--completion-uninstall"
+                    ) {
+                        format!(
+                            "{argument} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm {argument} bash)"
+                        )
+                    } else {
+                        format!("{argument} requires a value")
+                    }
+                })?;
             validate_direct_cli_value(argument, value)?;
             index += 2;
             continue;
@@ -840,6 +879,17 @@ fn validate_direct_cli_value(option: &str, value: &str) -> Result<(), String> {
         if !valid {
             return Err(format!("{option} must be formatted as <width>x<height>"));
         }
+    }
+    if matches!(
+        option,
+        "--completion" | "--completion-install" | "--completion-uninstall"
+    ) && !matches!(
+        value.to_ascii_lowercase().as_str(),
+        "bash" | "zsh" | "fish" | "powershell"
+    ) {
+        return Err(format!(
+            "{option} supports bash, zsh, fish, or powershell (received {value})"
+        ));
     }
     Ok(())
 }
@@ -1970,6 +2020,7 @@ fn runtime_config() -> RuntimeConfig {
         direct_runtime_config()
     };
     migrate_legacy_terminal_font_family(&mut config);
+    migrate_legacy_terminal_line_height(&mut config);
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -1999,13 +2050,19 @@ fn apply_saved_window_bounds(runtime: &mut RuntimeConfig) {
 }
 
 const DEFAULT_TERMINAL_FONT_FAMILY: &str = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
-const MACOS_TERMINAL_FONT_FAMILY: &str = "\"SF Mono\", Menlo, ui-monospace, SFMono-Regular, \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, monospace";
+const LEGACY_MACOS_TERMINAL_FONT_FAMILY: &str = "\"SF Mono\", Menlo, ui-monospace, SFMono-Regular, \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, monospace";
+const MACOS_TERMINAL_FONT_FAMILY: &str = "Menlo, \"SF Mono\", ui-monospace, SFMono-Regular, \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, monospace";
 const LEGACY_TERMINAL_FONT_FAMILY: &str = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 const LEGACY_NERD_FIRST_TERMINAL_FONT_FAMILY: &str = "\"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Hiragino Sans\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
 
 // Matches the Intel macOS renderer default to the host's more compact terminal metrics.
 fn default_terminal_font_size() -> u32 {
     terminal_font_size_for(env::consts::OS, env::consts::ARCH)
+}
+
+// Uses compact glyph rows so block-art logos do not show a visible gap.
+fn default_terminal_line_height() -> f64 {
+    terminal_line_height_for(env::consts::OS, env::consts::ARCH)
 }
 
 // Uses installed macOS monospace fonts before proportional Japanese fallbacks.
@@ -2034,10 +2091,26 @@ fn migrate_legacy_terminal_font_family(runtime: &mut RuntimeConfig) {
     };
     if font_family == LEGACY_TERMINAL_FONT_FAMILY
         || font_family == LEGACY_NERD_FIRST_TERMINAL_FONT_FAMILY
+        || (env::consts::OS == "macos" && font_family == LEGACY_MACOS_TERMINAL_FONT_FAMILY)
         || (env::consts::OS == "macos" && font_family == DEFAULT_TERMINAL_FONT_FAMILY)
     {
         runtime.config.terminal["fontFamily"] =
             serde_json::Value::String(default_terminal_font_family().to_string());
+    }
+}
+
+// Migrates former defaults while keeping macOS rows compact enough for block art.
+fn migrate_legacy_terminal_line_height(runtime: &mut RuntimeConfig) {
+    let line_height = runtime
+        .config
+        .terminal
+        .get("lineHeight")
+        .and_then(serde_json::Value::as_f64);
+    let former_default = line_height == Some(1.0)
+        || line_height == Some(1.12)
+        || (env::consts::OS == "macos" && line_height == Some(0.92));
+    if former_default {
+        runtime.config.terminal["lineHeight"] = serde_json::json!(default_terminal_line_height());
     }
 }
 
@@ -2047,6 +2120,15 @@ fn terminal_font_size_for(platform: &str, architecture: &str) -> u32 {
         12
     } else {
         14
+    }
+}
+
+// Keeps the macOS WebKit cell-height adjustment testable from CI hosts.
+fn terminal_line_height_for(platform: &str, _architecture: &str) -> f64 {
+    if platform == "macos" {
+        0.8
+    } else {
+        0.92
     }
 }
 
@@ -2092,6 +2174,7 @@ fn merge_runtime_config_from_path(
     }
     config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
     migrate_legacy_terminal_font_family(&mut config);
+    migrate_legacy_terminal_line_height(&mut config);
     config.config_path = absolute_path.to_string_lossy().to_string();
     config.config_dir = absolute_path
         .parent()
@@ -2209,11 +2292,17 @@ fn merge_json_value(base: &mut serde_json::Value, override_value: serde_json::Va
 // Builds a minimal config when the Tauri binary is started without the Node launcher.
 fn default_runtime_config() -> RuntimeConfig {
     let home = home_dir();
-    let config_dir = format!("{home}/.config/fpasoterm/User");
     let config_path = env::var("FPASOTERM_CONFIG_PATH")
         .ok()
         .or_else(|| cli_option_value_any(&["--config", "-c"]))
-        .unwrap_or_else(|| format!("{config_dir}/config.toml"));
+        .unwrap_or_else(|| format!("{home}/.config/fpasoterm/User/config.toml"));
+    let config_dir = Path::new(&config_path)
+        .parent()
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_else(|| format!("{home}/.config/fpasoterm/User"));
+    // A missing plugin directory is normal on a first launch. Do not make a
+    // read-only custom config path fatal, but prepare User/plugins when writable.
+    let _ = fs::create_dir_all(Path::new(&config_dir).join("plugins"));
     let window_state_path = format!("{config_dir}/window-state.json");
     let window = WindowConfig {
         title: env::var("FPASOTERM_WINDOW_TITLE")
@@ -2246,9 +2335,12 @@ fn default_runtime_config() -> RuntimeConfig {
                 "cursorStyle": "block",
                 "fontFamily": default_terminal_font_family(),
                 "fontSize": default_terminal_font_size(),
-                "minimumContrastRatio": 4.5,
-                "rescaleOverlappingGlyphs": true,
+                "lineHeight": default_terminal_line_height(),
+                "backgroundOpacity": 0.65,
+                "minimumContrastRatio": 1,
+                "rescaleOverlappingGlyphs": false,
                 "scrollback": 1000,
+                "termName": "xterm-256color",
                 "shell": read_configured_shell(&config_path).unwrap_or_default(),
                 "images": {
                     "enabled": false,
@@ -2259,7 +2351,7 @@ fn default_runtime_config() -> RuntimeConfig {
                     "iipSupport": false
                 },
                 "theme": {
-                    "background": "rgba(16, 19, 23, 0.80)",
+                    "background": "rgba(16, 19, 23, 0.65)",
                     "foreground": "#e8edf2",
                     "cursor": "#f5d76e",
                     "selectionBackground": "#35506b"
@@ -2293,7 +2385,8 @@ fn default_runtime_config() -> RuntimeConfig {
                 "channel": "default",
                 "diagnostics": true,
                 "maxBytes": 1048576,
-                "commands": true,
+                "commands": false,
+                "commandSecret": "",
                 "commandTtlSeconds": 60
             }),
             logging: serde_json::json!({
@@ -2459,6 +2552,205 @@ fn print_cli_text(text: &str) {
         let _ = stdout.write_all(text.as_bytes());
         let _ = stdout.flush();
     }
+}
+
+// Prints one embedded completion script without starting the desktop application.
+fn print_completion_cli(shell: &str) {
+    match completion_script(shell) {
+        Ok((_, script)) => print_cli_text(script),
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    }
+}
+
+// Resolves an embedded script while keeping accepted shell names identical for every CLI action.
+fn completion_script(shell: &str) -> Result<(&'static str, &'static str), String> {
+    match shell.to_ascii_lowercase().as_str() {
+        "bash" => Ok(("bash", COMPLETION_BASH)),
+        "zsh" => Ok(("zsh", COMPLETION_ZSH)),
+        "fish" => Ok(("fish", COMPLETION_FISH)),
+        "powershell" => Ok(("powershell", COMPLETION_POWERSHELL)),
+        _ => Err(format!(
+            "--completion supports bash, zsh, fish, or powershell (received {shell})"
+        )),
+    }
+}
+
+// Uses only user-owned shell directories; packaged binaries never modify system completion files.
+fn completion_install_path(shell: &str) -> Result<PathBuf, String> {
+    match shell {
+        "bash" => Ok(env::var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(home_dir()).join(".local/share"))
+            .join("bash-completion/completions/fpasoterm")),
+        "zsh" => Ok(PathBuf::from(home_dir()).join(".zfunc/_fpasoterm")),
+        "fish" => Ok(env::var("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from(home_dir()).join(".config"))
+            .join("fish/completions/fpasoterm.fish")),
+        "powershell" if cfg!(windows) => {
+            Ok(PathBuf::from(home_dir()).join(".config/fpasoterm/User/completions/fpasoterm.ps1"))
+        }
+        "powershell" => {
+            Err("powershell completion installation is supported on Windows only".to_string())
+        }
+        _ => Err(format!(
+            "--completion supports bash, zsh, fish, or powershell (received {shell})"
+        )),
+    }
+}
+
+// Decodes the UTF-16LE profile path represented as ASCII-safe Base64 by PowerShell.
+#[cfg(windows)]
+fn decode_powershell_profile_path(encoded_path: &str) -> Option<PathBuf> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(encoded_path.trim())
+        .ok()?;
+    if bytes.is_empty() || bytes.len() % 2 != 0 {
+        return None;
+    }
+    let units = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    let path = String::from_utf16(&units).ok()?;
+    (!path.is_empty()).then(|| PathBuf::from(path.trim_start_matches('\u{feff}')))
+}
+
+// Queries every available Windows PowerShell host for its profile, supporting redirected Documents directories.
+#[cfg(windows)]
+fn powershell_profile_paths() -> Result<Vec<PathBuf>, String> {
+    let mut profiles = Vec::new();
+    for command in ["pwsh.exe", "powershell.exe"] {
+        let output = Command::new(command)
+            .args([
+                "-NoProfile",
+                "-Command",
+                "[Convert]::ToBase64String([System.Text.Encoding]::Unicode.GetBytes($PROFILE.CurrentUserCurrentHost))",
+            ])
+            .output();
+        if let Ok(output) = output {
+            let encoded_profile = String::from_utf8_lossy(&output.stdout);
+            if output.status.success() {
+                if let Some(profile) = decode_powershell_profile_path(&encoded_profile) {
+                    if !profiles.iter().any(|candidate| candidate == &profile) {
+                        profiles.push(profile);
+                    }
+                }
+            }
+        }
+    }
+    if !profiles.is_empty() {
+        return Ok(profiles);
+    }
+    Err("PowerShell was not found; install it or use --completion powershell manually".to_string())
+}
+
+// Adds or removes the explicit marker block without touching unrelated profile content.
+#[cfg(windows)]
+fn update_powershell_profile(
+    profile_path: &Path,
+    script_path: Option<&Path>,
+) -> Result<(), String> {
+    const START: &str = "# >>> fpasoterm completion >>>";
+    const END: &str = "# <<< fpasoterm completion <<<";
+    let existing = fs::read_to_string(profile_path).unwrap_or_default();
+    let mut retained = String::new();
+    let mut skipping = false;
+    let mut removed_managed_block = false;
+    for line in existing.lines() {
+        if line == START {
+            skipping = true;
+            removed_managed_block = true;
+            continue;
+        }
+        if skipping && line == END {
+            skipping = false;
+            continue;
+        }
+        if !skipping {
+            retained.push_str(line);
+            retained.push('\n');
+        }
+    }
+    let retained = retained.trim_end();
+    if let Some(script_path) = script_path {
+        let escaped = script_path.display().to_string().replace('\'', "''");
+        if let Some(parent) = profile_path.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let separator = if retained.is_empty() { "" } else { "\n\n" };
+        fs::write(
+            profile_path,
+            format!("{retained}{separator}{START}\n. '{escaped}'\n{END}\n"),
+        )
+        .map_err(|error| error.to_string())?;
+    } else if profile_path.exists() && removed_managed_block {
+        if retained.is_empty() {
+            fs::remove_file(profile_path).map_err(|error| error.to_string())?;
+        } else {
+            fs::write(profile_path, format!("{retained}\n")).map_err(|error| error.to_string())?;
+        }
+    }
+    Ok(())
+}
+
+// Writes one persistent completion file and, on Windows, a managed PowerShell profile entry.
+fn install_completion_cli(shell: &str) -> Result<(), String> {
+    let (shell, script) = completion_script(shell)?;
+    let target_path = completion_install_path(shell)?;
+    if let Some(parent) = target_path.parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    fs::write(&target_path, script).map_err(|error| error.to_string())?;
+    #[cfg(windows)]
+    if shell == "powershell" {
+        let profiles = powershell_profile_paths()?;
+        for profile in &profiles {
+            update_powershell_profile(profile, Some(&target_path))?;
+        }
+        let profile_list = profiles
+            .iter()
+            .map(|profile| profile.display().to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        print_cli_text(&format!(
+            "updated PowerShell profile{}: {profile_list}\nrestart PowerShell, or run: . $PROFILE\nif scripts are blocked: Set-ExecutionPolicy -Scope CurrentUser RemoteSigned\n",
+            if profiles.len() == 1 { "" } else { "s" }
+        ));
+    }
+    print_cli_text(&format!(
+        "installed {shell} completion: {}\n",
+        target_path.display()
+    ));
+    Ok(())
+}
+
+// Removes only fpasoterm's completion file and managed PowerShell profile block.
+fn uninstall_completion_cli(shell: &str) -> Result<(), String> {
+    let (shell, _) = completion_script(shell)?;
+    let target_path = completion_install_path(shell)?;
+    #[cfg(windows)]
+    if shell == "powershell" {
+        for profile in powershell_profile_paths()? {
+            update_powershell_profile(&profile, None)?;
+        }
+    }
+    if target_path.exists() {
+        fs::remove_file(&target_path).map_err(|error| error.to_string())?;
+        print_cli_text(&format!(
+            "removed {shell} completion: {}\n",
+            target_path.display()
+        ));
+    } else {
+        print_cli_text(&format!(
+            "{shell} completion is not installed: {}\n",
+            target_path.display()
+        ));
+    }
+    Ok(())
 }
 
 // Prints the resolved direct-binary config without opening the application window.
@@ -3353,14 +3645,24 @@ fn embedded_default_config_toml() -> String {
     default_config_toml_for_terminal_defaults(
         default_terminal_font_size(),
         default_terminal_font_family(),
+        default_terminal_line_height(),
     )
 }
 
 // Produces deterministic default TOML for runtime use and unit tests.
-fn default_config_toml_for_terminal_defaults(font_size: u32, font_family: &str) -> String {
+fn default_config_toml_for_terminal_defaults(
+    font_size: u32,
+    font_family: &str,
+    line_height: f64,
+) -> String {
     let text = include_str!("../default-config.toml").replacen(
         "fontSize = 14",
         &format!("fontSize = {font_size}"),
+        1,
+    );
+    let text = text.replacen(
+        "lineHeight = 0.92",
+        &format!("lineHeight = {line_height}"),
         1,
     );
     let font_family_line = format!(
@@ -6547,6 +6849,9 @@ mod tests {
         let value_options = [
             ("--config", "config.toml"),
             ("-c", "config.toml"),
+            ("--completion", "bash"),
+            ("--completion-install", "bash"),
+            ("--completion-uninstall", "bash"),
             ("--profile", "large-font"),
             ("-p", "large-font"),
             ("--plugin-info", "welcome-banner.ts"),
@@ -6624,6 +6929,10 @@ mod tests {
             validate_direct_cli_args(&["--title".to_string(), "-v".to_string()]),
             Err("--title requires a value".to_string())
         );
+        assert_eq!(
+            validate_direct_cli_args(&["--completion-uninstall".to_string()]),
+            Err("--completion-uninstall requires a shell: bash, zsh, fish, or powershell (example: fpasoterm --completion-uninstall bash)".to_string())
+        );
     }
 
     #[test]
@@ -6683,6 +6992,8 @@ mod tests {
         assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
         assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
+        assert_eq!(terminal_line_height_for("macos", "aarch64"), 0.8);
+        assert_eq!(terminal_line_height_for("linux", "x86_64"), 0.92);
     }
 
     #[test]
@@ -6691,7 +7002,7 @@ mod tests {
             terminal_font_family_for("macos"),
             MACOS_TERMINAL_FONT_FAMILY
         );
-        assert!(terminal_font_family_for("macos").starts_with("\"SF Mono\""));
+        assert!(terminal_font_family_for("macos").starts_with("Menlo"));
         assert_eq!(
             terminal_font_family_for("linux"),
             DEFAULT_TERMINAL_FONT_FAMILY
@@ -6734,10 +7045,11 @@ mod tests {
 
     #[test]
     fn embedded_default_config_is_complete_toml() {
-        let text = default_config_toml_for_terminal_defaults(12, MACOS_TERMINAL_FONT_FAMILY);
+        let text = default_config_toml_for_terminal_defaults(12, MACOS_TERMINAL_FONT_FAMILY, 0.8);
         let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
         assert_eq!(config["window"]["width"].as_integer(), Some(1000));
         assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
+        assert_eq!(config["terminal"]["lineHeight"].as_float(), Some(0.8));
         assert_eq!(
             config["terminal"]["fontFamily"].as_str(),
             Some(MACOS_TERMINAL_FONT_FAMILY)

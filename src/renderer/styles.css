@@ -151,6 +151,11 @@ body {
   gap: 4px;
 }
 
+/* The submenu layout rule otherwise overrides the HTML hidden attribute. */
+.window-menu-submenu[hidden] {
+  display: none;
+}
+
 #window-menu-items .window-menu-submenu-toggle::after {
   content: ">";
   float: right;

@@ -68,12 +68,9 @@ CLI reports their version as `(not declared)`.
 
 ## Enable plugins
 
-For a manually maintained local plugin, create the directory and enable its
-trusted source in configuration:
-
-```sh
-mkdir -p ~/.config/fpasoterm/User/plugins
-```
+fpasoterm creates `User/plugins` on its first normal launch. For a manually
+maintained local plugin, place its trusted source there and enable it in
+configuration.
 
 Enable the files in `~/.config/fpasoterm/User/config.toml`:
 
@@ -166,8 +163,15 @@ provides:
 - `onReady(callback)`: run code once after the terminal backend has started.
 - `registerCommand(id, title, handler)`: add an action button under the
   hamburger menu's `Plugins` submenu. The submenu is shown only when at least
-  one loaded plugin registers a command.
-  of the existing hamburger menu.
+  one loaded plugin registers a command. Enabling a plugin alone does not add a
+  button because fpasoterm has no action handler to invoke.
+
+All current in-tree samples register one command, so enabling current copies of
+`hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four
+buttons. If an older local sample does not register a command, it remains
+enabled and can still run its startup code, but it is intentionally absent from
+the menu. Use `--plugin-info <file>` to inspect its source/version and restart
+after replacing a local plugin file.
 
 Keep plugins small and defensive. A plugin load error is reported in diagnostics
 and does not stop later enabled plugins from loading, but an invalid plugin can

@@ -194,7 +194,7 @@ For `channel = "work"`, fpasoterm writes:
 
 `diagnostics.json` contains a JSON payload with `kind`, `channel`, `sourceId`, `updatedAt`, and `text`.
 
-`commands` contains short-lived broadcast-input requests only when a user explicitly selects `Include synced channel` in the Broadcast dialog. It is disabled by default. Enable it only with a `commandSecret` of at least 32 characters shared by trusted devices. FpasoTerm signs command files with HMAC-SHA-256 and ignores unsigned or invalid files. `commandTtlSeconds` defaults to 60 and is capped at 600 seconds. Set `commands = false` to keep diagnostics/log sync while refusing remote input commands.
+`commands` contains short-lived broadcast-input requests only when a user explicitly selects `Include synced channel` in the Broadcast dialog. It is disabled by default. Enable it only with a `commandSecret` of at least 32 characters shared by trusted devices. fpasoterm signs command files with HMAC-SHA-256 and ignores unsigned or invalid files. `commandTtlSeconds` defaults to 60 and is capped at 600 seconds. Set `commands = false` to keep diagnostics/log sync while refusing remote input commands.
 
 ## Usage
 

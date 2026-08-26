@@ -17,12 +17,12 @@ rememberBounds = true
 allowTransparency = true
 cursorBlink = true
 cursorStyle = "block"
-fontFamily = "\"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
+fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
-lineHeight = 1.12
-minimumContrastRatio = 4.5
-rescaleOverlappingGlyphs = true
-backgroundOpacity = 0.8
+lineHeight = 0.92
+minimumContrastRatio = 1
+rescaleOverlappingGlyphs = false
+backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
 shell = ""
@@ -31,7 +31,7 @@ shell = ""
 # Current builds ignore this section. Do not add it to config.toml.
 
 [terminal.theme]
-background = "rgba(16, 19, 23, 0.80)"
+background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
 selectionBackground = "#35506b"
@@ -86,7 +86,8 @@ path = ""
 channel = "default"
 diagnostics = true
 maxBytes = 1048576
-commands = true
+commands = false
+commandSecret = ""
 commandTtlSeconds = 60
 
 [logging]
