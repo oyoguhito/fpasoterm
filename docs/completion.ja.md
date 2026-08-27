@@ -20,6 +20,19 @@ fpasoterm --completion-uninstall bash
 
 `bash`は`zsh`、`fish`、`powershell`へ置き換えられます。install/uninstallはfpasotermが管理するuser fileだけを操作し、system completion fileは変更しません。
 
+## 更新時のcompletion
+
+アプリを更新しても、既に導入したcompletion scriptが動かなくなるための再導入は不要です。永続completionはuser directoryへcopyしたfileであるため、新しいCLI optionや値をTab補完の候補へ追加したい場合だけ、使用するshellに対して再度installを実行してください。
+
+```sh
+fpasoterm --completion-install bash
+fpasoterm --completion-install zsh
+fpasoterm --completion-install fish
+fpasoterm --completion-install powershell
+```
+
+更新後はshellを再起動します。PowerShellでは新しいconsoleを開かずに`. $PROFILE`でprofileを再読込できます。`--completion-uninstall <shell>`はcompletionを削除するためだけのcommandであり、通常の更新時には必要ありません。
+
 ## Bash
 
 現在のshellだけで有効にする場合:

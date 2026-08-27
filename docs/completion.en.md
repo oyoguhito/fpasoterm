@@ -23,6 +23,24 @@ fpasoterm --completion-uninstall bash
 Replace `bash` with `zsh`, `fish`, or `powershell`. Install and uninstall only
 touch fpasoterm-owned user files; they do not modify system completion files.
 
+## Updating Completion
+
+An application update does not require reinstallation for the existing
+completion script to keep working. Persistent completion is a copied user file,
+so rerun the install command only when you want newly added CLI options or
+value candidates to appear in Tab completion:
+
+```sh
+fpasoterm --completion-install bash
+fpasoterm --completion-install zsh
+fpasoterm --completion-install fish
+fpasoterm --completion-install powershell
+```
+
+Restart the shell after updating. In PowerShell, `. $PROFILE` reloads the
+profile without opening a new console. Use `--completion-uninstall <shell>`
+only to remove completion; it is not needed for a normal update.
+
 ## Bash
 
 Current shell:

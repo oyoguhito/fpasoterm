@@ -2,7 +2,7 @@
 
 fpasoterm のプラグインは、terminal の準備後に renderer で動作するローカルの JavaScript または TypeScript file です。起動時メッセージ、terminal option の調整、diagnostics 連携など、個人用の小さな挙動変更に使えます。追加すると便利な workflow は、原則として本体ではなく plugin として実装します。本体の変更は terminal の正確性、platform integration、security、shell / multiplexer / TUI editorとの互換性に必要なものへ限定します。
 
-プラグインは高度なローカルカスタマイズ機能です。sandbox 化された extension 形式ではなく、fpasoterm がネットワークから plugin を取得することもありません。
+plugin は高度なローカルカスタマイズ機能で、sandbox 化された extension 形式ではありません。fpasoterm は利用者が `--plugin-install` を明示した場合に限り公開portを取得できます。起動時やrenderer pluginから自動取得することはありません。
 
 review済みの公開pluginは [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。公開catalog、port metadata、compatibility check、local install/update/uninstall command、contribution processはこのrepositoryで管理します。本書はfpasoterm本体のruntime contractと手動local plugin配置を説明します。
 
@@ -72,22 +72,46 @@ fpasoterm --show-config
 ```sh
 fpasoterm --plugin-path
 fpasoterm --plugin-list
-fpasoterm --plugin-info welcome-banner.ts
-fpasoterm --plugin-enable welcome-banner.ts
-fpasoterm --plugin-disable welcome-banner.ts
+fpasoterm --plugin-info welcome-banner
+fpasoterm --plugin-uninstall welcome-banner
+fpasoterm --plugin-enable welcome-banner
+fpasoterm --plugin-disable welcome-banner
 fpasoterm --plugin-enable-all
 fpasoterm --plugin-disable-all
 ```
 
-`--plugin-list` は検出した fileと宣言されたversion、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
-`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、load status、renderer URL を表示します。`welcome-banner.ts` のように `.js` または `.ts` の拡張子を含めて指定します。拡張子なしのnameはselectorとして無効です。
+`--plugin-list` はactiveな `User/plugins` directoryだけを対象にする **local list** です。GitHubや公開port catalogへの問い合わせは行いません。remote catalogは `--plugin-search [query]` を使用してください。検出した fileと宣言されたversion、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
+`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、load status、renderer URL を表示します。localの`--plugin-*` selectorでは、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。たとえば`welcome-banner`や`appearance/teal`を指定できます。`.js`と`.ts`の両方が一致する場合はextensionまたはより具体的なpathを指定してください。
+`--plugin-uninstall <file>` は `User/plugins` のlocal plugin sourceを1件またはcomma区切りで削除し、生成済みcacheと同じ`plugins.enabled` entryも削除します。公開catalogには接続せず、曖昧なname、traversal、symlink化されたplugin fileはerrorにします。削除後は開いているfpasoterm windowを再起動してください。他のplugin変更optionとの同時指定はできません。
 `--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`User/plugins`にplugin sourceが無い場合は、空のlistを成功扱いにせずerrorを表示します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
+
+## 公開portの直接install
+
+portを選ぶ前に公開metadata indexを検索できます。これは公式`INDEX`だけを取得し、plugin sourceのdownloadや実行は行いません。
+
+```sh
+fpasoterm --plugin-search
+fpasoterm --plugin-search teal
+```
+
+`--plugin-search` は公式GitHub `INDEX`を表示する **remote search** で、出力にもsourceを表示します。reviewや編集したlocal checkoutから操作する場合は、`fpasoterm-plugins`内で`npm run ports -- search <query>`を使用します。ports CLIの`install`と`update`はそのlocal checkoutからだけcopyするため、remote direct installとlocal review済みcopyの経路を区別できます。
+
+公式の [oyoguhito/fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins)
+repositoryから、必要なportだけを本体CLIで直接取得できます。ports checkout全体やNode.jsは不要です。
+
+```sh
+fpasoterm --plugin-install appearance/teal
+fpasoterm --plugin-install appearance/teal --enable
+fpasoterm --plugin-uninstall appearance/teal
+```
+
+最初のcommandは指定portのsourceだけを`User/plugins`へcopyし、reviewできるよう無効のままにします。`--enable`を明示した場合だけ`plugins.enabled`へ追加します。既存fileは`--plugin-install-force`を指定しない限り置き換えません。installerは固定の公式repositoryにHTTPSで接続し、port/source path、manifest metadata、source size、期待するfpasoterm plugin headerを検証します。download後もpluginはrendererで動作するため、有効化前に内容を確認して信頼できるものだけを使用してください。
 
 subdirectory に同名 file がある場合は、`team/status-banner.ts` のように `plugins` からの相対 path を指定してください。
 
 ### Windows packaged binary
 
-MSI/EXEは公開sampleをwritableな`User/plugins` directoryへ自動コピーしません。review済みportは [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) のWindows source checkout手順で導入してください。手動配置する場合は`fpasoterm.cmd --plugin-path`でdirectoryを確認します。
+MSI/EXEでは`fpasoterm.exe --plugin-install <category/name>`を直接使用できます。Node.jsやsource checkoutは不要です。Windows source checkoutで実行する場合だけ`fpasoterm.cmd`を使用します。
 
 起動時は、trusted な `User/plugins` source または生成されたTypeScript cacheをTauriのlocal asset protocol経由で読み込みます。標準の`User` directoryが対象です。pluginを有効化または編集した後は、対象のfpasoterm windowを閉じて再起動してください。読み込みerrorを調べる場合は、`fpasoterm --foreground --console-diagnostics`で起動し、`plugin loaded` または `failed to load plugin` を確認します。
 

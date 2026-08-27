@@ -631,17 +631,20 @@ function discoverPluginFiles(targetPath = configPath()) {
   return discovered.sort();
 }
 
-// Resolves a file name or plugins-relative path to one unambiguous plugin entry.
+// Resolves a filename or plugins-relative path, with an optional .js/.ts suffix, to one plugin entry.
 function resolvePluginSelector(selector, candidates, action) {
   const normalized = selector.replaceAll('\\', '/').replace(/^\.\//, '').replace(/^plugins\//, '');
   if (!normalized || normalized.startsWith('/') || normalized.startsWith('../') || normalized.includes('/../')) {
     throw new Error(`invalid plugin name: ${selector}`);
   }
 
-  const exact = `plugins/${normalized}`;
-  const matches = normalized.includes('/')
-    ? candidates.filter((candidate) => candidate === exact)
-    : candidates.filter((candidate) => path.posix.basename(candidate) === normalized);
+  const extensionless = !['.js', '.ts'].includes(path.posix.extname(normalized));
+  const matches = candidates.filter((candidate) => {
+    const relative = candidate.replace(/^plugins\//, '');
+    const candidateSelector = normalized.includes('/') ? relative : path.posix.basename(relative);
+    if (candidateSelector === normalized) return true;
+    return extensionless && candidateSelector.replace(/\.(?:js|ts)$/, '') === normalized;
+  });
 
   if (matches.length === 0) {
     throw new Error(`cannot ${action} plugin '${selector}': no matching plugin file`);

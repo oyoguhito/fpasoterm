@@ -209,6 +209,8 @@ const bin = read('bin/fpasoterm');
 assert.match(bin, /--help/);
 assert.match(bin, /--version/);
 assert.match(bin, /-v, --version/);
+assert.match(bin, /--update-check/);
+assert.match(bin, /--plugin-search/);
 assert.match(bin, /-l, --list/);
 assert.match(bin, /-q, --close <pid\|title\|all>/);
 assert.match(bin, /printRunningInstances/);
@@ -535,11 +537,11 @@ assert.equal(pluginPathResult.stdout.trim(), cliPluginsDir);
 
 const emptyPluginListResult = runCli('--plugin-list');
 assert.equal(emptyPluginListResult.status, 0, emptyPluginListResult.stderr);
-assert.match(emptyPluginListResult.stdout, /Available plugins:/);
+assert.match(emptyPluginListResult.stdout, /Local plugins \(User\/plugins\):/);
 assert.match(emptyPluginListResult.stdout, /plugins\/hello\.ts/);
 assert.match(emptyPluginListResult.stdout, /Enabled plugins:\n  \(none enabled\)/);
 
-const enableResult = runCli('--plugin-enable', 'hello.ts, theme.js');
+const enableResult = runCli('--plugin-enable', 'hello, theme');
 assert.equal(enableResult.status, 0, enableResult.stderr);
 assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enabled, [
   'plugins/hello.ts',
@@ -551,12 +553,25 @@ assert.equal(pluginListResult.status, 0, pluginListResult.stderr);
 assert.match(pluginListResult.stdout, /Enabled plugins:\n  plugins\/hello\.ts\n  plugins\/theme\.js/);
 assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3\]/);
 
-const pluginInfoResult = runCli('--plugin-info', 'hello.ts');
+const pluginInfoResult = runCli('--plugin-info', 'hello');
 assert.equal(pluginInfoResult.status, 0, pluginInfoResult.stderr);
 assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
 assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 
-const disableResult = runCli('--plugin-disable', 'hello.ts', '--plugin-disable', 'theme.js');
+const uninstallResult = runCli('--plugin-uninstall', 'theme');
+assert.equal(uninstallResult.status, 0, uninstallResult.stderr);
+assert.match(uninstallResult.stdout, /uninstalled local plugin plugins\/theme\.js/);
+assert.equal(fs.existsSync(path.join(cliPluginsDir, 'theme.js')), false);
+assert.equal(fs.existsSync(path.join(path.dirname(cliConfigPath), 'cache', 'plugins', 'theme.js')), false);
+assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enabled, [
+  'plugins/hello.ts',
+]);
+
+const incompatibleUninstallResult = runCli('--plugin-uninstall', 'hello.ts', '--plugin-enable', 'hello.ts');
+assert.equal(incompatibleUninstallResult.status, 2);
+assert.match(incompatibleUninstallResult.stderr, /cannot be combined with other plugin mutation options/);
+
+const disableResult = runCli('--plugin-disable', 'hello');
 assert.equal(disableResult.status, 0, disableResult.stderr);
 assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enabled, []);
 
@@ -566,13 +581,13 @@ const discoveredPlugins = discoverPluginFiles(cliConfigPath);
 assert.deepEqual(discoveredPlugins, [
   'plugins/hello.ts',
   'plugins/nested/hello.ts',
-  'plugins/theme.js',
 ]);
 assert.throws(
   () => resolvePluginSelector('hello.ts', discoveredPlugins, 'enable'),
   /plugin name 'hello\.ts' is ambiguous.*plugins\/nested\/hello\.ts/,
 );
 assert.equal(resolvePluginSelector('nested/hello.ts', discoveredPlugins, 'enable'), 'plugins/nested/hello.ts');
+assert.equal(resolvePluginSelector('nested/hello', discoveredPlugins, 'enable'), 'plugins/nested/hello.ts');
 fs.rmSync(cliTestDir, { recursive: true, force: true });
 
 const originalConfigHome = process.env.XDG_CONFIG_HOME;
@@ -655,6 +670,9 @@ assert.match(buildArtifacts, /\.exe/);
 assert.match(buildArtifacts, /\.app\.tar\.gz/);
 
 const windowsCommandWrapper = read('extra/windows/fpasoterm.cmd');
+assert.match(windowsCommandWrapper, /--update-check/);
+assert.match(windowsCommandWrapper, /--plugin-search/);
+assert.match(windowsCommandWrapper, /--plugin-install/);
 assert.match(windowsCommandWrapper, /call "%FPASOTERM_EXE%" %\*/);
 assert.doesNotMatch(windowsCommandWrapper, /start "" \/wait/);
 assert.match(windowsCommandWrapper, /--plugin-path/);
@@ -789,6 +807,9 @@ assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
 assert.match(rustMain, /fn cli_help_text/);
 assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
+assert.match(rustMain, /fn npm_update_check/);
+assert.match(rustMain, /fn public_plugin_search_text/);
+assert.match(rustMain, /fn update_check/);
 assert.match(rustMain, /cli_has_flag\(&\["--list", "-l"\]\)/);
 assert.match(rustMain, /fn print_running_instances/);
 assert.match(rustMain, /fn broadcast_targeted_close_request/);
@@ -828,7 +849,9 @@ assert.match(rustMain, /active_profile/);
 assert.match(rustMain, /--plugin-list/);
 assert.match(rustMain, /--plugin-path/);
 assert.match(rustMain, /--plugin-info <file>/);
+assert.match(rustMain, /--plugin-uninstall <file>/);
 assert.match(rustMain, /fn plugin_cli/);
+assert.match(rustMain, /fn uninstall_local_plugins_cli/);
 assert.match(rustMain, /fn resolve_direct_plugin_urls/);
 assert.match(rustMain, /\[profiles\.large-font\.terminal\]/);
 assert.match(rustMain, /--config-check/);
@@ -1186,6 +1209,7 @@ assert.match(readme, /docs\/pr-review\.en\.md/);
 assert.match(readme, /examples\/plugins/);
 assert.match(readme, /registerCommand\(\)/);
 assert.match(readme, /--plugin-list/);
+assert.match(readme, /--plugin-uninstall/);
 assert.match(readme, /docs\/plugins\.en\.md/);
 assert.match(readme, /--shell/);
 assert.match(readme, /--profile <name>/);
@@ -1480,6 +1504,7 @@ assert.match(pluginDocsEn, /User\/plugins/);
 assert.match(pluginDocsEn, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsEn, /local files that you trust/);
 assert.match(pluginDocsEn, /--plugin-list/);
+assert.match(pluginDocsEn, /--plugin-uninstall/);
 assert.match(pluginDocsEn, /registerCommand/);
 assert.match(pluginDocsEn, /@fpasoterm-plugin version/);
 
@@ -1489,6 +1514,7 @@ assert.match(pluginDocsJa, /User\/plugins/);
 assert.match(pluginDocsJa, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsJa, /信頼できるローカル file/);
 assert.match(pluginDocsJa, /--plugin-list/);
+assert.match(pluginDocsJa, /--plugin-uninstall/);
 assert.match(pluginDocsJa, /registerCommand/);
 assert.match(pluginDocsJa, /@fpasoterm-plugin version/);
 
@@ -2142,6 +2168,10 @@ assert.match(config, /transpileModule/);
 const launcher = read('bin/fpasoterm');
 assert.match(launcher, /const runtimeConfig = loadConfig\(\);\s+printPluginList\(targetPath, \[\.\.\.enabled\]\.sort\(\), runtimeConfig\.pluginUrls\);/);
 assert.match(launcher, /--plugin-info <file>/);
+assert.match(launcher, /--plugin-uninstall <file>/);
+assert.match(launcher, /function uninstallLocalPlugins/);
+const windowsLauncher = read('extra/windows/fpasoterm.cmd');
+assert.match(windowsLauncher, /--plugin-uninstall/);
 assert.match(launcher, /function showPluginInfo\(options\)/);
 assert.match(launcher, /--setup-sync/);
 assert.match(launcher, /--sync-status/);
