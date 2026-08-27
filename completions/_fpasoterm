@@ -17,6 +17,7 @@ _fpasoterm() {
     '(-h --help)'{-h,--help}'[show help]' \
     '(-v --version)'{-v,--version}'[show version and build commit]' \
     '--update-check[compare the installed version with npm latest]' \
+    '--doctor[check updates, npm audit, and config health]' \
     '--completion=[print a completion script]:shell:(bash zsh fish powershell)' \
     '--completion-install=[install persistent completion]:shell:(bash zsh fish powershell)' \
     '--completion-uninstall=[remove persistent completion]:shell:(bash zsh fish powershell)' \
@@ -44,8 +45,10 @@ _fpasoterm() {
     '--plugin-uninstall=[remove local plugin files]:plugin:_fpasoterm_plugin_names' \
     '--plugin-search=[search official public plugin ports]:query:' \
     '--plugin-install=[download an official public port]:port:(terminal/hello terminal/welcome-banner terminal/status-banner terminal/theme appearance/amber appearance/teal appearance/high-contrast productivity/git-status productivity/session-marker)' \
-    '--plugin-install-force[replace an existing file during plugin install]' \
-    '--enable[enable the downloaded public plugin]' \
+    '--plugin-ports-dir=[install --plugin-install from this local fpasoterm-plugins checkout]:directory:_files -/' \
+    '--plugin-install-file=[copy a trusted local JavaScript or TypeScript plugin]:plugin:_files -g "*.(js|ts)"' \
+    '--force[replace an existing file during plugin install]' \
+    '--enable[enable a plugin installed by one install command]' \
     '--enable-plugin=[enable plugins]:plugin:_fpasoterm_plugin_names' \
     '--disable-plugin=[disable plugins]:plugin:_fpasoterm_plugin_names' \
     '--plugin-enable=[alias for enable-plugin]:plugin:_fpasoterm_plugin_names' \

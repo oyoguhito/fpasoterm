@@ -4,7 +4,7 @@ fpasoterm のプラグインは、terminal の準備後に renderer で動作す
 
 plugin は高度なローカルカスタマイズ機能で、sandbox 化された extension 形式ではありません。fpasoterm は利用者が `--plugin-install` を明示した場合に限り公開portを取得できます。起動時やrenderer pluginから自動取得することはありません。
 
-review済みの公開pluginは [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。公開catalog、port metadata、compatibility check、local install/update/uninstall command、contribution processはこのrepositoryで管理します。本書はfpasoterm本体のruntime contractと手動local plugin配置を説明します。
+review済みの公開pluginは [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。このrepositoryは公開catalog、`INDEX`、開発時のcheck、contribution processを管理します。利用者向けのlocal checkoutまたは指定fileからのinstallはfpasoterm本体CLIで行います。本書はfpasoterm本体のruntime contractと手動local plugin配置を説明します。
 
 ## セキュリティ
 
@@ -62,8 +62,8 @@ plugin list または plugin source を変更した後は fpasoterm を再起動
 CLIでは、packaged Windows/macOS/Linux binaryを含めて、file nameを指定してlistを更新できます。
 
 ```sh
-fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
-fpasoterm --disable-plugin status-banner.ts
+fpasoterm --enable-plugin welcome-banner,status-banner
+fpasoterm --disable-plugin status-banner
 fpasoterm --show-config
 ```
 
@@ -94,7 +94,7 @@ fpasoterm --plugin-search
 fpasoterm --plugin-search teal
 ```
 
-`--plugin-search` は公式GitHub `INDEX`を表示する **remote search** で、出力にもsourceを表示します。reviewや編集したlocal checkoutから操作する場合は、`fpasoterm-plugins`内で`npm run ports -- search <query>`を使用します。ports CLIの`install`と`update`はそのlocal checkoutからだけcopyするため、remote direct installとlocal review済みcopyの経路を区別できます。
+`--plugin-search` は公式GitHub `INDEX`を表示する **remote search** で、出力にもsourceを表示します。`fpasoterm-plugins` 内の `ports` command はlocal `INDEX`検索、port開発、検証に使えますが、利用者がpluginをinstallするためには不要です。
 
 公式の [oyoguhito/fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins)
 repositoryから、必要なportだけを本体CLIで直接取得できます。ports checkout全体やNode.jsは不要です。
@@ -105,13 +105,33 @@ fpasoterm --plugin-install appearance/teal --enable
 fpasoterm --plugin-uninstall appearance/teal
 ```
 
-最初のcommandは指定portのsourceだけを`User/plugins`へcopyし、reviewできるよう無効のままにします。`--enable`を明示した場合だけ`plugins.enabled`へ追加します。既存fileは`--plugin-install-force`を指定しない限り置き換えません。installerは固定の公式repositoryにHTTPSで接続し、port/source path、manifest metadata、source size、期待するfpasoterm plugin headerを検証します。download後もpluginはrendererで動作するため、有効化前に内容を確認して信頼できるものだけを使用してください。
+最初のcommandは指定portのsourceだけを`User/plugins`へcopyし、reviewできるよう無効のままにします。`--enable`を明示した場合だけ`plugins.enabled`へ追加します。既存fileは`--force`を指定しない限り置き換えません。installerは固定の公式repositoryにHTTPSで接続し、port/source path、manifest metadata、source size、期待するfpasoterm plugin headerを検証します。download後もpluginはrendererで動作するため、有効化前に内容を確認して信頼できるものだけを使用してください。
+
+### local checkout / fileからのinstall
+
+clone、review、開発中のlocal portは、`npm run ports install` を使わずfpasoterm本体CLIからinstallできます。
+
+```sh
+git clone https://github.com/oyoguhito/fpasoterm-plugins.git
+fpasoterm --plugin-install appearance/teal \
+  --plugin-ports-dir ./fpasoterm-plugins --enable
+```
+
+`--plugin-ports-dir` には `ports/` を含むcheckoutを明示します。指定しない`--plugin-install`は公式GitHub repositoryから対象portを取得します。指定した場合はlocal installerとして`port.toml`、metadata、必要なfpasoterm versionを検証し、該当plugin sourceだけをcopyします。local経路はnetworkへ接続しません。
+
+ports checkout外にある信頼済みの単独pluginをcopyする場合は、source fileを明示します。
+
+```sh
+fpasoterm --plugin-install-file ~/work/my-plugins/team-banner.ts --enable
+```
+
+どちらのlocal commandもfpasoterm plugin headerとrenderer API markerを持つ通常の`.js`または`.ts` fileだけを受け付けます。既存fileは`--force`を指定しない限り置き換えません。
 
 subdirectory に同名 file がある場合は、`team/status-banner.ts` のように `plugins` からの相対 path を指定してください。
 
 ### Windows packaged binary
 
-MSI/EXEでは`fpasoterm.exe --plugin-install <category/name>`を直接使用できます。Node.jsやsource checkoutは不要です。Windows source checkoutで実行する場合だけ`fpasoterm.cmd`を使用します。
+MSI/EXEでは`fpasoterm.exe --plugin-install <category/name>`を`--plugin-ports-dir`の有無にかかわらず使用でき、`--plugin-install-file`も直接使用できます。Node.jsは不要です。Windows source checkoutで実行する場合だけ`fpasoterm.cmd`を使用します。
 
 起動時は、trusted な `User/plugins` source または生成されたTypeScript cacheをTauriのlocal asset protocol経由で読み込みます。標準の`User` directoryが対象です。pluginを有効化または編集した後は、対象のfpasoterm windowを閉じて再起動してください。読み込みerrorを調べる場合は、`fpasoterm --foreground --console-diagnostics`で起動し、`plugin loaded` または `failed to load plugin` を確認します。
 
@@ -132,6 +152,9 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `config`: `plugins.enabled` を含む解決済み runtime config の参照。
 - `log(message)`: plugin prefix 付き diagnostics の出力。
 - `version`: 実行中の fpasoterm version と build identifier の参照。
+- `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
+  `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
+  行いません。
 - `onReady(callback)`: terminal backend の起動成功後に一度だけ code を実行。
 - `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` submenu配下へ
   action buttonを追加する。loaded pluginが一つ以上commandを登録した場合だけsubmenuを表示する。pluginを

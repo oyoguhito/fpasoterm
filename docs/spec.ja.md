@@ -58,7 +58,7 @@ shell 付き PTY が終了した場合、fpasoterm は対応するアプリケ�
 
 ユーザー設定は `~/.config/fpasoterm/User/config.toml` から読み込みます。`XDG_CONFIG_HOME` がある場合は `$XDG_CONFIG_HOME/fpasoterm/User/config.toml` を使います。
 `fpasoterm --config <path>` で一度だけ別の TOML file を使えます。`--width`、`--height`、`--size` は一度だけ window size を上書きします。`--shell <command>` は一度だけ別の shell を使います。`--command <command>` は起動後に shell へ command を送ります。`--reset-window-state` は保存済み window size を削除します。`--reset-config` (`-R`) は選択した `config.toml` をtimestamp付きbackup名へrenameし、OSごとの全デフォルト値へ戻し、保存済みwindow stateも削除してデフォルトの1000x680を反映して終了します。
-`--show-config` は解決済み設定と plugin 読み込み状況を表示します。`--enable-plugin` と `--disable-plugin` は `User/plugins` 配下から一つ以上のファイル名を選択し、`plugins.enabled` を編集します。
+`--show-config` は解決済み設定と plugin 読み込み状況を表示します。`--enable-plugin` と `--disable-plugin` は一つ以上のlocal plugin selectorを選択し、`plugins.enabled` を編集します。selectorは曖昧でない場合、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。
 
 起動時に fpasoterm は既定値を `config.toml.example` として書き出し、古い場合は更新します。既存のユーザー設定は上書きしません。`window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。保存済み size は `config.toml` に明示した `window.width`、`window.height` より優先され、CLI の一時指定は最後に適用されます。
 

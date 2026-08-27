@@ -22,6 +22,17 @@ exit status `1`になります。warningだけの場合は、省略した設定�
 `0`です。正の数であるべき設定、無効または存在しない`plugins.enabled`、
 `--prune-config`で削除対象となる未対応keyを確認します。
 
+## Doctor
+
+```sh
+fpasoterm --doctor
+```
+
+`--doctor`はread-onlyです。Node launcherでは選択中のconfig検証、npmの`latest`との比較、
+`npm audit --omit=dev`を実行します。自動更新やconfig書換は行わず、結果に応じて明示的な
+`--self-update`だけを案内します。standalone binaryではconfigと更新確認を実行しますが、
+npm package manifestを持たないためnpm auditは`unavailable`として表示します。
+
 ## 診断report
 
 ```sh

@@ -124,11 +124,18 @@ Check the installed version without opening a window:
 fpasoterm --version
 fpasoterm -v
 fpasoterm --update-check
+fpasoterm --doctor
 ```
 
 `--update-check` explicitly queries npm for the `latest` release and prints
 whether an update is available. It is not run automatically at startup, from
 `--help`, or by `--version`.
+
+`--doctor` is a read-only maintenance report. From the Node launcher it checks
+the selected config, npm latest version, and `npm audit --omit=dev`; it only
+suggests `--self-update` and never updates automatically. A standalone bundled
+binary reports config and update health, while npm audit is unavailable because
+it has no npm package context.
 
 In the GUI, open the hamburger menu, choose **Help**, then select **Check for
 Updates**. The same panel shows the installed build, npm latest version, and
@@ -319,6 +326,7 @@ opening a window:
 
 ```sh
 fpasoterm --config-check
+fpasoterm --doctor
 fpasoterm --diagnostics
 fpasoterm --copy-diagnostics
 fpasoterm --open-log-dir
@@ -337,8 +345,8 @@ plugin load details when it is available.
 Enable or disable plugins in `config.toml`:
 
 ```sh
-fpasoterm --enable-plugin hello.ts,theme.ts
-fpasoterm --disable-plugin hello.ts,theme.ts
+fpasoterm --enable-plugin hello,theme
+fpasoterm --disable-plugin hello,theme
 ```
 
 Plugin enable/disable commands are handled by the Node launcher. For direct
@@ -410,7 +418,7 @@ actions to the hamburger menu's `Plugins` submenu through `registerCommand()`.
 Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins in the
 local `User/plugins` directory, or
 `--plugin-enable` / `--plugin-disable` to update the enabled list. Use
-`fpasoterm --plugin-info welcome-banner.ts` for a plugin's source, enabled
+`fpasoterm --plugin-info welcome-banner` for a plugin's source, enabled
 state, description, and load status. Restart the affected window after an
 enable or source change.
 
@@ -422,6 +430,13 @@ To download one reviewed public plugin without cloning the ports repository or
 installing Node.js, use `fpasoterm --plugin-install appearance/teal`. Add
 `--enable` only after review to enable it. See [Plugins](docs/plugins.en.md)
 for the fixed repository, validation, and overwrite rules.
+
+For a reviewed local `fpasoterm-plugins` checkout, use
+`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`.
+For one trusted standalone source file, use
+`fpasoterm --plugin-install-file ./my-plugin.ts --enable`. The ports project is
+for catalog/INDEX search and plugin development or validation; fpasoterm performs
+the end-user installation.
 
 Use `fpasoterm --plugin-search [query]` to search official public port metadata
 without installing a plugin or downloading plugin source. The output includes a

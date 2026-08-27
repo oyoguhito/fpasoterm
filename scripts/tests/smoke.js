@@ -210,6 +210,15 @@ assert.match(bin, /--help/);
 assert.match(bin, /--version/);
 assert.match(bin, /-v, --version/);
 assert.match(bin, /--update-check/);
+assert.match(bin, /--doctor/);
+assert.match(bin, /runDoctor/);
+assert.match(bin, /npmAuditSummary/);
+assert.match(bin, /installPublicPlugin/);
+assert.match(bin, /installLocalPluginPort/);
+assert.match(bin, /installLocalPluginFile/);
+assert.match(bin, /--plugin-ports-dir/);
+assert.match(bin, /--plugin-install-file/);
+assert.match(bin, /without starting Cargo/);
 assert.match(bin, /--plugin-search/);
 assert.match(bin, /-l, --list/);
 assert.match(bin, /-q, --close <pid\|title\|all>/);
@@ -671,14 +680,17 @@ assert.match(buildArtifacts, /\.app\.tar\.gz/);
 
 const windowsCommandWrapper = read('extra/windows/fpasoterm.cmd');
 assert.match(windowsCommandWrapper, /--update-check/);
+assert.match(windowsCommandWrapper, /--doctor/);
+assert.match(windowsCommandWrapper, /FPASOTERM_ARGS/);
 assert.match(windowsCommandWrapper, /--plugin-search/);
 assert.match(windowsCommandWrapper, /--plugin-install/);
-assert.match(windowsCommandWrapper, /call "%FPASOTERM_EXE%" %\*/);
+assert.match(windowsCommandWrapper, /--plugin-install-file/);
+assert.match(windowsCommandWrapper, /call "%FPASOTERM_EXE%" %FPASOTERM_ARGS%/);
 assert.doesNotMatch(windowsCommandWrapper, /start "" \/wait/);
 assert.match(windowsCommandWrapper, /--plugin-path/);
 assert.match(windowsCommandWrapper, /--version/);
 assert.match(windowsCommandWrapper, /--broadcast --broadcast-target --broadcast-sync/);
-assert.match(windowsCommandWrapper, /start "" "%FPASOTERM_EXE%" %\*/);
+assert.match(windowsCommandWrapper, /start "" "%FPASOTERM_EXE%" %FPASOTERM_ARGS%/);
 
 const releaseWorkflow = read('.github/workflows/release.yml');
 assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
@@ -809,6 +821,8 @@ assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
 assert.match(rustMain, /fn npm_update_check/);
 assert.match(rustMain, /fn public_plugin_search_text/);
+assert.match(rustMain, /fn public_plugin_catalog_entries/);
+assert.match(rustMain, /fn plugin_catalog/);
 assert.match(rustMain, /fn update_check/);
 assert.match(rustMain, /cli_has_flag\(&\["--list", "-l"\]\)/);
 assert.match(rustMain, /fn print_running_instances/);
@@ -856,6 +870,8 @@ assert.match(rustMain, /fn resolve_direct_plugin_urls/);
 assert.match(rustMain, /\[profiles\.large-font\.terminal\]/);
 assert.match(rustMain, /--config-check/);
 assert.match(rustMain, /config_check_cli/);
+assert.match(rustMain, /--doctor/);
+assert.match(rustMain, /fn doctor_cli/);
 assert.match(rustMain, /diagnostics_markdown_cli/);
 assert.match(rustMain, /open_log_directory_cli/);
 assert.match(rustMain, /cli_has_flag\(&\["--reset-window-state", "-r"\]\)/);
@@ -1471,6 +1487,7 @@ function runSamplePlugin(relativePath) {
       plugins: { enabled: ['plugins/hello.ts'] },
     },
     log: (message) => logs.push(message),
+    getOfficialPluginIndex: async () => [],
     onReady: (callback) => readyCallbacks.push(callback),
     registerCommand: (id, title, handler) => commands.set(id, { title, handler }),
   };
@@ -1740,6 +1757,7 @@ assert.match(pluginTypes, /duplicateWindowMs/);
 assert.match(pluginTypes, /version: string/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
+assert.match(pluginTypes, /getOfficialPluginIndex:/);
 
 const renderer = read('src/renderer/renderer.js');
 assert.match(renderer, /registerPluginReadyCallback/);
@@ -1747,6 +1765,8 @@ assert.match(renderer, /notifyPluginsReady/);
 assert.match(renderer, /schedulePluginsReadyAfterTerminalOutput/);
 assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
+assert.match(renderer, /getPluginCatalog: \(\) => invoke\('plugin_catalog'\)/);
+assert.match(renderer, /getOfficialPluginIndex: \(\) => window\.fpasoterm\.getPluginCatalog\(\)/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
 assert.match(renderer, /pluginMenuSection\.hidden = !hasCommands/);

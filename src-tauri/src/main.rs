@@ -418,7 +418,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --doctor                   Check updates and configuration health, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Back up config.toml and restore all defaults, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n";
 
 const COMPLETION_BASH: &str = include_str!("../../completions/fpasoterm.bash");
 const COMPLETION_ZSH: &str = include_str!("../../completions/_fpasoterm");
@@ -430,7 +430,27 @@ fn cli_help_text() -> String {
     HELP_TEXT
         .replacen(
             "  -c, --config <path>           Use a specific config.toml for this launch.",
-            "  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --plugin-uninstall <file> Remove comma-separated local plugin files, then exit.\n      --plugin-install <port>   Download one official plugin port into User/plugins, then exit.\n      --plugin-install-force    Replace an existing file during --plugin-install.\n      --enable                  Enable the downloaded plugin; valid only with --plugin-install.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.\n                                Local selectors may omit plugins/ and .js/.ts when unambiguous.",
+            "  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --plugin-uninstall <file> Remove comma-separated local plugin files, then exit.\n      --plugin-install <port>   Download one official plugin port into User/plugins, then exit.\n      --plugin-install-local <port>\n                                Install one port from a local fpasoterm-plugins checkout.\n      --plugin-ports-dir <path> Use this checkout with --plugin-install-local.\n      --plugin-install-file <path>\n                                Copy one trusted local .js/.ts plugin into User/plugins.\n      --plugin-install-force    Replace an existing file during a plugin install.\n      --enable                  Enable a plugin installed by one --plugin-install command.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.\n                                Local selectors may omit plugins/ and .js/.ts when unambiguous.",
+            1,
+        )
+        .replacen(
+            "      --plugin-install <port>   Download one official plugin port into User/plugins, then exit.",
+            "      --plugin-install <port>   Install from GitHub, or --plugin-ports-dir when supplied.",
+            1,
+        )
+        .replacen(
+            "      --plugin-install-local <port>\n                                Install one port from a local fpasoterm-plugins checkout.\n",
+            "",
+            1,
+        )
+        .replacen(
+            "      --plugin-ports-dir <path> Use this checkout with --plugin-install-local.",
+            "      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout.",
+            1,
+        )
+        .replacen(
+            "      --plugin-install-force    Replace an existing file during a plugin install.",
+            "      --force                   Replace an existing file during a plugin install.",
             1,
         )
         .replacen(
@@ -498,6 +518,10 @@ fn main() {
                 std::process::exit(1);
             }
         }
+        return;
+    }
+    if cli_has_flag(&["--doctor"]) {
+        doctor_cli();
         return;
     }
     if cli_has_flag(&["--plugin-search"]) {
@@ -716,6 +740,7 @@ fn main() {
             clipboard_write,
             app_version,
             update_check,
+            plugin_catalog,
             terminal_capabilities,
             config_get,
             config_apply_path,
@@ -749,6 +774,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--version",
         "-v",
         "--update-check",
+        "--doctor",
         "--plugin-search",
         "--list",
         "-l",
@@ -762,7 +788,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
-        "--plugin-install-force",
+        "--force",
         "--enable",
         "--sync-status",
         "--sync-clean",
@@ -798,6 +824,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-enable",
         "--plugin-disable",
         "--plugin-install",
+        "--plugin-ports-dir",
+        "--plugin-install-file",
         "--shell",
         "-s",
         "--command",
@@ -890,18 +918,33 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
             "--broadcast-target and --broadcast-sync require --broadcast <text>".to_string(),
         );
     }
-    let has_public_plugin_install = args.iter().any(|argument| {
-        argument == "--plugin-install" || argument.starts_with("--plugin-install=")
-    });
-    if !has_public_plugin_install
+    let plugin_install_count = args
+        .iter()
+        .filter(|argument| {
+            matches!(
+                argument.as_str(),
+                "--plugin-install" | "--plugin-install-file"
+            ) || argument.starts_with("--plugin-install=")
+                || argument.starts_with("--plugin-install-file=")
+        })
+        .count();
+    if plugin_install_count > 1 {
+        return Err("use only one of --plugin-install or --plugin-install-file".to_string());
+    }
+    if plugin_install_count == 0
         && args
             .iter()
-            .any(|argument| argument == "--plugin-install-force" || argument == "--enable")
+            .any(|argument| argument == "--force" || argument == "--enable")
     {
-        return Err(
-            "--plugin-install-force and --enable require --plugin-install <category/name>"
-                .to_string(),
-        );
+        return Err("--force and --enable require a --plugin-install command".to_string());
+    }
+    if args.iter().any(|argument| {
+        argument == "--plugin-ports-dir" || argument.starts_with("--plugin-ports-dir=")
+    }) && !args
+        .iter()
+        .any(|argument| argument == "--plugin-install" || argument.starts_with("--plugin-install="))
+    {
+        return Err("--plugin-ports-dir requires --plugin-install <category/name>".to_string());
     }
     let has_plugin_uninstall = args.iter().any(|argument| {
         argument == "--plugin-uninstall" || argument.starts_with("--plugin-uninstall=")
@@ -917,7 +960,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
                     | "--plugin-enable-all"
                     | "--plugin-disable-all"
                     | "--plugin-install"
-                    | "--plugin-install-force"
+                    | "--plugin-install-file"
+                    | "--force"
                     | "--enable"
             ) || argument.starts_with("--enable-plugin=")
                 || argument.starts_with("--disable-plugin=")
@@ -2933,17 +2977,17 @@ fn validate_selected_profile_cli() -> Result<(), String> {
     }
 }
 
-// Validates the selected TOML file without changing it or creating a window.
-fn config_check_cli() {
+// Builds the selected TOML validation report without changing it or creating a window.
+fn config_check_report() -> (String, bool) {
     let runtime = default_runtime_config();
     let path = runtime.config_path;
     let config = match read_toml_config_or_empty(&path) {
         Ok(config) => config,
         Err(error) => {
-            print_cli_text(&format!(
-                "config: {path}\nstatus: error\n\nerrors:\n- {error}\n"
-            ));
-            std::process::exit(1);
+            return (
+                format!("config: {path}\nstatus: error\n\nerrors:\n- {error}\n"),
+                false,
+            );
         }
     };
     let mut warnings = Vec::new();
@@ -3010,12 +3054,22 @@ fn config_check_cli() {
                 .map(|key| format!("{key} is not a supported configuration key")),
         );
     }
-    print_cli_text(&format!("config: {path}\nstatus: ok\n"));
+    let mut report = format!("config: {path}\nstatus: ok\n");
     if !warnings.is_empty() {
-        print_cli_text("\nwarnings:\n");
+        report.push_str("\nwarnings:\n");
         for warning in warnings {
-            print_cli_text(&format!("- {warning}\n"));
+            report.push_str(&format!("- {warning}\n"));
         }
+    }
+    (report, true)
+}
+
+// Validates the selected TOML file without changing it or creating a window.
+fn config_check_cli() {
+    let (report, valid) = config_check_report();
+    print_cli_text(&report);
+    if !valid {
+        std::process::exit(1);
     }
 }
 
@@ -3157,6 +3211,20 @@ struct PublicPluginPort {
     install_path: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Public metadata read from the fixed official INDEX without downloading plugin code.
+struct PublicPluginCatalogEntry {
+    id: String,
+    name: String,
+    version: String,
+    author: String,
+    description: String,
+    license: String,
+    min_fpasoterm_version: String,
+    install_path: String,
+}
+
 // Permits only normal, portable port path components in a public registry request.
 fn validate_public_plugin_port_id(value: &str) -> Result<String, String> {
     let id = sanitize_cli_value(value);
@@ -3217,16 +3285,53 @@ fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String
     Ok(text)
 }
 
+// Downloads and validates the compact official INDEX without downloading plugin code.
+fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, String> {
+    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
+    index
+        .lines()
+        .enumerate()
+        .map(|(line_number, line)| {
+            let fields = line.split('|').collect::<Vec<_>>();
+            if fields.len() != 8 || fields.iter().any(|field| field.trim().is_empty()) {
+                return Err(format!("official INDEX:{} is malformed", line_number + 1));
+            }
+            let id = validate_public_plugin_port_id(fields[0])?;
+            if !safe_public_plugin_relative_path(fields[7]) {
+                return Err(format!(
+                    "official INDEX:{} has an invalid install path",
+                    line_number + 1
+                ));
+            }
+            Ok(PublicPluginCatalogEntry {
+                id,
+                name: fields[1].to_string(),
+                version: fields[2].to_string(),
+                author: fields[3].to_string(),
+                description: fields[4].to_string(),
+                license: fields[5].to_string(),
+                min_fpasoterm_version: fields[6].to_string(),
+                install_path: fields[7].to_string(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+// Exposes only fixed-repository catalog metadata to trusted renderer plugins.
+fn plugin_catalog() -> Result<Vec<PublicPluginCatalogEntry>, String> {
+    public_plugin_catalog_entries()
+}
+
 // Searches bounded public metadata without downloading or evaluating plugin source.
 fn public_plugin_search_text(query: &str) -> Result<String, String> {
     let needle = query.trim().to_ascii_lowercase();
-    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
-    let matches = index
-        .lines()
-        .filter_map(|line| {
-            let fields = line.split('|').collect::<Vec<_>>();
-            (fields.len() == 8 && fields[..5].join(" ").to_ascii_lowercase().contains(&needle))
-                .then_some(fields)
+    let matches = public_plugin_catalog_entries()?
+        .into_iter()
+        .filter(|entry| {
+            [&entry.id, &entry.name, &entry.author, &entry.description]
+                .iter()
+                .any(|value| value.to_ascii_lowercase().contains(&needle))
         })
         .collect::<Vec<_>>();
     let mut lines = vec![if needle.is_empty() {
@@ -3238,10 +3343,16 @@ fn public_plugin_search_text(query: &str) -> Result<String, String> {
     if matches.is_empty() {
         lines.push("  (none)".to_string());
     } else {
-        for fields in matches {
+        for entry in matches {
             lines.push(format!(
                 "  {} ({} {}, {}, requires >= {})\n    {}\n    install: fpasoterm --plugin-install {} --enable",
-                fields[0], fields[1], fields[2], fields[3], fields[6], fields[4], fields[0]
+                entry.id,
+                entry.name,
+                entry.version,
+                entry.author,
+                entry.min_fpasoterm_version,
+                entry.description,
+                entry.id,
             ));
         }
     }
@@ -3322,29 +3433,13 @@ fn public_plugin_version_at_least(current: &str, required: &str) -> bool {
     }
 }
 
-// Copies a verified official port source into User/plugins without following symlinked directories.
-fn install_public_plugin_port(
+// Writes one verified plugin source into User/plugins without following symlinked destinations.
+fn install_plugin_source(
     config_path: &str,
-    selector: &str,
+    port: &PublicPluginPort,
+    source: String,
     force: bool,
 ) -> Result<String, String> {
-    let id = validate_public_plugin_port_id(selector)?;
-    let manifest_text = download_public_plugin_file(
-        &format!("ports/{id}/port.toml"),
-        PUBLIC_PLUGIN_MANIFEST_LIMIT,
-    )?;
-    let port = parse_public_plugin_manifest(&id, &manifest_text)?;
-    let current_version = env!("CARGO_PKG_VERSION");
-    if !public_plugin_version_at_least(current_version, &port.min_fpasoterm_version) {
-        return Err(format!(
-            "{} requires fpasoterm >= {}; current version is {}",
-            port.id, port.min_fpasoterm_version, current_version
-        ));
-    }
-    let source = download_public_plugin_file(
-        &format!("ports/{}/{}", port.id, port.source),
-        PUBLIC_PLUGIN_SOURCE_LIMIT,
-    )?;
     if !source.contains("window.fpasotermPluginApi") {
         return Err(format!("{} is not a fpasoterm renderer plugin", port.id));
     }
@@ -3380,7 +3475,7 @@ fn install_public_plugin_port(
         }
         if !force {
             return Err(format!(
-                "{} already exists; review it and rerun with --plugin-install-force to replace it",
+                "{} already exists; review it and rerun with --force to replace it",
                 destination.display()
             ));
         }
@@ -3399,6 +3494,130 @@ fn install_public_plugin_port(
     }
     fs::rename(&temporary, &destination).map_err(|error| error.to_string())?;
     Ok(format!("plugins/{}", port.install_path.replace('\\', "/")))
+}
+
+// Copies a verified official port source into User/plugins without following symlinked directories.
+fn install_public_plugin_port(
+    config_path: &str,
+    selector: &str,
+    force: bool,
+) -> Result<String, String> {
+    let id = validate_public_plugin_port_id(selector)?;
+    let manifest_text = download_public_plugin_file(
+        &format!("ports/{id}/port.toml"),
+        PUBLIC_PLUGIN_MANIFEST_LIMIT,
+    )?;
+    let port = parse_public_plugin_manifest(&id, &manifest_text)?;
+    let current_version = env!("CARGO_PKG_VERSION");
+    if !public_plugin_version_at_least(current_version, &port.min_fpasoterm_version) {
+        return Err(format!(
+            "{} requires fpasoterm >= {}; current version is {}",
+            port.id, port.min_fpasoterm_version, current_version
+        ));
+    }
+    let source = download_public_plugin_file(
+        &format!("ports/{}/{}", port.id, port.source),
+        PUBLIC_PLUGIN_SOURCE_LIMIT,
+    )?;
+    install_plugin_source(config_path, &port, source, force)
+}
+
+// Locates a checked-out fpasoterm-plugins tree for reviewed local port installs.
+fn local_plugin_ports_directory(explicit: Option<String>) -> Result<PathBuf, String> {
+    let directory = explicit
+        .map(PathBuf::from)
+        .ok_or_else(|| "--plugin-ports-dir requires a path".to_string())?;
+    if directory.join("ports").is_dir() {
+        Ok(directory)
+    } else {
+        Err(
+            "local fpasoterm-plugins checkout not found; pass --plugin-ports-dir <path>"
+                .to_string(),
+        )
+    }
+}
+
+// Reads a bounded regular local source file and rejects symlinks before copying it.
+fn read_local_plugin_file(path: &Path, limit: u64, label: &str) -> Result<String, String> {
+    let metadata = fs::symlink_metadata(path)
+        .map_err(|error| format!("could not read {label} {}: {error}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err(format!("{label} {} must be a regular file", path.display()));
+    }
+    if metadata.len() > limit {
+        return Err(format!(
+            "{label} {} exceeds the {limit}-byte limit",
+            path.display()
+        ));
+    }
+    fs::read_to_string(path)
+        .map_err(|error| format!("could not read {label} {}: {error}", path.display()))
+}
+
+// Installs a reviewed port from a local fpasoterm-plugins checkout without network access.
+fn install_local_plugin_port(
+    config_path: &str,
+    selector: &str,
+    ports_directory: Option<String>,
+    force: bool,
+) -> Result<String, String> {
+    let id = validate_public_plugin_port_id(selector)?;
+    let root = local_plugin_ports_directory(ports_directory)?;
+    let port_directory = root.join("ports").join(&id);
+    let manifest = read_local_plugin_file(
+        &port_directory.join("port.toml"),
+        PUBLIC_PLUGIN_MANIFEST_LIMIT,
+        "local port manifest",
+    )?;
+    let port = parse_public_plugin_manifest(&id, &manifest)?;
+    if !public_plugin_version_at_least(env!("CARGO_PKG_VERSION"), &port.min_fpasoterm_version) {
+        return Err(format!(
+            "{} requires fpasoterm >= {}; current version is {}",
+            port.id,
+            port.min_fpasoterm_version,
+            env!("CARGO_PKG_VERSION")
+        ));
+    }
+    let source = read_local_plugin_file(
+        &port_directory.join(&port.source),
+        PUBLIC_PLUGIN_SOURCE_LIMIT,
+        "local plugin source",
+    )?;
+    install_plugin_source(config_path, &port, source, force)
+}
+
+// Copies one explicit trusted local plugin file into User/plugins without requiring a ports tree.
+fn install_local_plugin_file(
+    config_path: &str,
+    source_path: &str,
+    force: bool,
+) -> Result<String, String> {
+    let path = PathBuf::from(source_path);
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| "--plugin-install-file requires a .js or .ts file".to_string())?;
+    if !matches!(
+        path.extension().and_then(|value| value.to_str()),
+        Some("js" | "ts")
+    ) {
+        return Err("--plugin-install-file requires a .js or .ts file".to_string());
+    }
+    let source = read_local_plugin_file(&path, PUBLIC_PLUGIN_SOURCE_LIMIT, "local plugin source")?;
+    let metadata = plugin_metadata(&source);
+    if metadata.version == "(not declared)" {
+        return Err(
+            "local plugin source must declare // @fpasoterm-plugin version: <version>".to_string(),
+        );
+    }
+    let port = PublicPluginPort {
+        id: file_name.to_string(),
+        version: metadata.version,
+        min_fpasoterm_version: env!("CARGO_PKG_VERSION").to_string(),
+        source: file_name.to_string(),
+        install_path: file_name.to_string(),
+    };
+    install_plugin_source(config_path, &port, source, force)
 }
 
 // Resolves a filename or plugins-relative selector with an optional .js/.ts suffix.
@@ -3630,19 +3849,38 @@ fn plugin_cli() {
         return;
     }
     let public_ports = cli_option_values_any(&["--plugin-install"]);
-    if !public_ports.is_empty() {
-        let force = cli_has_flag(&["--plugin-install-force"]);
+    let local_files = cli_option_values_any(&["--plugin-install-file"]);
+    if !public_ports.is_empty() || !local_files.is_empty() {
+        let force = cli_has_flag(&["--force"]);
         let enable = cli_has_flag(&["--enable"]);
         let mut installed = Vec::new();
-        for selector in public_ports
+        let selectors = if !public_ports.is_empty() {
+            &public_ports
+        } else {
+            &local_files
+        };
+        for selector in selectors
             .iter()
             .flat_map(|value| value.split(','))
             .map(str::trim)
             .filter(|value| !value.is_empty())
         {
-            match install_public_plugin_port(&config_path, selector, force) {
+            let result =
+                if !public_ports.is_empty() && cli_option_value("--plugin-ports-dir").is_some() {
+                    install_local_plugin_port(
+                        &config_path,
+                        selector,
+                        cli_option_value("--plugin-ports-dir"),
+                        force,
+                    )
+                } else if !public_ports.is_empty() {
+                    install_public_plugin_port(&config_path, selector, force)
+                } else {
+                    install_local_plugin_file(&config_path, selector, force)
+                };
+            match result {
                 Ok(plugin) => {
-                    print_cli_text(&format!("installed public port {selector} -> {plugin}\n"));
+                    print_cli_text(&format!("installed plugin {selector} -> {plugin}\n"));
                     installed.push(plugin);
                 }
                 Err(error) => {
@@ -3669,12 +3907,12 @@ fn plugin_cli() {
                 std::process::exit(2);
             }
             print_cli_text(&format!(
-                "enabled {} downloaded plugin(s) in {config_path}\n",
+                "enabled {} installed plugin(s) in {config_path}\n",
                 installed.len()
             ));
-            print_cli_text("Restart fpasoterm to load the downloaded plugin selection.\n");
+            print_cli_text("Restart fpasoterm to load the installed plugin selection.\n");
         } else {
-            print_cli_text("Review the downloaded source, then enable it with fpasoterm --plugin-enable <file>.\n");
+            print_cli_text("Review the installed source, then enable it with fpasoterm --plugin-enable <file>.\n");
         }
         return;
     }
@@ -3787,7 +4025,8 @@ fn plugin_cli_requested() -> bool {
         "--plugin-enable-all",
         "--plugin-disable-all",
         "--plugin-install",
-        "--plugin-install-force",
+        "--plugin-install-file",
+        "--force",
         "--enable",
     ]) || !cli_option_values_any(&[
         "--plugin-info",
@@ -3797,6 +4036,7 @@ fn plugin_cli_requested() -> bool {
         "--plugin-enable",
         "--plugin-disable",
         "--plugin-install",
+        "--plugin-install-file",
     ])
     .is_empty()
 }
@@ -6824,6 +7064,50 @@ fn npm_update_check_text(status: &NpmUpdateCheck) -> String {
     format!("{}\n", lines.join("\n"))
 }
 
+// Prints a read-only maintenance summary for standalone native binaries.
+// npm audit needs the JavaScript package manifest, so it runs in the Node launcher
+// and is intentionally reported as unavailable for a bundled executable.
+fn doctor_cli() {
+    let (config_report, config_valid) = config_check_report();
+    print_cli_text("## fpasoterm doctor\n\n");
+    print_cli_text(&format!("- version: {}\n", app_version()));
+    for line in config_report.lines() {
+        if let Some(value) = line.strip_prefix("config: ") {
+            print_cli_text(&format!("- config: {value}\n"));
+        } else if let Some(value) = line.strip_prefix("status: ") {
+            print_cli_text(&format!("- config status: {value}\n"));
+        } else if line.starts_with("- ") {
+            print_cli_text(&format!("- config warning: {}\n", &line[2..]));
+        }
+    }
+    match npm_update_check() {
+        Ok(status) if status.update_available => {
+            print_cli_text(&format!(
+                "- npm latest: {}\n- update: available; run fpasoterm --self-update\n",
+                status.latest
+            ));
+        }
+        Ok(status) if status.local_build_newer => {
+            print_cli_text(&format!(
+                "- npm latest: {}\n- update: local build is newer\n",
+                status.latest
+            ));
+        }
+        Ok(status) => print_cli_text(&format!(
+            "- npm latest: {}\n- update: up to date\n",
+            status.latest
+        )),
+        Err(error) => print_cli_text(&format!("- update: unavailable ({error})\n")),
+    }
+    print_cli_text("- npm audit: unavailable (standalone binary has no npm package context)\n");
+    print_cli_text(
+        "\nDoctor is read-only. Review findings, then update or edit config.toml explicitly.\n",
+    );
+    if !config_valid {
+        std::process::exit(1);
+    }
+}
+
 #[tauri::command]
 // Exposes the explicit npm update status to the Help panel without auto-checking at startup.
 fn update_check() -> Result<NpmUpdateCheck, String> {
@@ -7391,6 +7675,7 @@ mod tests {
             "--version",
             "-v",
             "--update-check",
+            "--doctor",
             "--plugin-search",
             "--list",
             "-l",
@@ -7446,6 +7731,7 @@ mod tests {
             ("--plugin-enable", "welcome-banner.ts"),
             ("--plugin-disable", "welcome-banner.ts"),
             ("--plugin-install", "appearance/teal"),
+            ("--plugin-install-file", "./my-plugin.ts"),
             ("--shell", "/bin/zsh"),
             ("-s", "/bin/zsh"),
             ("--command", "echo ok"),
@@ -7470,6 +7756,15 @@ mod tests {
                 "option {option} should be accepted"
             );
         }
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-install".to_string(),
+                "appearance/teal".to_string(),
+                "--plugin-ports-dir".to_string(),
+                "../fpasoterm-plugins".to_string(),
+            ]),
+            Ok(())
+        );
         assert_eq!(
             validate_direct_cli_args(&["--size=800x600".to_string()]),
             Ok(())
@@ -7580,10 +7875,7 @@ mod tests {
         );
         assert_eq!(
             validate_direct_cli_args(&["--enable".to_string()]),
-            Err(
-                "--plugin-install-force and --enable require --plugin-install <category/name>"
-                    .to_string()
-            )
+            Err("--force and --enable require a --plugin-install command".to_string())
         );
     }
 

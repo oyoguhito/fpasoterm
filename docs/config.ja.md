@@ -217,8 +217,8 @@ copyします。[`examples/config/profiles.toml`](../examples/config/profiles.to
 コマンドラインから plugin を有効化・無効化する場合:
 
 ```sh
-fpasoterm --enable-plugin hello.ts,theme.ts
-fpasoterm --disable-plugin hello.ts,theme.ts
+fpasoterm --enable-plugin hello,theme
+fpasoterm --disable-plugin hello,theme
 ```
 
 plugin 操作は `User/plugins` 配下のファイル名で選択します。複数指定はカンマ区切り、

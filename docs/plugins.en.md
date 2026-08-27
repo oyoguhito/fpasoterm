@@ -17,9 +17,10 @@ or automatically from a renderer plugin.
 
 For reviewed public plugins, use the
 [fpasoterm-plugins ports repository](https://github.com/oyoguhito/fpasoterm-plugins).
-It owns the public catalog, port metadata, compatibility checks, local
-install/update/uninstall commands, and contribution process. This document
-defines the fpasoterm runtime contract and manual local plugin layout.
+It owns the public catalog, `INDEX`, development checks, and contribution
+process. End users install a reviewed local checkout or an explicit local
+plugin file through the fpasoterm CLI; this document defines that runtime
+contract and manual local plugin layout.
 
 ## Security
 
@@ -91,8 +92,8 @@ The CLI, including packaged Windows/macOS/Linux binaries, can update the list
 by plugin filename:
 
 ```sh
-fpasoterm --enable-plugin welcome-banner.ts,status-banner.ts
-fpasoterm --disable-plugin status-banner.ts
+fpasoterm --enable-plugin welcome-banner,status-banner
+fpasoterm --disable-plugin status-banner
 fpasoterm --show-config
 ```
 
@@ -143,10 +144,9 @@ fpasoterm --plugin-search teal
 ```
 
 `--plugin-search` is a **remote** search and prints its source as the official
-GitHub `INDEX`. For a local checkout that you want to review or modify, use
-`npm run ports -- search <query>` from `fpasoterm-plugins`; its `install` and
-`update` commands copy only from that local checkout. This keeps remote direct
-install and local reviewed-copy workflows distinct.
+GitHub `INDEX`. The `fpasoterm-plugins` `ports` command remains useful for
+local `INDEX` search, port development, and validation. It is not required for
+an end-user install.
 
 Download one selected port from the official
 [`oyoguhito/fpasoterm-plugins`](https://github.com/oyoguhito/fpasoterm-plugins)
@@ -161,19 +161,47 @@ fpasoterm --plugin-uninstall appearance/teal
 The first command copies only the requested source into `User/plugins` and
 leaves it disabled for review. `--enable` explicitly adds it to
 `plugins.enabled`. Existing files are preserved unless
-`--plugin-install-force` is supplied. The installer connects over HTTPS only to
+`--force` is supplied. The installer connects over HTTPS only to
 the fixed official repository, validates port/source paths, manifest metadata,
 source size, and the expected fpasoterm plugin header. Downloaded plugins still
 run in the renderer, so review and trust them before enabling them.
+
+### Local checkout or file install
+
+To install a port you have cloned, reviewed, or are developing locally, use
+the fpasoterm CLI directly. No `npm run ports install` step is needed:
+
+```sh
+git clone https://github.com/oyoguhito/fpasoterm-plugins.git
+fpasoterm --plugin-install appearance/teal \
+  --plugin-ports-dir ./fpasoterm-plugins --enable
+```
+
+`--plugin-ports-dir` explicitly selects the checkout containing `ports/`.
+Without it, `--plugin-install` obtains the selected port from the official
+GitHub repository. With it, the installer reads `port.toml`, checks metadata
+and the minimum fpasoterm version, then copies only that local plugin source.
+The local path never contacts the network.
+
+For a standalone trusted plugin outside a ports checkout, explicitly name the
+source file:
+
+```sh
+fpasoterm --plugin-install-file ~/work/my-plugins/team-banner.ts --enable
+```
+
+Both local commands require a regular `.js` or `.ts` file with the fpasoterm
+plugin header and renderer API marker. They preserve an existing destination
+unless `--force` is supplied.
 
 When duplicate filenames exist in different subdirectories, use a path
 relative to `plugins`, such as `team/status-banner.ts`.
 
 ### Windows packaged binary
 
-MSI/EXE supports `fpasoterm.exe --plugin-install <category/name>` directly;
-Node.js and a source checkout are not required. Use `fpasoterm.cmd` only when
-running from a Windows source checkout.
+MSI/EXE supports `fpasoterm.exe --plugin-install <category/name>` with or
+without `--plugin-ports-dir`, and `--plugin-install-file` directly; Node.js is
+not required. Use `fpasoterm.cmd` only when running from a Windows source checkout.
 
 At startup, plugin scripts are loaded from the trusted `User/plugins` source or
 the generated TypeScript cache using Tauri's local asset protocol. The default
@@ -205,6 +233,9 @@ provides:
 - `config`: read the resolved runtime configuration, including `plugins.enabled`.
 - `log(message)`: write a plugin-prefixed diagnostic entry.
 - `version`: read the running fpasoterm version and build identifier.
+- `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
+  used by `fpasoterm --plugin-search`. It does not download, install, enable,
+  or execute plugin source.
 - `onReady(callback)`: run code once after the terminal backend has started.
 - `registerCommand(id, title, handler)`: add an action button under the
   hamburger menu's `Plugins` submenu. The submenu is shown only when at least

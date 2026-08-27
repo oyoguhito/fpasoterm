@@ -71,11 +71,14 @@ source <(fpasoterm --completion bash)
 fpasoterm --version
 fpasoterm -v
 fpasoterm --update-check
+fpasoterm --doctor
 ```
 
 GUIではhamburger menuから**Help**を開き、**Check for Updates**を選択します。同じpanelに現在のbuild、npmの最新版、更新状況が表示されます。Helpを開いただけでは通信しません。
 
 `--update-check` はnpmの`latest` releaseを明示的に問い合わせ、更新の有無を表示します。起動時、`--help`、`--version`では自動実行しません。
+
+`--doctor`はread-onlyの保守reportです。Node launcherでは選択中のconfig、npm latest、`npm audit --omit=dev`を確認し、更新が必要な場合も`--self-update`を案内するだけで自動更新はしません。standalone binaryではconfigと更新情報を確認し、npm package contextが無いためnpm auditは`unavailable`として表示します。
 
 一時的な設定上書き:
 
@@ -170,6 +173,7 @@ windowを開かずに設定を検証し、Issue向けMarkdown reportを作成す
 
 ```sh
 fpasoterm --config-check
+fpasoterm --doctor
 fpasoterm --diagnostics
 fpasoterm --copy-diagnostics
 fpasoterm --open-log-dir
@@ -206,8 +210,8 @@ Windows で古い installer から上書き更新した後は `fpasoterm --versi
 `config.toml` の plugin を有効化・無効化:
 
 ```sh
-fpasoterm --enable-plugin hello.ts,theme.ts
-fpasoterm --disable-plugin hello.ts,theme.ts
+fpasoterm --enable-plugin hello,theme
+fpasoterm --disable-plugin hello,theme
 ```
 
 plugin enable/disable command は Node launcher が処理します。packaged binary
@@ -265,11 +269,13 @@ enabled = ["plugins/example.ts"]
 
 プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。plugin は renderer context で動作するため、内容を確認した信頼できるローカル file だけを有効にしてください。pluginとsync folderの信頼境界は[セキュリティ](docs/security.ja.md)を参照してください。
 
-plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list` でlocalの `User/plugins` にある検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`--plugin-info welcome-banner.ts`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
+plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list` でlocalの `User/plugins` にある検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`--plugin-info welcome-banner`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
 
 review済みのlocal pluginとそのenabled entryを削除する場合は`fpasoterm --plugin-uninstall <file>`を使用します。これはlocal-onlyの操作であり、公開port catalogへは接続しません。
 
 ports repository全体をcloneせず、Node.jsも使わずにreview済み公開pluginを取得する場合は、`fpasoterm --plugin-install appearance/teal`を実行します。内容確認後に有効化する場合だけ`--enable`を追加します。固定repository、検証、上書き条件は[プラグイン](docs/plugins.ja.md)を参照してください。
+
+review済みのlocal `fpasoterm-plugins` checkoutからは、`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`を使用します。単独の信頼済みsource fileは`fpasoterm --plugin-install-file ./my-plugin.ts --enable`でcopyできます。ports projectはcatalog / INDEX検索とplugin開発・検証用で、利用者向けのinstallはfpasoterm本体が行います。
 
 `fpasoterm --plugin-search [query]`はpluginを導入せず、公開port metadataだけを検索します。各結果にはcopyして使える`--plugin-install` commandとremote公式`INDEX`であるsourceを表示します。`--plugin-list`はlocal-onlyであり、networkには接続しません。
 
