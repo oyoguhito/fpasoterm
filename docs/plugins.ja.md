@@ -152,6 +152,9 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `config`: `plugins.enabled` を含む解決済み runtime config の参照。
 - `log(message)`: plugin prefix 付き diagnostics の出力。
 - `version`: 実行中の fpasoterm version と build identifier の参照。
+- `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
+  `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
+  行いません。
 - `onReady(callback)`: terminal backend の起動成功後に一度だけ code を実行。
 - `registerCommand(id, title, handler)`: 既存 hamburger menu の `Plugins` submenu配下へ
   action buttonを追加する。loaded pluginが一つ以上commandを登録した場合だけsubmenuを表示する。pluginを

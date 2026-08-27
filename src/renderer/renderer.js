@@ -363,6 +363,7 @@ function installTauriApiAdapter() {
     writeClipboard: (text) => invoke('clipboard_write', { text }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
+    getPluginCatalog: () => invoke('plugin_catalog'),
     getTerminalCapabilities: () => invoke('terminal_capabilities'),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
@@ -1496,6 +1497,7 @@ async function loadPlugins() {
     imageAddon,
     config: appConfig,
     log: (message) => showDiagnostic(`plugin: ${message}`),
+    getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     onReady: registerPluginReadyCallback,
     registerCommand: registerPluginCommand,
   });

@@ -29,6 +29,16 @@ type FpasotermPluginApi = {
     };
   };
   log: (message: string) => void;
+  getOfficialPluginIndex: () => Promise<Array<{
+    id: string;
+    name: string;
+    version: string;
+    author: string;
+    description: string;
+    license: string;
+    minFpasotermVersion: string;
+    installPath: string;
+  }>>;
   onReady: (callback: () => void) => void;
   registerCommand: (
     id: string,

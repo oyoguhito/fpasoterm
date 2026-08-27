@@ -740,6 +740,7 @@ fn main() {
             clipboard_write,
             app_version,
             update_check,
+            plugin_catalog,
             terminal_capabilities,
             config_get,
             config_apply_path,
@@ -3210,6 +3211,20 @@ struct PublicPluginPort {
     install_path: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Public metadata read from the fixed official INDEX without downloading plugin code.
+struct PublicPluginCatalogEntry {
+    id: String,
+    name: String,
+    version: String,
+    author: String,
+    description: String,
+    license: String,
+    min_fpasoterm_version: String,
+    install_path: String,
+}
+
 // Permits only normal, portable port path components in a public registry request.
 fn validate_public_plugin_port_id(value: &str) -> Result<String, String> {
     let id = sanitize_cli_value(value);
@@ -3270,16 +3285,53 @@ fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String
     Ok(text)
 }
 
+// Downloads and validates the compact official INDEX without downloading plugin code.
+fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, String> {
+    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
+    index
+        .lines()
+        .enumerate()
+        .map(|(line_number, line)| {
+            let fields = line.split('|').collect::<Vec<_>>();
+            if fields.len() != 8 || fields.iter().any(|field| field.trim().is_empty()) {
+                return Err(format!("official INDEX:{} is malformed", line_number + 1));
+            }
+            let id = validate_public_plugin_port_id(fields[0])?;
+            if !safe_public_plugin_relative_path(fields[7]) {
+                return Err(format!(
+                    "official INDEX:{} has an invalid install path",
+                    line_number + 1
+                ));
+            }
+            Ok(PublicPluginCatalogEntry {
+                id,
+                name: fields[1].to_string(),
+                version: fields[2].to_string(),
+                author: fields[3].to_string(),
+                description: fields[4].to_string(),
+                license: fields[5].to_string(),
+                min_fpasoterm_version: fields[6].to_string(),
+                install_path: fields[7].to_string(),
+            })
+        })
+        .collect()
+}
+
+#[tauri::command]
+// Exposes only fixed-repository catalog metadata to trusted renderer plugins.
+fn plugin_catalog() -> Result<Vec<PublicPluginCatalogEntry>, String> {
+    public_plugin_catalog_entries()
+}
+
 // Searches bounded public metadata without downloading or evaluating plugin source.
 fn public_plugin_search_text(query: &str) -> Result<String, String> {
     let needle = query.trim().to_ascii_lowercase();
-    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
-    let matches = index
-        .lines()
-        .filter_map(|line| {
-            let fields = line.split('|').collect::<Vec<_>>();
-            (fields.len() == 8 && fields[..5].join(" ").to_ascii_lowercase().contains(&needle))
-                .then_some(fields)
+    let matches = public_plugin_catalog_entries()?
+        .into_iter()
+        .filter(|entry| {
+            [&entry.id, &entry.name, &entry.author, &entry.description]
+                .iter()
+                .any(|value| value.to_ascii_lowercase().contains(&needle))
         })
         .collect::<Vec<_>>();
     let mut lines = vec![if needle.is_empty() {
@@ -3291,10 +3343,16 @@ fn public_plugin_search_text(query: &str) -> Result<String, String> {
     if matches.is_empty() {
         lines.push("  (none)".to_string());
     } else {
-        for fields in matches {
+        for entry in matches {
             lines.push(format!(
                 "  {} ({} {}, {}, requires >= {})\n    {}\n    install: fpasoterm --plugin-install {} --enable",
-                fields[0], fields[1], fields[2], fields[3], fields[6], fields[4], fields[0]
+                entry.id,
+                entry.name,
+                entry.version,
+                entry.author,
+                entry.min_fpasoterm_version,
+                entry.description,
+                entry.id,
             ));
         }
     }

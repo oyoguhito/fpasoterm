@@ -233,6 +233,9 @@ provides:
 - `config`: read the resolved runtime configuration, including `plugins.enabled`.
 - `log(message)`: write a plugin-prefixed diagnostic entry.
 - `version`: read the running fpasoterm version and build identifier.
+- `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
+  used by `fpasoterm --plugin-search`. It does not download, install, enable,
+  or execute plugin source.
 - `onReady(callback)`: run code once after the terminal backend has started.
 - `registerCommand(id, title, handler)`: add an action button under the
   hamburger menu's `Plugins` submenu. The submenu is shown only when at least

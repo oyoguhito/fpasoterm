@@ -821,6 +821,8 @@ assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
 assert.match(rustMain, /fn npm_update_check/);
 assert.match(rustMain, /fn public_plugin_search_text/);
+assert.match(rustMain, /fn public_plugin_catalog_entries/);
+assert.match(rustMain, /fn plugin_catalog/);
 assert.match(rustMain, /fn update_check/);
 assert.match(rustMain, /cli_has_flag\(&\["--list", "-l"\]\)/);
 assert.match(rustMain, /fn print_running_instances/);
@@ -1485,6 +1487,7 @@ function runSamplePlugin(relativePath) {
       plugins: { enabled: ['plugins/hello.ts'] },
     },
     log: (message) => logs.push(message),
+    getOfficialPluginIndex: async () => [],
     onReady: (callback) => readyCallbacks.push(callback),
     registerCommand: (id, title, handler) => commands.set(id, { title, handler }),
   };
@@ -1754,6 +1757,7 @@ assert.match(pluginTypes, /duplicateWindowMs/);
 assert.match(pluginTypes, /version: string/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
+assert.match(pluginTypes, /getOfficialPluginIndex:/);
 
 const renderer = read('src/renderer/renderer.js');
 assert.match(renderer, /registerPluginReadyCallback/);
@@ -1761,6 +1765,8 @@ assert.match(renderer, /notifyPluginsReady/);
 assert.match(renderer, /schedulePluginsReadyAfterTerminalOutput/);
 assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
+assert.match(renderer, /getPluginCatalog: \(\) => invoke\('plugin_catalog'\)/);
+assert.match(renderer, /getOfficialPluginIndex: \(\) => window\.fpasoterm\.getPluginCatalog\(\)/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
 assert.match(renderer, /pluginMenuSection\.hidden = !hasCommands/);
