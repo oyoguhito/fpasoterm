@@ -25,6 +25,9 @@ rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
+# encoding controls decoding of PTY output. Keep UTF-8 unless a legacy program
+# explicitly emits Shift_JIS or EUC-JP bytes.
+encoding = "utf-8"
 shell = ""
 # Enables enhanced Kitty keyboard negotiation for compatible TUIs. Keep false
 # unless needed; this is separate from the currently disabled graphics addon.

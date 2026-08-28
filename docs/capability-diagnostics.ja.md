@@ -8,7 +8,16 @@ panelにはfpasotermがPTYへ設定する次のenvironmentを表示します。
 - `TERM`: `xterm-256color`
 - `COLORTERM`: `truecolor`
 - `locale`: 有効な`LC_ALL`、`LC_CTYPE`、または`LANG`
+- `output encoding`: 設定済みPTY decoder
 - `shell`: configまたはOS既定から選択したshell command
+
+## Output Encoding
+
+panelから`terminal.encoding`を`utf-8`、`shift-jis`、`euc-jp`として保存できます。
+PTY decoderとshell localeはshell起動前に決まるため、選択後はwindowを再起動してください。
+既定値はUTF-8です。Unixでは親環境がUTF-8以外のlocaleでも、UTF-8 PTYにはUTF-8 localeを
+設定するため、通常のtoolが日本語filenameを`?`へ置換することを防ぎます。文字コードの自動判定は
+曖昧で正しいtextも壊し得るため実装しません。
 
 ## Truecolor
 

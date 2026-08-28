@@ -2,6 +2,7 @@
 
 #[cfg(windows)]
 use base64::Engine;
+use encoding_rs::{EUC_JP, SHIFT_JIS};
 use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
@@ -392,6 +393,15 @@ struct TerminalSession {
 struct TerminalOutputDecoder {
     pending: Vec<u8>,
     jis_x0201_kana: bool,
+    legacy_decoder: Option<encoding_rs::Decoder>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+// Selects the byte decoder used for PTY output. UTF-8 remains the default.
+enum TerminalEncoding {
+    Utf8,
+    ShiftJis,
+    EucJp,
 }
 
 // Converts terminal control output to readable append-only text.
@@ -758,6 +768,7 @@ fn main() {
             terminal_capabilities,
             config_get,
             config_apply_path,
+            config_set_terminal_encoding,
             sync_status,
             sync_clean,
             sync_write_diagnostics,
@@ -2275,6 +2286,58 @@ fn terminal_line_height_for(platform: &str, _architecture: &str) -> f64 {
     }
 }
 
+// Parses the user-facing terminal.encoding setting without guessing byte encodings.
+fn terminal_output_encoding(config: &Config) -> TerminalEncoding {
+    match config
+        .terminal
+        .get("encoding")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("utf-8")
+        .trim()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "shift-jis" | "shift_jis" | "sjis" => TerminalEncoding::ShiftJis,
+        "euc-jp" | "euc_jp" | "eucjp" => TerminalEncoding::EucJp,
+        _ => TerminalEncoding::Utf8,
+    }
+}
+
+// Returns the canonical setting name shown in diagnostics and persisted to TOML.
+fn terminal_encoding_name(encoding: TerminalEncoding) -> &'static str {
+    match encoding {
+        TerminalEncoding::Utf8 => "utf-8",
+        TerminalEncoding::ShiftJis => "shift-jis",
+        TerminalEncoding::EucJp => "euc-jp",
+    }
+}
+
+// Uses a UTF-8 locale for modern terminal output when the launcher inherited a
+// non-UTF-8 locale. This prevents macOS utilities from replacing path bytes with '?'.
+fn configure_utf8_terminal_locale(command: &mut CommandBuilder, encoding: TerminalEncoding) {
+    if encoding != TerminalEncoding::Utf8 || cfg!(windows) {
+        return;
+    }
+    let inherited = ["LC_ALL", "LC_CTYPE", "LANG"]
+        .iter()
+        .filter_map(|name| env::var(name).ok())
+        .find(|value| !value.trim().is_empty())
+        .unwrap_or_default();
+    if inherited.to_ascii_lowercase().contains("utf-8")
+        || inherited.to_ascii_lowercase().contains("utf8")
+    {
+        return;
+    }
+    let locale = if cfg!(target_os = "macos") {
+        "en_US.UTF-8"
+    } else {
+        "C.UTF-8"
+    };
+    command.env("LC_ALL", locale);
+    command.env("LC_CTYPE", locale);
+    command.env("LANG", locale);
+}
+
 // Loads a TOML config file on demand and merges it over the current runtime config.
 fn runtime_config_from_path(config_path: &str) -> Result<RuntimeConfig, String> {
     merge_runtime_config_from_path(runtime_config(), config_path)
@@ -2484,6 +2547,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 "rescaleOverlappingGlyphs": false,
                 "scrollback": 1000,
                 "termName": "xterm-256color",
+                "encoding": "utf-8",
                 "shell": read_configured_shell(&config_path).unwrap_or_default(),
                 "images": {
                     "enabled": false,
@@ -4783,16 +4847,29 @@ fn terminal_path_with_app_dir() -> Option<String> {
 }
 
 impl TerminalOutputDecoder {
-    // Creates a decoder that preserves UTF-8 while handling legacy half-width kana encodings.
-    fn new() -> Self {
+    // Creates a streaming decoder for the selected PTY output encoding.
+    fn new(encoding: TerminalEncoding) -> Self {
         Self {
             pending: Vec::new(),
             jis_x0201_kana: false,
+            legacy_decoder: match encoding {
+                TerminalEncoding::Utf8 => None,
+                TerminalEncoding::ShiftJis => Some(SHIFT_JIS.new_decoder_without_bom_handling()),
+                TerminalEncoding::EucJp => Some(EUC_JP.new_decoder_without_bom_handling()),
+            },
         }
     }
 
     // Converts PTY bytes to Unicode text for xterm.js.
     fn decode(&mut self, bytes: &[u8]) -> String {
+        if let Some(decoder) = self.legacy_decoder.as_mut() {
+            let mut result = String::with_capacity(bytes.len());
+            // Keep replacement characters visible rather than silently changing bytes.
+            // This tells the user that a different decoder may be needed.
+            let (_, _, _had_errors) = decoder.decode_to_string(bytes, &mut result, false);
+            return result;
+        }
+
         let mut input = Vec::with_capacity(self.pending.len() + bytes.len());
         input.append(&mut self.pending);
         input.extend_from_slice(bytes);
@@ -5110,6 +5187,7 @@ fn terminal_start(
         .map_err(|error| error.to_string())?;
 
     let config = runtime_config();
+    let output_encoding = terminal_output_encoding(&config.config);
     let shell = shell_command(&config.config);
     append_diagnostic(
         &app,
@@ -5128,6 +5206,7 @@ fn terminal_start(
     // xterm-256color terminfo entry so TUI applications choose their truecolor path.
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "fpasoterm");
+    configure_utf8_terminal_locale(&mut command, output_encoding);
     if let Some(path_value) = terminal_path_with_app_dir() {
         if cfg!(windows) {
             command.env("Path", path_value);
@@ -5168,7 +5247,7 @@ fn terminal_start(
 
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
-        let mut decoder = TerminalOutputDecoder::new();
+        let mut decoder = TerminalOutputDecoder::new(output_encoding);
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
@@ -5250,10 +5329,12 @@ fn terminal_capabilities() -> serde_json::Value {
         })
         .unwrap_or_else(|| "(not set)".to_string());
     let config = runtime_config();
+    let encoding = terminal_encoding_name(terminal_output_encoding(&config.config));
     serde_json::json!({
         "term": "xterm-256color",
         "colorterm": "truecolor",
         "locale": locale,
+        "encoding": encoding,
         "shell": shell_command(&config.config),
     })
 }
@@ -6156,7 +6237,7 @@ fn start_terminal_log_state(
         file,
         bytes_written: 0,
         max_bytes: logging_max_bytes(),
-        decoder: TerminalOutputDecoder::new(),
+        decoder: TerminalOutputDecoder::new(terminal_output_encoding(&runtime_config().config)),
         normalizer: TerminalTextNormalizer::new(),
     });
     if let Ok(mut last_path) = state.last_terminal_log_path.lock() {
@@ -6505,7 +6586,8 @@ fn terminal_log_clear(state: State<AppState>) -> Result<TerminalLogStatus, Strin
                 .seek(SeekFrom::Start(0))
                 .map_err(|error| error.to_string())?;
             log.bytes_written = 0;
-            log.decoder = TerminalOutputDecoder::new();
+            log.decoder =
+                TerminalOutputDecoder::new(terminal_output_encoding(&runtime_config().config));
             log.normalizer = TerminalTextNormalizer::new();
             let _ = log.file.flush();
             active_path = Some(log.path.clone());
@@ -7147,6 +7229,41 @@ fn config_apply_path(app: AppHandle, path: String) -> Result<RuntimeConfig, Stri
         &format!("applied runtime config {}", config.config_path),
     );
     Ok(config)
+}
+
+#[tauri::command]
+// Persists a supported PTY output decoder choice for the next terminal launch.
+fn config_set_terminal_encoding(app: AppHandle, encoding: String) -> Result<String, String> {
+    let normalized = match encoding.trim().to_ascii_lowercase().as_str() {
+        "utf-8" | "utf8" => "utf-8",
+        "shift-jis" | "shift_jis" | "sjis" => "shift-jis",
+        "euc-jp" | "euc_jp" | "eucjp" => "euc-jp",
+        _ => return Err("unsupported encoding; choose utf-8, shift-jis, or euc-jp".to_string()),
+    };
+    let runtime = runtime_config();
+    let config_path = runtime.config_path;
+    let mut config = read_toml_config_or_empty(&config_path)?;
+    let root = config
+        .as_table_mut()
+        .ok_or_else(|| "config root must be a TOML table".to_string())?;
+    let terminal = root
+        .entry("terminal".to_string())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| "terminal must be a TOML table".to_string())?;
+    terminal.insert(
+        "encoding".to_string(),
+        toml::Value::String(normalized.to_string()),
+    );
+    if let Some(parent) = Path::new(&config_path).parent() {
+        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    write_toml_config(&config_path, &config)?;
+    append_diagnostic(
+        &app,
+        &format!("saved terminal encoding {normalized} to {config_path}"),
+    );
+    Ok(config_path)
 }
 
 // Resolved sync-folder paths for the active channel.
@@ -8081,8 +8198,16 @@ installPath = "appearance/other.ts"
 
     #[test]
     fn terminal_output_decoder_preserves_utf8() {
-        let mut decoder = TerminalOutputDecoder::new();
+        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Utf8);
         assert_eq!(decoder.decode("半角ｶﾀｶﾅ ±".as_bytes()), "半角ｶﾀｶﾅ ±");
+    }
+
+    #[test]
+    fn terminal_output_decoder_decodes_shift_jis_text() {
+        let (bytes, _, had_errors) = SHIFT_JIS.encode("MEGAドライブ");
+        assert!(!had_errors);
+        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::ShiftJis);
+        assert_eq!(decoder.decode(&bytes), "MEGAドライブ");
     }
 
     #[test]
@@ -8116,19 +8241,19 @@ installPath = "appearance/other.ts"
 
     #[test]
     fn terminal_output_decoder_maps_shift_jis_half_width_kana() {
-        let mut decoder = TerminalOutputDecoder::new();
+        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Utf8);
         assert_eq!(decoder.decode(&[0xb6, 0xc0, 0xb6, 0xc5, b' ']), "ｶﾀｶﾅ ");
     }
 
     #[test]
     fn terminal_output_decoder_maps_invalid_utf8_half_width_kana_bytes() {
-        let mut decoder = TerminalOutputDecoder::new();
+        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Utf8);
         assert_eq!(decoder.decode(&[0xc2, b' ', 0xb1]), "ﾂ ｱ");
     }
 
     #[test]
     fn terminal_output_decoder_maps_iso2022_half_width_kana_across_chunks() {
-        let mut decoder = TerminalOutputDecoder::new();
+        let mut decoder = TerminalOutputDecoder::new(TerminalEncoding::Utf8);
         assert_eq!(decoder.decode(&[0x1b, b'(']), "");
         assert_eq!(decoder.decode(&[b'I', 0x36, 0x40, 0x36, 0x45]), "ｶﾀｶﾅ");
         assert_eq!(decoder.decode(&[0x1b, b'(', b'B', b'A']), "A");

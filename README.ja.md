@@ -17,7 +17,7 @@ IME、描画、clipboard、window問題を再現して確認する手順は
 
 window menu の `Font / Glyph Test` では、使用中のterminal font設定とCJK、半角カナ、罫線、記号、Nerd Font glyphを確認できます。詳細は[Font / Glyph Diagnostics](docs/font-diagnostics.ja.md)を参照してください。
 
-window menu の `Diagnostics > Capability Test` では、terminal environmentとtruecolor、OSC 52、OSC 8、bracketed paste、bellの対応状況を確認できます。詳細は[Terminal Capability Diagnostics](docs/capability-diagnostics.ja.md)を参照してください。
+window menu の `Diagnostics > Capability Test` では、terminal environmentとtruecolor、OSC 52、OSC 8、bracketed paste、bellの対応状況を確認できます。同じpanelで次回のterminal session用にUTF-8、Shift_JIS、EUC-JPのoutput decoderも保存できます。詳細は[Terminal Capability Diagnostics](docs/capability-diagnostics.ja.md)を参照してください。
 
 ## 必要な環境
 

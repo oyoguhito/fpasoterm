@@ -49,6 +49,9 @@ const defaultConfig = Object.freeze({
     backgroundOpacity: 0.65,
     scrollback: 1000,
     termName: 'xterm-256color',
+    // Decode PTY output as UTF-8 unless a legacy application explicitly
+    // emits a different Japanese encoding.
+    encoding: 'utf-8',
     shell: '',
     // Keep enhanced Kitty keyboard negotiation opt-in until IME behavior is
     // verified across the supported WebView implementations.
@@ -218,6 +221,9 @@ scrollback = 1000
 # termName is the terminal type used by xterm.js. The backend PTY exports
 # TERM=xterm-256color so terminal multiplexers such as tmux can use terminfo.
 termName = "xterm-256color"
+# encoding controls decoding of PTY output. Keep UTF-8 unless a legacy program
+# explicitly emits Shift_JIS or EUC-JP bytes.
+encoding = "utf-8"
 # shell overrides the platform default when non-empty.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""

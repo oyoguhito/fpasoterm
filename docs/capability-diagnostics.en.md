@@ -9,7 +9,17 @@ The panel reports the environment fpasoterm provides to its PTY:
 - `TERM`: `xterm-256color`
 - `COLORTERM`: `truecolor`
 - `locale`: the effective `LC_ALL`, `LC_CTYPE`, or `LANG` value
+- `output encoding`: the configured PTY decoder
 - `shell`: the configured or platform-selected shell command
+
+## Output Encoding
+
+The panel can save `terminal.encoding` as `utf-8`, `shift-jis`, or `euc-jp`.
+The choice applies when the window is restarted because both the PTY decoder and
+shell locale are selected before the shell starts. UTF-8 is the default. On
+Unix, fpasoterm supplies a UTF-8 locale to an inherited non-UTF-8 environment,
+so normal tools keep UTF-8 filenames intact. It does not auto-detect byte
+encodings because detection is ambiguous and can corrupt otherwise valid text.
 
 ## Truecolor
 
