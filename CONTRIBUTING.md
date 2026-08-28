@@ -30,6 +30,10 @@ cached runtime is used or Cargo is building one. Use
 `--foreground --console-diagnostics` only when waiting for compiler and
 desktop-process output is intentional.
 
+For IME, rendering, clipboard, and window issues, follow the forced rebuild,
+event-trace, and safe-reporting workflow in [docs/debugging.en.md](docs/debugging.en.md).
+Japanese contribution guidance is available in [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md).
+
 ## Pull Request Review
 
 Do not review a tagged release asset when the requested change is in a pull

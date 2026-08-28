@@ -66,7 +66,6 @@ shell 付き PTY が終了した場合、fpasoterm は対応するアプリケ�
 
 - `window`: 初期ウィンドウサイズ、最小ウィンドウサイズ、背景色、theme source、frame/titlebar 表示、最後の size を local に記憶するかどうか。
 - `terminal`: `fontFamily`、`fontSize`、`scrollback`、`theme` などの xterm.js terminal options。
-- `ime`: 二重入力 guard の `duplicateGuard`、`duplicateWindowMs`、`repeatedTextWindowMs`。
 - `plugins.enabled`: config directory からの相対 plugin path。
 
 プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。`.js` と `.ts` に対応します。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換してから renderer に読み込みます。追加すると便利な挙動は、原則として本体ではなく plugin として実装します。

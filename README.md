@@ -4,7 +4,7 @@
 
 Cross-platform terminal app built with Tauri, xterm.js, and a Rust PTY bridge.
 
-fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
+fpasoterm is intended to be used with terminal multiplexers such as screen / tmux / byobu / zellij / herdr. It focuses on a single terminal surface and does not manage split panes. Multiple application windows can be tiled from the titlebar.
 
 This is a deliberate boundary: fpasoterm avoids reimplementing capabilities that belong to the user's shell, multiplexer, or TUI editor. This includes pane and session management, shell commands, job control, multiplexer configuration, and editor features supplied by Vim, Emacs, Fresh, Helix, and similar tools. Use those tools for their native workflows; fpasoterm provides the terminal surface, OS integration, and local customization hooks. New convenience behavior should normally be delivered as a plugin instead of expanding the core application. Compatibility with those multiplexers and TUI editors is a maintenance priority.
 
@@ -21,6 +21,9 @@ Japanese IME composition and keyboard layout switching are handled by the OS web
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
 Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
+
+For reproducible IME, rendering, clipboard, and window diagnostics, see the
+[Debugging Guide](docs/debugging.en.md).
 
 Use `Font / Glyph Test` in the window menu to inspect the active terminal font
 settings and representative CJK, half-width kana, box drawing, symbol, and
@@ -395,17 +398,12 @@ rememberBounds = true
 frame = false
 [terminal]
 fontSize = 15
-lineHeight = 0.92
+lineHeight = 1
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
-
-[ime]
-duplicateGuard = true
-duplicateWindowMs = 800
-repeatedTextWindowMs = 140
 
 [plugins]
 enabled = ["plugins/example.ts"]
@@ -453,7 +451,7 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-The IME duplicate guard can be adjusted from `config.toml`. If a specific environment still produces duplicate text, increase `ime.duplicateWindowMs` or `ime.repeatedTextWindowMs` slightly.
+IME composition is displayed visually only. fpasoterm does not suppress, replay, replace, or directly commit text received from the WebView/xterm.js input path.
 
 When `window.rememberBounds` is enabled, fpasoterm stores the last window size locally in `~/.config/fpasoterm/User/window-state.json`.
 
@@ -556,7 +554,8 @@ MIT. See [LICENSE](LICENSE).
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
+See [CONTRIBUTING.md](CONTRIBUTING.md) or [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md).
+Release history is tracked in [CHANGELOG.md](CHANGELOG.md).
 
 ## Project Name
 
@@ -590,4 +589,5 @@ Release workflow.
 - [Configuration](docs/config.en.md)
 - [Sync Folder](docs/sync.en.md)
 - [Pull request review](docs/pr-review.en.md)
+- [Debugging guide](docs/debugging.en.md)
 - [Release checklist](docs/release-checklist.en.md)

@@ -15,8 +15,10 @@ const defaultTerminalFontFamily = `${cjkMonospaceFontFallback}, ${nerdFontFallba
 const legacyMacosTerminalFontFamily = `"SF Mono", Menlo, ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
 // Menlo's box and block glyph metrics match the macOS Terminal renderer more closely.
 const macosTerminalFontFamily = `Menlo, "SF Mono", ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
-const defaultTerminalLineHeight = 0.92;
-const macosTerminalLineHeight = 0.8;
+// Keep descenders such as g, q, and y visibly separate from the next row.
+const defaultTerminalLineHeight = 1;
+// Prioritize readable descenders over compact TUI logo rows on macOS.
+const macosTerminalLineHeight = 1;
 const legacyTerminalFontFamily = `${nerdFontFallback}, "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "NanumGothicCoding", "BIZ UDGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
 
 // The complete set of supported user settings. This object is also used to
@@ -48,6 +50,9 @@ const defaultConfig = Object.freeze({
     scrollback: 1000,
     termName: 'xterm-256color',
     shell: '',
+    // Keep enhanced Kitty keyboard negotiation opt-in until IME behavior is
+    // verified across the supported WebView implementations.
+    kittyKeyboard: false,
     images: {
       enabled: false,
       kittySupport: false,
@@ -78,11 +83,6 @@ const defaultConfig = Object.freeze({
       brightCyan: '#9de9ea',
       brightWhite: '#ffffff',
     },
-  },
-  ime: {
-    duplicateGuard: true,
-    duplicateWindowMs: 800,
-    repeatedTextWindowMs: 140,
   },
   keybindings: {
     prefix: 'Mod+Shift',
@@ -152,9 +152,9 @@ function migrateLegacyMacosFontFamily(config, platform = process.platform) {
   return mergeConfig(config, { terminal: { fontFamily: macosTerminalFontFamily } });
 }
 
-// Compacts former defaults across platforms now that xterm accepts sub-unit line heights.
+// Migrates previously shipped compact defaults while preserving custom values.
 function migrateLegacyTerminalLineHeight(config, platform = process.platform) {
-  const formerDefaults = platform === 'darwin' ? [0.92, 1, 1.12] : [1, 1.12];
+  const formerDefaults = platform === 'darwin' ? [0.8, 0.81, 0.82, 0.85, 0.9, 0.92, 1.12] : [0.92, 1.12];
   if (formerDefaults.includes(config?.terminal?.lineHeight)) {
     return mergeConfig(config, {
       terminal: {
@@ -221,6 +221,9 @@ termName = "xterm-256color"
 # shell overrides the platform default when non-empty.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
+# kittyKeyboard enables enhanced key negotiation for compatible TUIs. Keep it
+# false unless that TUI requires it; it is unrelated to the disabled graphics addon.
+kittyKeyboard = false
 
 # [terminal.images] is reserved for a future stable renderer. Current builds
 # ignore it, so do not add this section to config.toml.
@@ -247,12 +250,6 @@ brightBlue = "#a4ceff"
 brightMagenta = "#e3c3ff"
 brightCyan = "#9de9ea"
 brightWhite = "#ffffff"
-
-# IME guard options reduce duplicate text after composition commits.
-[ime]
-duplicateGuard = true
-duplicateWindowMs = 800
-repeatedTextWindowMs = 140
 
 # Keybindings use Mod for Ctrl on Windows/Linux and Cmd on macOS.
 # Set prefix = "Ctrl+Alt" on Windows when Ctrl+Shift is unavailable.
@@ -502,6 +499,10 @@ function validateUserConfig(targetPath = configPath(), profileName = process.env
   const fontSize = userConfig.terminal?.fontSize;
   if (fontSize !== undefined && (typeof fontSize !== 'number' || !Number.isFinite(fontSize) || fontSize <= 0)) {
     result.warnings.push('terminal.fontSize should be a positive number');
+  }
+
+  if (userConfig.terminal?.kittyKeyboard !== undefined && typeof userConfig.terminal.kittyKeyboard !== 'boolean') {
+    result.warnings.push('terminal.kittyKeyboard should be true or false');
   }
 
   for (const [key, value] of [

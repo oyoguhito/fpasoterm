@@ -6,11 +6,14 @@
 
 fpasoterm は Tauri、xterm.js、Rust PTY bridge を使った Terminal アプリです。ChromeOS Linux での日本語入力を重視しつつ、将来的に他 OS へ展開しやすい構成にしています。
 
-screen / tmux / byobu / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身では画面分割を行いませんが、titlebar の `Tile` button で複数 window を並べられます。
+screen / tmux / byobu / zellij / herdr などの terminal multiplexer と併用する前提です。fpasoterm 自身では画面分割を行いませんが、titlebar の `Tile` button で複数 window を並べられます。
 
 これは意図した責務境界です。pane / session管理、shell command、job control、multiplexer設定に加え、Vim、Emacs、Fresh、Helix などの TUI editor が提供する編集機能も、原則として再実装しません。これらの workflow は shell、multiplexer、TUI editor へ委ね、fpasoterm は terminal surface、OS integration、local customization hook を担当します。追加すると便利な挙動は、原則として本体を肥大化させず plugin として提供します。一方で、これらの multiplexer と TUI editor を問題なく利用できる互換性の維持・改善は優先します。
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
+
+IME、描画、clipboard、window問題を再現して確認する手順は
+[デバッグガイド](docs/debugging.ja.md)を参照してください。
 
 window menu の `Font / Glyph Test` では、使用中のterminal font設定とCJK、半角カナ、罫線、記号、Nerd Font glyphを確認できます。詳細は[Font / Glyph Diagnostics](docs/font-diagnostics.ja.md)を参照してください。
 
@@ -255,13 +258,8 @@ fpasoterm は以下の設定を読み込みます。
 ```toml
 [terminal]
 fontSize = 15
-lineHeight = 0.92
+lineHeight = 1
 fontFamily = "Noto Sans Mono CJK JP, monospace"
-
-[ime]
-duplicateGuard = true
-duplicateWindowMs = 800
-repeatedTextWindowMs = 140
 
 [plugins]
 enabled = ["plugins/example.ts"]
@@ -289,7 +287,7 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-二重入力が残る環境では、`config.toml` の `ime.duplicateWindowMs` または `ime.repeatedTextWindowMs` を少し大きくしてください。
+IME composition は表示専用です。WebView/xterm.js の入力経路で受け取った文字を、fpasoterm が抑止・再送・置換・直接確定することはありません。
 
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 
@@ -348,7 +346,8 @@ MIT。詳細は [LICENSE](LICENSE) を参照してください。
 
 ## コントリビュート
 
-[CONTRIBUTING.md](CONTRIBUTING.md) を参照してください。release 履歴は [CHANGELOG.md](CHANGELOG.md) に記録します。
+[CONTRIBUTING.ja.md](CONTRIBUTING.ja.md) を参照してください。英語版は
+[CONTRIBUTING.md](CONTRIBUTING.md)です。release 履歴は [CHANGELOG.md](CHANGELOG.md) に記録します。
 
 ## jj repository 初期化
 
@@ -376,5 +375,6 @@ GitHub Actions は push と pull request で同じ check と Linux artifact buil
 - [設定](docs/config.ja.md)
 - [Sync Folder](docs/sync.ja.md)
 - [Pull request review](docs/pr-review.ja.md)
+- [デバッグガイド](docs/debugging.ja.md)
 - [リリースチェックリスト](docs/release-checklist.ja.md)
 - [既知課題](docs/known-issues.ja.md)

@@ -260,6 +260,8 @@ struct TerminalBroadcastItem {
     text: String,
     target_instance_ids: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    key_event: Option<TerminalBroadcastKeyEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     signature: Option<String>,
 }
 
@@ -274,6 +276,17 @@ struct TerminalBroadcastSignaturePayload<'a> {
     expires_at: u128,
     text: &'a str,
     target_instance_ids: &'a [String],
+    #[serde(skip_serializing_if = "Option::is_none")]
+    key_event: Option<&'a TerminalBroadcastKeyEvent>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A semantic terminal key delivered by the target renderer's active xterm encoder.
+struct TerminalBroadcastKeyEvent {
+    key: String,
+    code: String,
+    shift_key: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -283,6 +296,7 @@ struct TerminalBroadcastRequest {
     text: String,
     include_sync: bool,
     target_instance_ids: Vec<String>,
+    key_event: Option<TerminalBroadcastKeyEvent>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -2223,16 +2237,21 @@ fn migrate_legacy_terminal_font_family(runtime: &mut RuntimeConfig) {
     }
 }
 
-// Migrates former defaults while keeping macOS rows compact enough for block art.
+// Migrates former compact defaults while preserving explicit user values.
 fn migrate_legacy_terminal_line_height(runtime: &mut RuntimeConfig) {
     let line_height = runtime
         .config
         .terminal
         .get("lineHeight")
         .and_then(serde_json::Value::as_f64);
-    let former_default = line_height == Some(1.0)
-        || line_height == Some(1.12)
-        || (env::consts::OS == "macos" && line_height == Some(0.92));
+    let former_default = line_height == Some(1.12)
+        || (env::consts::OS == "macos" && line_height == Some(0.81))
+        || (env::consts::OS == "macos" && line_height == Some(0.82))
+        || (env::consts::OS == "macos" && line_height == Some(0.85))
+        || (env::consts::OS == "macos" && line_height == Some(0.8))
+        || line_height == Some(0.8)
+        || line_height == Some(0.92)
+        || (env::consts::OS == "macos" && line_height == Some(0.9));
     if former_default {
         runtime.config.terminal["lineHeight"] = serde_json::json!(default_terminal_line_height());
     }
@@ -2247,12 +2266,12 @@ fn terminal_font_size_for(platform: &str, architecture: &str) -> u32 {
     }
 }
 
-// Keeps the macOS WebKit cell-height adjustment testable from CI hosts.
+// Keeps platform terminal cell heights testable from CI hosts.
 fn terminal_line_height_for(platform: &str, _architecture: &str) -> f64 {
     if platform == "macos" {
-        0.8
+        1.0
     } else {
-        0.92
+        1.0
     }
 }
 
@@ -4414,11 +4433,7 @@ fn default_config_toml_for_terminal_defaults(
         &format!("fontSize = {font_size}"),
         1,
     );
-    let text = text.replacen(
-        "lineHeight = 0.92",
-        &format!("lineHeight = {line_height}"),
-        1,
-    );
+    let text = text.replacen("lineHeight = 1", &format!("lineHeight = {line_height}"), 1);
     let font_family_line = format!(
         "fontFamily = {}",
         toml::Value::String(font_family.to_string())
@@ -5404,6 +5419,7 @@ fn terminal_broadcast(
         expires_at: created_at.saturating_add(sync_command_ttl_millis()),
         text,
         target_instance_ids: request.target_instance_ids,
+        key_event: request.key_event,
         signature: None,
     };
     if request.include_sync {
@@ -5520,6 +5536,7 @@ fn broadcast_terminal_input_cli() -> Result<String, String> {
             .iter()
             .map(|target| target.id.clone())
             .collect(),
+        key_event: None,
         signature: None,
     };
     if include_sync {
@@ -5579,15 +5596,21 @@ fn start_terminal_broadcast_listener(app: AppHandle, state: &AppState) {
                         continue;
                     }
                     match write_terminal_input(&terminal, &item.text) {
-                        Ok(()) => append_diagnostic(
-                            &app,
-                            &format!(
-                                "terminal broadcast received id={} bytes={} source={}",
-                                item.id,
-                                item.text.len(),
-                                item.source_id
-                            ),
-                        ),
+                        Ok(()) => {
+                            if let Some(key_event) = item.key_event.as_ref() {
+                                let _ = app.emit("terminal:broadcast-key", key_event);
+                            }
+                            append_diagnostic(
+                                &app,
+                                &format!(
+                                    "terminal broadcast received id={} bytes={} key_event={} source={}",
+                                    item.id,
+                                    item.text.len(),
+                                    item.key_event.is_some(),
+                                    item.source_id
+                                ),
+                            );
+                        }
                         Err(error) => append_diagnostic(
                             &app,
                             &format!("terminal broadcast write failed id={}: {error}", item.id),
@@ -5687,6 +5710,7 @@ fn terminal_broadcast_signature_payload(item: &TerminalBroadcastItem) -> Result<
         expires_at: item.expires_at,
         text: &item.text,
         target_instance_ids: &item.target_instance_ids,
+        key_event: item.key_event.as_ref(),
     })
     .map_err(|error| error.to_string())
 }
@@ -7952,8 +7976,8 @@ installPath = "appearance/other.ts"
         assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
         assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
-        assert_eq!(terminal_line_height_for("macos", "aarch64"), 0.8);
-        assert_eq!(terminal_line_height_for("linux", "x86_64"), 0.92);
+        assert_eq!(terminal_line_height_for("macos", "aarch64"), 1.0);
+        assert_eq!(terminal_line_height_for("linux", "x86_64"), 1.0);
     }
 
     #[test]
@@ -8005,11 +8029,11 @@ installPath = "appearance/other.ts"
 
     #[test]
     fn embedded_default_config_is_complete_toml() {
-        let text = default_config_toml_for_terminal_defaults(12, MACOS_TERMINAL_FONT_FAMILY, 0.8);
+        let text = default_config_toml_for_terminal_defaults(12, MACOS_TERMINAL_FONT_FAMILY, 1.0);
         let config: toml::Value = toml::from_str(&text).expect("parse embedded defaults");
         assert_eq!(config["window"]["width"].as_integer(), Some(1000));
         assert_eq!(config["terminal"]["fontSize"].as_integer(), Some(12));
-        assert_eq!(config["terminal"]["lineHeight"].as_float(), Some(0.8));
+        assert_eq!(config["terminal"]["lineHeight"].as_float(), Some(1.0));
         assert_eq!(
             config["terminal"]["fontFamily"].as_str(),
             Some(MACOS_TERMINAL_FONT_FAMILY)
@@ -8072,6 +8096,7 @@ installPath = "appearance/other.ts"
             expires_at: 200,
             text: "git status\r".to_string(),
             target_instance_ids: vec!["window-1".to_string()],
+            key_event: None,
             signature: None,
         };
         let signature = sign_terminal_broadcast_item(&item, signing_key).expect("sign command");

@@ -1,4 +1,5 @@
 const terminalElement = document.getElementById('terminal');
+const imePreeditElement = document.getElementById('ime-preedit');
 const diagnosticsPanel = document.getElementById('diagnostics-panel');
 const diagnosticsTitleElement = document.getElementById('diagnostics-title');
 const diagnosticsElement = document.getElementById('diagnostics');
@@ -34,6 +35,7 @@ const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
+const imeStatusElement = document.getElementById('ime-status');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
@@ -61,6 +63,7 @@ const terminalBroadcastText = document.getElementById('terminal-broadcast-text')
 const terminalBroadcastControl = document.getElementById('terminal-broadcast-control');
 const terminalBroadcastControlInsertButton = document.getElementById('terminal-broadcast-control-insert');
 const terminalBroadcastControlStatus = document.getElementById('terminal-broadcast-control-status');
+const terminalBroadcastFocusStatus = document.getElementById('terminal-broadcast-focus-status');
 const terminalBroadcastTargetList = document.getElementById('terminal-broadcast-target-list');
 const terminalBroadcastSelectAllButton = document.getElementById('terminal-broadcast-select-all');
 const terminalBroadcastSelectNoneButton = document.getElementById('terminal-broadcast-select-none');
@@ -92,7 +95,7 @@ const fallbackConfig = {
     cursorStyle: 'block',
     fontFamily: '"DejaVu Sans Mono", "Noto Sans Mono", "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "NanumGothicCoding", "BIZ UDGothic", "Symbols Nerd Font Mono", "Symbols Nerd Font", "JetBrainsMono Nerd Font", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace',
     fontSize: 14,
-    lineHeight: 0.92,
+    lineHeight: 1,
     minimumContrastRatio: 1,
     rescaleOverlappingGlyphs: false,
     backgroundOpacity: 0.65,
@@ -120,11 +123,6 @@ const fallbackConfig = {
       brightCyan: '#9de9ea',
       brightWhite: '#ffffff',
     },
-  },
-  ime: {
-    duplicateGuard: true,
-    duplicateWindowMs: 800,
-    repeatedTextWindowMs: 140,
   },
   keybindings: {
     prefix: 'Mod+Shift',
@@ -172,13 +170,8 @@ let term;
 let fitAddon;
 let imageAddon;
 let terminalBroadcastTargets = [];
-let imeDuplicateWindowMs = fallbackConfig.ime.duplicateWindowMs;
-let imeRepeatedTextWindowMs = fallbackConfig.ime.repeatedTextWindowMs;
-let imeDuplicateGuardEnabled = fallbackConfig.ime.duplicateGuard;
-let pendingCompositionData = '';
-let recentCompositionCommit = null;
-let recentPlainTextWrite = null;
-let compositionRecentlyActiveUntil = 0;
+let imePreeditClearTimer = null;
+let imeTraceUntil = 0;
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
 let terminalDeferredResizeTimer = null;
@@ -332,8 +325,8 @@ function installTauriApiAdapter() {
     startTerminal: (size) => invoke('terminal_start', { size }),
     writeTerminal: (data) => invoke('terminal_write', { data }),
     killTerminal: () => invoke('terminal_kill'),
-    broadcastTerminal: (text, includeSync, targetInstanceIds) => invoke('terminal_broadcast', {
-      request: { text, includeSync, targetInstanceIds },
+    broadcastTerminal: (text, includeSync, targetInstanceIds, keyEvent) => invoke('terminal_broadcast', {
+      request: { text, includeSync, targetInstanceIds, keyEvent },
     }),
     terminalBroadcastTargets: () => invoke('terminal_broadcast_targets'),
     resizeTerminal: (size) => invoke('terminal_resize', { size }),
@@ -346,6 +339,9 @@ function installTauriApiAdapter() {
     deleteTerminalLog: (path) => invoke('terminal_log_delete', { request: { path: path || null } }),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
+    },
+    onTerminalBroadcastKey: (callback) => {
+      return listen('terminal:broadcast-key', (event) => callback(event.payload));
     },
     onTerminalExit: (callback) => {
       return listen('terminal:exit', (event) => callback(event.payload?.exitCode ?? 0));
@@ -482,98 +478,199 @@ function focusTerminalInput() {
   }
 }
 
-// Returns true for printable text, excluding control sequences and escapes.
-function isPlainTextInput(data) {
-  return data.length > 0 && !/[\u0000-\u001f\u007f]/.test(data);
+// Some supported WebViews keep marked text exclusively in xterm's hidden
+// textarea. The overlay is visual-only and does not affect PTY input.
+function needsImePreeditOverlay() {
+  return true;
 }
 
-// Extends the time window in which duplicate IME text can be detected.
-function markCompositionActivity() {
-  compositionRecentlyActiveUntil = performance.now() + imeDuplicateWindowMs;
+// Keeps a platform-independent conversion indicator visible when a WebView
+// declines to paint the terminal-area overlay.
+function updateImeStatus(text) {
+  if (!imeStatusElement) {
+    return;
+  }
+  const value = String(text || '');
+  imeStatusElement.textContent = value ? `IME: ${value}` : '';
+  imeStatusElement.hidden = !value;
+}
+
+// Shows browser-owned marked IME text over the terminal without sending it to
+// the PTY. Some macOS WebKit builds do not paint xterm's hidden textarea text.
+function showImePreedit(text, showComposingFallback = false) {
+  const value = String(text || '') || (showComposingFallback ? 'composing...' : '');
+  if (!needsImePreeditOverlay() || !imePreeditElement || !value || !terminalElement) {
+    return;
+  }
+  document.body.classList.add('ime-preedit-overlay');
+  if (imePreeditClearTimer) {
+    clearTimeout(imePreeditClearTimer);
+    imePreeditClearTimer = null;
+  }
+  const terminalRect = terminalElement.getBoundingClientRect();
+  const textarea = terminalElement.querySelector('.xterm-helper-textarea');
+  const textareaRect = textarea?.getBoundingClientRect();
+  const fontSize = Number(appConfig?.terminal?.fontSize) || fallbackConfig.terminal.fontSize;
+  const lineHeight = Number(appConfig?.terminal?.lineHeight) || fallbackConfig.terminal.lineHeight;
+  const withinTerminal = textareaRect
+    && textareaRect.left >= terminalRect.left
+    && textareaRect.left < terminalRect.right
+    && textareaRect.top >= terminalRect.top
+    && textareaRect.top < terminalRect.bottom;
+  const left = withinTerminal ? textareaRect.left : terminalRect.left + 4;
+  const top = withinTerminal ? textareaRect.top : terminalRect.bottom - fontSize * lineHeight - 8;
+  imePreeditElement.style.left = `${Math.round(Math.max(terminalRect.left + 2, left))}px`;
+  imePreeditElement.style.top = `${Math.round(Math.max(terminalRect.top + 2, top))}px`;
+  imePreeditElement.style.fontFamily = appConfig?.terminal?.fontFamily || fallbackConfig.terminal.fontFamily;
+  imePreeditElement.style.fontSize = `${fontSize}px`;
+  imePreeditElement.style.lineHeight = String(lineHeight);
+  imePreeditElement.textContent = value;
+  imePreeditElement.hidden = false;
+  updateImeStatus(value);
+}
+
+// Clears the visual-only preedit overlay after the committed terminal text can paint.
+function clearImePreedit(delay = 0) {
+  if (!imePreeditElement) {
+    return;
+  }
+  if (imePreeditClearTimer) {
+    clearTimeout(imePreeditClearTimer);
+  }
+  if (delay <= 0) {
+    imePreeditClearTimer = null;
+    imePreeditElement.hidden = true;
+    imePreeditElement.textContent = '';
+    updateImeStatus('');
+    return;
+  }
+  imePreeditClearTimer = setTimeout(() => {
+    imePreeditClearTimer = null;
+    imePreeditElement.hidden = true;
+    imePreeditElement.textContent = '';
+    updateImeStatus('');
+  }, delay);
 }
 
 // Stores the latest in-progress composition text from the helper textarea.
 function trackCompositionUpdate(event) {
-  markCompositionActivity();
-  if (event.data) {
-    pendingCompositionData = event.data;
+  const value = event.data || event.target?.value || '';
+  showDebugDiagnostic(`renderer ime compositionupdate data=${JSON.stringify(event.data || '')} value=${JSON.stringify(event.target?.value || '')}`);
+  if (value) {
+    showImePreedit(value);
   }
 }
 
-// Records the committed composition text so xterm duplicate emissions can be filtered.
-function trackCompositionCommit(event) {
-  markCompositionActivity();
-  const data = event.data || pendingCompositionData;
-  pendingCompositionData = '';
-
-  if (data && isPlainTextInput(data)) {
-    recentCompositionCommit = {
-      data,
-      time: performance.now(),
-      seen: false,
-    };
-  }
+// Records native composition ordering without changing browser or xterm input.
+function traceImeEvent(name, event) {
+  showDebugDiagnostic(`renderer ime ${name} data=${JSON.stringify(event.data || '')} value=${JSON.stringify(event.target?.value || '')} inputType=${event.inputType || ''}`);
 }
 
-// Drops or corrects duplicate plain-text input produced around IME composition commits.
-function correctCompositionData(data) {
-  if (!imeDuplicateGuardEnabled || !isPlainTextInput(data)) {
-    return data;
-  }
-
-  const now = performance.now();
-  if (
-    recentPlainTextWrite &&
-    now <= compositionRecentlyActiveUntil &&
-    data === recentPlainTextWrite.data &&
-    now - recentPlainTextWrite.time <= imeRepeatedTextWindowMs
-  ) {
-    recentPlainTextWrite = null;
-    return '';
-  }
-
-  if (!recentCompositionCommit) {
-    return data;
-  }
-
-  if (now - recentCompositionCommit.time > imeDuplicateWindowMs) {
-    recentCompositionCommit = null;
-    return data;
-  }
-
-  if (data === recentCompositionCommit.data + recentCompositionCommit.data) {
-    const correctedData = recentCompositionCommit.data;
-    recentCompositionCommit = null;
-    return correctedData;
-  }
-
-  if (data !== recentCompositionCommit.data) {
-    return data;
-  }
-
-  if (!recentCompositionCommit.seen) {
-    recentCompositionCommit.seen = true;
-    return data;
-  }
-
-  recentCompositionCommit = null;
-  return '';
+// Retains a short trace window after commit so the next ordinary key can be
+// correlated with delayed composition delivery without changing either input.
+function extendImeTraceWindow() {
+  imeTraceUntil = Date.now() + 800;
 }
 
-// Hooks composition events on xterm's helper textarea for duplicate-input detection.
-function installCompositionDuplicateGuard() {
+// ChromeOS keeps committed text in xterm's hidden helper textarea. A new
+// composition has not inserted its marked text at compositionstart, so clear
+// the stale helper value there without changing terminal or PTY text.
+function clearStaleImeTextareaAtCompositionStart(textarea) {
+  if (!/Linux/.test(navigator.platform || navigator.userAgent || '') || !textarea.value) {
+    return;
+  }
+  const staleValue = textarea.value;
+  textarea.value = '';
+  showDebugDiagnostic(`renderer ime cleared stale helper at compositionstart value=${JSON.stringify(staleValue)}`);
+}
+
+// Some Windows WebView2 builds dispatch composition events above xterm's
+// hidden textarea. Observe the document capture path for display only.
+function isTerminalImeEvent(event) {
+  return Boolean(
+    terminalElement?.contains(event.target)
+    || terminalElement?.contains(document.activeElement),
+  );
+}
+
+function installImeVisualFallback() {
+  document.addEventListener('keydown', (event) => {
+    if (isTerminalImeEvent(event) && (event.isComposing || event.keyCode === 229)) {
+      traceImeEvent('document-keydown', event);
+      showImePreedit(event.target?.value || document.activeElement?.value, true);
+    }
+  }, true);
+  document.addEventListener('compositionstart', (event) => {
+    if (isTerminalImeEvent(event)) {
+      traceImeEvent('document-compositionstart', event);
+      showImePreedit(event.data || event.target?.value, true);
+    }
+  }, true);
+  document.addEventListener('compositionupdate', (event) => {
+    if (isTerminalImeEvent(event)) {
+      traceImeEvent('document-compositionupdate', event);
+      showImePreedit(event.data || event.target?.value, true);
+    }
+  }, true);
+  document.addEventListener('compositionend', (event) => {
+    if (isTerminalImeEvent(event)) {
+      traceImeEvent('document-compositionend', event);
+      showImePreedit(event.data || event.target?.value, true);
+      clearImePreedit(180);
+    }
+  }, true);
+}
+
+// Observes composition events for visual feedback only. Do not suppress,
+// replay, replace, or directly commit them: xterm.js owns normal PTY input.
+function installCompositionObserver() {
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
   if (!textarea) {
     return;
   }
 
-  textarea.addEventListener('compositionstart', () => {
-    markCompositionActivity();
-    pendingCompositionData = '';
-    recentCompositionCommit = null;
+  textarea.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.keyCode === 229 || Date.now() < imeTraceUntil) {
+      traceImeEvent('keydown', event);
+    }
+    if (event.isComposing || event.keyCode === 229) {
+      showImePreedit(textarea.value, true);
+    }
+  }, true);
+
+  textarea.addEventListener('compositionstart', (event) => {
+    extendImeTraceWindow();
+    traceImeEvent('compositionstart', event);
+    clearImePreedit();
+    clearStaleImeTextareaAtCompositionStart(textarea);
+    showImePreedit(event.target?.value, true);
+  }, true);
+  textarea.addEventListener('compositionupdate', (event) => {
+    extendImeTraceWindow();
+    trackCompositionUpdate(event);
+  }, true);
+  textarea.addEventListener('beforeinput', (event) => {
+    const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
+    if (isCompositionInput || Date.now() < imeTraceUntil) {
+      traceImeEvent('beforeinput', event);
+    }
+    if (event.inputType === 'insertCompositionText') {
+      trackCompositionUpdate(event);
+    }
+  }, true);
+  textarea.addEventListener('compositionend', (event) => {
+    extendImeTraceWindow();
+    traceImeEvent('compositionend', event);
+    const committedValue = event.target?.value || event.data || '';
+    showImePreedit(event.data || committedValue, true);
+    clearImePreedit(180);
   });
-  textarea.addEventListener('compositionupdate', trackCompositionUpdate);
-  textarea.addEventListener('compositionend', trackCompositionCommit);
+  textarea.addEventListener('input', (event) => {
+    const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
+    if (isCompositionInput || Date.now() < imeTraceUntil) {
+      traceImeEvent('input', event);
+    }
+  }, true);
 }
 
 // Writes a diagnostic line to the optional in-window diagnostics panel.
@@ -684,22 +781,11 @@ function showTerminalError(message) {
   terminalElement.classList.add('terminal-error');
 }
 
-// Sends terminal input through the same duplicate guard and PTY write path.
+// Sends terminal input as emitted by xterm.js. IME data is intentionally not
+// altered here so platform-specific input can be observed and debugged.
 function sendTerminalInput(data, source = 'input') {
-  showDebugDiagnostic(`renderer terminal ${source} bytes=${data.length}`);
-  const correctedData = correctCompositionData(data);
-
-  if (!correctedData) {
-    showDiagnostic(`renderer dropped duplicate composition data=${data}`);
-    return;
-  }
-
-  if (correctedData !== data) {
-    showDiagnostic(`renderer corrected duplicate composition data=${data} corrected=${correctedData}`);
-  }
-
-  rememberPlainTextWrite(correctedData);
-  window.fpasoterm.writeTerminal(correctedData).catch((error) => {
+  showDebugDiagnostic(`renderer terminal ${source} bytes=${data.length} data=${JSON.stringify(data)} codepoints=${Array.from(data).map((character) => `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(',')}`);
+  window.fpasoterm.writeTerminal(data).catch((error) => {
     showTerminalError(`terminal write failed: ${error}`);
   });
 }
@@ -1083,10 +1169,6 @@ async function loadRuntimeConfig() {
       });
     }
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
-    imeDuplicateWindowMs = Number(appConfig.ime.duplicateWindowMs) || fallbackConfig.ime.duplicateWindowMs;
-    imeRepeatedTextWindowMs =
-      Number(appConfig.ime.repeatedTextWindowMs) || fallbackConfig.ime.repeatedTextWindowMs;
-    imeDuplicateGuardEnabled = appConfig.ime.duplicateGuard !== false;
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
     showDiagnostic(
@@ -1194,10 +1276,6 @@ async function applyRuntimeConfig(runtimeConfig) {
   activeConfigPath = String(runtimeConfig.configPath || activeConfigPath);
   applyKeybindingLabels();
   pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
-  imeDuplicateWindowMs = Number(appConfig.ime.duplicateWindowMs) || fallbackConfig.ime.duplicateWindowMs;
-  imeRepeatedTextWindowMs =
-    Number(appConfig.ime.repeatedTextWindowMs) || fallbackConfig.ime.repeatedTextWindowMs;
-  imeDuplicateGuardEnabled = appConfig.ime.duplicateGuard !== false;
   applyWindowAppearance();
   applyTerminalAppearance();
 
@@ -1415,10 +1493,15 @@ function createTerminal() {
     return;
   }
 
+  const terminalOptions = { ...appConfig.terminal };
+  delete terminalOptions.kittyKeyboard;
+
   term = new Terminal({
-    ...appConfig.terminal,
+    ...terminalOptions,
     theme: terminalThemeWithOpacity(appConfig.terminal || {}),
     screenReaderMode: false,
+    // Keep this opt-in until it is verified not to interfere with IME input.
+    vtExtensions: { kittyKeyboard: appConfig.terminal?.kittyKeyboard === true },
   });
   if (typeof term.onTitleChange === 'function') {
     term.onTitleChange((title) => setRuntimeWindowTitle(title));
@@ -1453,19 +1536,6 @@ function createTerminal() {
   logXtermCanvasDiagnostics();
   logXtermTextDiagnostics();
   showDebugDiagnostic(`terminal opened cols=${term.cols} rows=${term.rows}`);
-}
-
-// Remembers recent text sent to the PTY so a repeated IME emission can be dropped.
-function rememberPlainTextWrite(data) {
-  if (!isPlainTextInput(data)) {
-    recentPlainTextWrite = null;
-    return;
-  }
-
-  recentPlainTextWrite = {
-    data,
-    time: performance.now(),
-  };
 }
 
 // Converts a trusted file URL from the config resolver into Tauri's scoped
@@ -1816,6 +1886,79 @@ function enableFloatingPanelDrag(panel, handle) {
 enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
 enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
 
+// Returns focusable controls in the visible Broadcast dialog, including its
+// dynamically rendered local-window target checkboxes.
+function terminalBroadcastFocusItems() {
+  if (!terminalBroadcastDialog || terminalBroadcastDialog.hidden) {
+    return [];
+  }
+  if (terminalBroadcastConfirmElement && !terminalBroadcastConfirmElement.hidden) {
+    return [
+      terminalBroadcastConfirmOkButton,
+      terminalBroadcastConfirmCancelButton,
+    ].filter((element) => element && !element.hidden && !element.disabled);
+  }
+  const targets = [...terminalBroadcastTargetList.querySelectorAll('input[type="checkbox"]')];
+  return [
+    terminalBroadcastText,
+    terminalBroadcastControl,
+    terminalBroadcastControlInsertButton,
+    ...targets,
+    terminalBroadcastSelectAllButton,
+    terminalBroadcastSelectNoneButton,
+    terminalBroadcastSyncLabel?.hidden ? null : terminalBroadcastSync,
+    terminalBroadcastSendButton,
+    terminalBroadcastCancelButton,
+  ].filter((element) => element && !element.hidden && !element.disabled && element.getClientRects().length > 0);
+}
+
+// Describes the active Broadcast control so keyboard navigation remains visible.
+function terminalBroadcastFocusLabel(element) {
+  if (element === terminalBroadcastText) {
+    return 'Input';
+  }
+  if (element === terminalBroadcastControl) {
+    return 'Control byte';
+  }
+  if (element === terminalBroadcastControlInsertButton) {
+    return 'Insert control byte';
+  }
+  if (element === terminalBroadcastSync) {
+    return 'Include synced channel';
+  }
+  if (element?.matches?.('#terminal-broadcast-target-list input[type="checkbox"]')) {
+    return element.closest('label')?.textContent?.trim() || 'Local window';
+  }
+  return element?.getAttribute?.('aria-label') || element?.textContent?.trim() || 'Control';
+}
+
+// Updates the visible focus indicator after a keyboard or pointer focus change.
+function updateTerminalBroadcastFocusStatus(element) {
+  terminalBroadcastDialog?.querySelectorAll('.keyboard-focus').forEach((focusElement) => {
+    focusElement.classList.remove('keyboard-focus');
+  });
+  element?.classList?.add('keyboard-focus');
+  if (element?.matches?.('#terminal-broadcast-target-list input[type="checkbox"]')) {
+    element.closest('label')?.classList.add('keyboard-focus');
+  }
+  element?.scrollIntoView?.({ block: 'nearest', inline: 'nearest' });
+  if (terminalBroadcastFocusStatus) {
+    terminalBroadcastFocusStatus.textContent = `Keyboard focus: ${terminalBroadcastFocusLabel(element)}`;
+  }
+}
+
+// Cycles focus within Broadcast so Tab never falls through to xterm.js.
+function focusTerminalBroadcastItem(delta) {
+  const items = terminalBroadcastFocusItems();
+  if (items.length === 0) {
+    return;
+  }
+  const currentIndex = items.indexOf(document.activeElement);
+  const nextIndex = currentIndex < 0 ? 0 : (currentIndex + delta + items.length) % items.length;
+  items[nextIndex].focus({ preventScroll: true });
+  updateTerminalBroadcastFocusStatus(items[nextIndex]);
+}
+
 // Returns focusable controls in the visible diagnostics/log panel.
 function diagnosticsPanelFocusItems() {
   if (!diagnosticsPanel || diagnosticsPanel.hidden) {
@@ -2112,6 +2255,7 @@ async function openTerminalBroadcastDialog() {
   terminalBroadcastSync.checked = false;
   terminalBroadcastControl.value = '';
   terminalBroadcastControlStatus.textContent = '';
+  updateTerminalBroadcastFocusStatus(terminalBroadcastText);
   terminalBroadcastTargetList.textContent = 'Loading local windows...';
   terminalBroadcastDialog.hidden = false;
   terminalBroadcastText.focus({ preventScroll: true });
@@ -2135,6 +2279,7 @@ function closeTerminalBroadcastDialog() {
 // Converts visible Broadcast control notation back into its terminal byte.
 function decodeTerminalBroadcastControls(text) {
   const controls = {
+    '\\x0d': '\r',
     '\\x1b': '\x1b',
     '\\x09': '\t',
     '\\x03': '\x03',
@@ -2142,7 +2287,44 @@ function decodeTerminalBroadcastControls(text) {
     '\\x18': '\x18',
     '\\x1a': '\x1a',
   };
-  return String(text || '').replace(/\\x(?:1b|09|03|04|18|1a)/gi, (match) => controls[match.toLowerCase()] || match);
+  return String(text || '').replace(/\\x(?:0d|1b|09|03|04|18|1a)/gi, (match) => controls[match.toLowerCase()] || match);
+}
+
+// Uses xterm's active keyboard encoder instead of guessing a byte sequence.
+// This preserves a target TUI's negotiated input protocol, including CSI-u.
+function terminalBroadcastSubmitKeyEvent() {
+  return { key: 'Enter', code: 'Enter', shiftKey: false };
+}
+
+// A control-byte-only broadcast is used for actions such as Ctrl+C. Appending
+// Enter would perform a second, unrelated action in the target application.
+function shouldAppendTerminalBroadcastEnter(text) {
+  const value = String(text || '');
+  return !value.endsWith('\r') && /[^\x00-\x1f\x7f]/.test(value);
+}
+
+// Delivers a semantic key press through xterm so its current keyboard mode
+// produces the exact PTY sequence expected by the target application.
+function dispatchTerminalBroadcastKey(keyEvent) {
+  if (!keyEvent || !term?._core || typeof term._core._keyDown !== 'function') {
+    showDiagnostic('terminal broadcast key event is unavailable');
+    return;
+  }
+  const event = {
+    type: 'keydown',
+    key: keyEvent.key === 'Enter' ? 'Enter' : String(keyEvent.key || ''),
+    code: keyEvent.code === 'Enter' ? 'Enter' : String(keyEvent.code || ''),
+    keyCode: keyEvent.key === 'Enter' ? 13 : 0,
+    shiftKey: keyEvent.shiftKey === true,
+    altKey: false,
+    ctrlKey: false,
+    metaKey: false,
+    repeat: false,
+    preventDefault() {},
+    stopPropagation() {},
+    getModifierState() { return false; },
+  };
+  term._core._keyDown(event);
 }
 
 // Inserts visible notation for a terminal control byte, avoiding browser keys
@@ -2150,6 +2332,7 @@ function decodeTerminalBroadcastControls(text) {
 function insertTerminalBroadcastControl() {
   const control = String(terminalBroadcastControl?.value || '');
   const controls = {
+    enter: { text: '\\x0D', label: 'Enter / CR (0x0D)' },
     tab: { text: '\\x09', label: 'Tab (0x09)' },
     'ctrl-c': { text: '\\x03', label: 'Ctrl+C (0x03)' },
     'ctrl-d': { text: '\\x04', label: 'Ctrl+D (0x04)' },
@@ -2226,7 +2409,11 @@ function resolveDangerousBroadcastConfirmation(confirmed) {
 // Writes the dialog text to local windows and optionally the configured sync channel.
 async function sendTerminalBroadcast() {
   const rawText = String(terminalBroadcastText?.value || '');
-  const text = rawText ? `${decodeTerminalBroadcastControls(normalizePasteText(rawText)).replace(/\r+$/, '')}\r` : '';
+  const normalizedText = decodeTerminalBroadcastControls(normalizePasteText(rawText).replace(/\r+$/, ''));
+  const text = normalizedText;
+  const keyEvent = shouldAppendTerminalBroadcastEnter(text)
+    ? terminalBroadcastSubmitKeyEvent()
+    : null;
   if (!text) {
     showDiagnostic('terminal broadcast skipped: input is empty');
     terminalBroadcastText?.focus({ preventScroll: true });
@@ -2255,6 +2442,7 @@ async function sendTerminalBroadcast() {
     text,
     Boolean(terminalBroadcastSync?.checked),
     targetInstanceIds,
+    keyEvent,
   );
   showDiagnostic(result.message || `terminal broadcast requested bytes=${text.length}`);
   terminalBroadcastText.value = '';
@@ -2759,28 +2947,81 @@ terminalBroadcastConfirmCancelButton.addEventListener('click', () => {
   resolveDangerousBroadcastConfirmation(false);
 });
 
-terminalBroadcastConfirmElement.addEventListener('keydown', (event) => {
+// Handles Broadcast keys at document capture time so xterm.js cannot reclaim
+// focus and turn a requested send into terminal input.
+function handleTerminalBroadcastKeyboard(event) {
+  if (!terminalBroadcastDialog || terminalBroadcastDialog.hidden) {
+    return false;
+  }
+
+  // Candidate selection and composition confirmation belong to the IME. Do not
+  // reinterpret those keys as dialog navigation or Broadcast submission.
+  if (event.isComposing) {
+    return false;
+  }
+
+  if (terminalBroadcastConfirmElement && !terminalBroadcastConfirmElement.hidden) {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      resolveDangerousBroadcastConfirmation(false);
+      return true;
+    }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      focusTerminalBroadcastItem(event.shiftKey ? -1 : 1);
+      return true;
+    }
+    return false;
+  }
+
   if (event.key === 'Escape') {
     event.preventDefault();
-    resolveDangerousBroadcastConfirmation(false);
+    event.stopImmediatePropagation();
+    closeTerminalBroadcastDialog();
+    return true;
   }
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    focusTerminalBroadcastItem(event.shiftKey ? -1 : 1);
+    return true;
+  }
+  if (event.key === 'Enter' && event.shiftKey && !event.isComposing) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    sendTerminalBroadcast().catch((error) => showDiagnostic(`terminal broadcast failed: ${error}`));
+    return true;
+  }
+  return false;
+}
+
+terminalBroadcastConfirmElement.addEventListener('keydown', (event) => {
+  handleTerminalBroadcastKeyboard(event);
 });
 
 terminalBroadcastDialog.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') {
-    event.preventDefault();
-    closeTerminalBroadcastDialog();
-  } else if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
-    event.preventDefault();
-    sendTerminalBroadcast().catch((error) => showDiagnostic(`terminal broadcast failed: ${error}`));
-  }
+  handleTerminalBroadcastKeyboard(event);
+});
+
+terminalBroadcastDialog.addEventListener('focusin', (event) => {
+  updateTerminalBroadcastFocusStatus(event.target);
 });
 
 document.addEventListener('keydown', (event) => {
+  if (handleTerminalBroadcastKeyboard(event)) {
+    return;
+  }
+
+  if (handleWindowMenuKeyboard(event)) {
+    return;
+  }
+
   if (matchesKeybinding(event, 'logMenu')) {
     event.preventDefault();
     const open = windowMenuItems?.hidden !== false;
-    setWindowMenuOpen(open);
+    setWindowMenuOpen(open, terminalLogToggleButton);
     if (open) {
       setWindowMenuSubmenuOpen('log', true, terminalLogToggleButton);
     }
@@ -3001,6 +3242,13 @@ function setWindowMenuOpen(open, preferredItem = newWindowButton) {
       ? preferredItem
       : newWindowButton;
     focusTarget.focus();
+    // xterm/WebKit can reclaim focus after the shortcut's key event finishes.
+    // Repeat on the next frame so keyboard navigation always starts in the menu.
+    requestAnimationFrame(() => {
+      if (!windowMenuItems.hidden && focusTarget.getClientRects().length > 0) {
+        focusTarget.focus({ preventScroll: true });
+      }
+    });
   }
 }
 
@@ -3015,33 +3263,55 @@ windowMenuToggleButton.addEventListener('keydown', (event) => {
   }
 });
 
-windowMenuItems.addEventListener('keydown', (event) => {
+// Handles menu navigation before xterm.js consumes keys when the menu is open.
+function handleWindowMenuKeyboard(event) {
+  if (!windowMenuItems || windowMenuItems.hidden) {
+    return false;
+  }
+
   if (event.key === 'Escape') {
     event.preventDefault();
+    event.stopImmediatePropagation();
     setWindowMenuOpen(false);
-    windowMenuToggleButton.focus({ preventScroll: true });
-    return;
+    focusTerminalInput();
+    return true;
   }
   if (event.key === 'Tab' || event.key === 'ArrowDown' || event.key === 'ArrowUp') {
     event.preventDefault();
+    event.stopImmediatePropagation();
     const backwards = event.key === 'ArrowUp' || (event.key === 'Tab' && event.shiftKey);
     focusWindowMenuItem(backwards ? -1 : 1);
-    return;
+    return true;
   }
 
   const submenu = windowMenuSubmenuForElement(document.activeElement);
   if (event.key === 'ArrowRight' && document.activeElement?.classList.contains('window-menu-submenu-toggle')) {
     event.preventDefault();
+    event.stopImmediatePropagation();
     const firstChild = submenu?.items.querySelector('button:not([hidden]):not(:disabled)');
     setWindowMenuSubmenuOpen(submenu?.name, true, firstChild);
-    return;
+    return true;
   }
 
   if (event.key === 'ArrowLeft' && submenu && document.activeElement !== submenu.toggle) {
     event.preventDefault();
+    event.stopImmediatePropagation();
     setWindowMenuSubmenuOpen(submenu.name, false);
     submenu.toggle.focus({ preventScroll: true });
+    return true;
   }
+
+  if (event.key === 'ArrowRight' || event.key === 'ArrowLeft') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    focusWindowMenuItem(event.key === 'ArrowRight' ? 1 : -1);
+    return true;
+  }
+  return false;
+}
+
+windowMenuItems.addEventListener('keydown', (event) => {
+  handleWindowMenuKeyboard(event);
 });
 
 window.addEventListener('resize', fitWindowMenuToViewport);
@@ -3203,11 +3473,17 @@ async function initialize() {
     sendTerminalInput(data, 'input');
   });
 
-  Promise.resolve(window.fpasoterm.onTerminalData((data) => {
-    queueTerminalOutput(data);
-  })).catch((error) => {
-    showDiagnostic(`terminal data listener failed: ${error}`);
-  });
+Promise.resolve(window.fpasoterm.onTerminalData((data) => {
+  queueTerminalOutput(data);
+})).catch((error) => {
+  showDiagnostic(`terminal data listener failed: ${error}`);
+});
+
+Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
+  dispatchTerminalBroadcastKey(keyEvent);
+})).catch((error) => {
+  showDiagnostic(`terminal broadcast key listener failed: ${error}`);
+});
   showDebugDiagnostic('renderer terminal data listener requested');
 
   Promise.resolve(window.fpasoterm.onTerminalExit((exitCode) => {
@@ -3254,7 +3530,8 @@ async function initialize() {
     showTerminalError(`failed to start terminal backend: ${error.stack || error.message || error}`);
     return;
   }
-  installCompositionDuplicateGuard();
+  installCompositionObserver();
+  installImeVisualFallback();
   // A no-output fallback keeps lifecycle plugins usable for shells that do not
   // print a prompt. Normal PTY output resets this timer until it is painted.
   schedulePluginsReadyAfterTerminalOutput(350);

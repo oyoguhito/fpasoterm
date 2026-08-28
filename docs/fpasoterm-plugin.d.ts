@@ -19,11 +19,6 @@ type FpasotermPluginApi = {
       themeSource: 'system' | 'light' | 'dark';
     };
     terminal: Record<string, unknown>;
-    ime: {
-      duplicateGuard: boolean;
-      duplicateWindowMs: number;
-      repeatedTextWindowMs: number;
-    };
     plugins: {
       enabled: string[];
     };
