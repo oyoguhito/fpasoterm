@@ -255,13 +255,17 @@ cursorStyle = "block"
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # When omitted, the default is 12 on Intel macOS and 14 on other platforms.
-lineHeight = 0.92
+lineHeight = 1
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
 shell = ""
+
+# Enable only for a TUI that explicitly requires enhanced Kitty keyboard input.
+# It is separate from the currently disabled graphics addon.
+kittyKeyboard = false
 
 # [terminal.images] is reserved for a future stable renderer.
 # Current builds ignore this section. Do not add it to config.toml.
@@ -357,11 +361,6 @@ Run with `--debug-keys --console-diagnostics`. A working shortcut reports both
 If it reports `ctrl=false`, the operating system did not deliver the modifier
 and this cannot be corrected from the renderer.
 
-[ime]
-duplicateGuard = true
-duplicateWindowMs = 800
-repeatedTextWindowMs = 140
-
 [plugins]
 enabled = []
 
@@ -383,11 +382,11 @@ autoStart = false
 maxBytes = 10485760
 ```
 
-`lineHeight` defaults to `0.92` on Linux and Windows, and `0.80` on macOS.
-The lower macOS value compensates for WebKit device-pixel rounding so terminal
-art and TUI logos use adjacent rows. fpasoterm's bundled xterm.js accepts
-values down to `0.5`. Existing macOS values matching former defaults `0.92`,
-`1`, or `1.12` are migrated at runtime; explicit custom values are retained.
+`lineHeight` defaults to `1` on every platform, including macOS. This
+keeps descenders such as `g`, `q`, and `y` distinct while keeping macOS TUI
+logo rows closer together. fpasoterm's bundled xterm.js accepts values down to
+`0.5`. Existing macOS values matching former compact defaults `0.8`, `0.81`, `0.82`, `0.85`, `0.9`, or `0.92`
+are migrated at runtime; explicit custom values are retained.
 
 On macOS, `Menlo` is the first default terminal font because its box and block
 glyph metrics match the macOS Terminal renderer more closely than `SF Mono`.
@@ -395,7 +394,9 @@ glyph metrics match the macOS Terminal renderer more closely than `SF Mono`.
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `lineHeight` defaults to `1` to keep terminal art and TUI logo rows connected. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. On Windows, PowerShell 7 (`pwsh.exe`) is the default when it is available. If `pwsh.exe` is not available on `PATH`, fpasoterm checks common PowerShell 7 install paths such as `C:\Program Files\PowerShell\7\pwsh.exe`; a full path can also be used. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `lineHeight` defaults to `1` to keep terminal art and TUI logo rows connected. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. PowerShell 7 (`pwsh.exe`) is the default when it is available; otherwise fpasoterm checks common PowerShell 7 install paths and accepts a full path. `terminal.kittyKeyboard` is `false` by default: enable it only for a TUI that explicitly needs enhanced Kitty keyboard input, because IME behavior differs among WebViews. It does not enable graphics. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+
+On Windows, a full shell path can be written as `C:\Program Files\PowerShell\7\pwsh.exe` when PowerShell is installed in a nonstandard location.
 
 ### TUI compatibility check
 
@@ -411,8 +412,8 @@ in its `[terminal]` section and restart, or launch the partial
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 ```
-- `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Restart or apply a runtime config file to refresh the menu labels and bindings.
-- `ime`: duplicate input guard settings for IME composition.
+- `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Opening it moves focus to its first item; `Tab`/`Shift+Tab` and arrow keys navigate it, while `Escape` closes it and returns focus to the terminal. Restart or apply a runtime config file to refresh the menu labels and bindings.
+fpasoterm observes IME composition events only to show marked text. xterm.js and the WebView retain native input delivery: fpasoterm does not suppress, replay, replace, or directly commit IME text. On ChromeOS/Linux, at the start of a new composition, it clears xterm's hidden helper textarea when it contains stale committed text and before the new marked text is inserted. This prevents later conversions from inheriting accumulated committed text and does not change terminal text or the PTY payload. All platforms show a visual-only `IME` marked-text overlay during composition so text remains visible when xterm's helper textarea is hidden; it never writes to the PTY. A fixed bottom status mirrors the same value as `IME: ...`, which remains visible on WebViews that do not paint the terminal-area overlay. If a WebView does not expose the marked string, both indicators show `IME composing...` for the active conversion session.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics and explicitly requested broadcast commands. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. `commands` permits short-lived shared commands and `commandTtlSeconds` limits their lifetime. See [Sync Folder](sync.en.md).
 - `logging`: terminal output logging. The hamburger menu contains `Log Start (^S)` / `Log Stop (^S)` and `Log Show (^P)`. `Ctrl+Shift+L` opens that menu at the log actions; `Ctrl+Shift+S` toggles logging directly, and `Ctrl+Shift+P` opens a selector for captured logs. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
@@ -435,17 +436,18 @@ Do not run `kitten icat`, `chafa --format kitty`, or `chafa --format sixels` in 
 
 ## Broadcast Input
 
-Open the hamburger menu and choose `Broadcast (^B)`, or press `Ctrl+Shift+B`. Select one or more local windows by title and PID, enter one or more commands, then choose `Send`. fpasoterm normalizes line endings and appends Enter before delivering the text only to the selected local fpasoterm windows. This is useful for starting the same tmux, herdr, or diagnostic command in several terminals without affecting unrelated windows.
+Open the hamburger menu and choose `Broadcast (^B)`, or press `Ctrl+Shift+B`. Select one or more local windows by title and PID, enter one or more commands, then press `Shift+Enter` or choose `Send`. Use `Enter` for a line break in a multi-line command. fpasoterm removes trailing line breaks, normalizes line endings, and delivers the text only to the selected local fpasoterm windows. Every command uses the target terminal's actual Enter key event after its text, so a target TUI can encode the active keyboard protocol correctly. In a conventional shell it produces the usual CR byte. A control-byte-only input, such as the `Ctrl+C` notation inserted by the picker, is delivered without an added Enter key.
 
 When every local window is selected and sync is enabled, the dialog exposes `Include synced channel`. This publishes the same short-lived command to every already-running fpasoterm instance using the same sync path and channel. Sync delivery is disabled for a local subset because remote window identities are not shared. Command files expire after `sync.commandTtlSeconds` (60 seconds by default) and an instance ignores commands created before it started.
 
 This feature deliberately has no remote server, OAuth token, or automatic command execution for later launches. A shared sync folder becomes a command channel when this option is used. Use it only with a folder and channel trusted by every participating machine.
 
-Broadcast always appends Enter. Its **Control byte** picker inserts visible
-notation at the textarea cursor: `\x09` for `Tab`, `\x03` for `Ctrl+C`,
+Broadcast keeps keyboard focus inside its dialog while it is open: `Tab` and `Shift+Tab` cycle through its controls instead of reaching the terminal. The focused control scrolls into view, has a yellow outline, and is named by the `Keyboard focus:` status line. `Shift+Enter` sends even if focus was unexpectedly reclaimed by the terminal. Every send uses the target terminal's actual Enter key event after the text; this is distinct from the dialog shortcut and preserves enhanced keyboard protocols. IME composition keys remain with the browser instead of being treated as dialog navigation. Its **Control byte** picker inserts visible
+notation at the textarea cursor: `\x0D` for an explicit `Enter / CR`, `\x09` for `Tab`, `\x03` for `Ctrl+C`,
 `\x04` for `Ctrl+D`, `\x18` for `Ctrl+X`, and `\x1A` for `Ctrl+Z`.
 fpasoterm converts only these picker-inserted notations to terminal bytes when
-you send them. The standalone `Esc` option is intentionally omitted because
+you send them. A trailing explicit `\x0D` does not receive a second semantic
+Enter event. The standalone `Esc` option is intentionally omitted because
 **Alt prefix / Esc** inserts the same `\x1B`. `Ctrl` and `Alt` are modifiers,
 not bytes. For the conventional `Alt+x` terminal sequence, insert **Alt prefix
 / Esc**, then type `x`. The picker avoids relying on Escape and Tab key events,

@@ -62,6 +62,8 @@
       </div>
     </header>
     <main id="terminal"></main>
+    <div id="ime-preedit" hidden aria-live="polite" aria-label="IME preedit text"></div>
+    <div id="ime-status" hidden aria-live="polite">IME composing...</div>
     <pre id="terminal-mirror" hidden aria-label="Terminal data mirror"></pre>
     <div class="resize-edge resize-edge-top" data-resize-direction="north"></div>
     <div class="resize-edge resize-edge-right" data-resize-direction="east"></div>
@@ -114,11 +116,14 @@
     <section id="terminal-broadcast-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-broadcast-title">
       <div class="terminal-log-confirm-card terminal-broadcast-card">
         <div id="terminal-broadcast-title" class="panel-drag-title" data-panel-drag-handle>Broadcast Input</div>
-        <textarea id="terminal-broadcast-text" aria-label="Text to send to fpasoterm windows" spellcheck="false"></textarea>
+        <textarea id="terminal-broadcast-text" aria-label="Text to send to fpasoterm windows. Press Shift+Enter to send." aria-describedby="terminal-broadcast-hint" spellcheck="false"></textarea>
+        <div id="terminal-broadcast-hint"><strong>Send: Shift+Enter</strong>. New line: Enter.</div>
+        <div id="terminal-broadcast-focus-status" aria-live="polite">Keyboard focus: Input</div>
         <div id="terminal-broadcast-control-picker">
           <label>Control byte
             <select id="terminal-broadcast-control" aria-label="Control byte to insert">
               <option value="">Select</option>
+              <option value="enter">Enter / CR (0x0D)</option>
               <option value="tab">Tab (0x09)</option>
               <option value="ctrl-c">Ctrl+C (0x03)</option>
               <option value="ctrl-d">Ctrl+D (0x04)</option>
@@ -140,7 +145,7 @@
         </fieldset>
         <label id="terminal-broadcast-sync-label"><input id="terminal-broadcast-sync" type="checkbox"> Include synced channel</label>
         <div class="terminal-log-confirm-actions">
-          <button id="terminal-broadcast-send" type="button">Send</button>
+          <button id="terminal-broadcast-send" type="button">Send (Shift+Enter)</button>
           <button id="terminal-broadcast-cancel" type="button">Cancel</button>
         </div>
       </div>

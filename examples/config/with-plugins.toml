@@ -9,7 +9,7 @@ titlebarColor = "#1565c0"
 
 [terminal]
 fontSize = 15
-lineHeight = 0.92
+lineHeight = 1
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
@@ -23,11 +23,6 @@ shell = ""
 background = "rgba(16, 19, 23, 0.65)"
 foreground = "#e8edf2"
 cursor = "#f5d76e"
-
-[ime]
-duplicateGuard = true
-duplicateWindowMs = 900
-repeatedTextWindowMs = 180
 
 [plugins]
 enabled = [

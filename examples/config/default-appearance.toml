@@ -8,7 +8,7 @@ title = "fpasoterm"
 titlebarColor = "#1565c0"
 
 [terminal]
-lineHeight = 0.92
+lineHeight = 1
 # Preserve application-selected ANSI/RGB colors and block/box glyph art.
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false

@@ -73,7 +73,6 @@ Supported config sections:
 
 - `window`: initial window size, minimum window size, background color, theme source, frame/titlebar visibility, and whether to remember the last size locally.
 - `terminal`: xterm.js terminal options such as `fontFamily`, `fontSize`, `scrollback`, and `theme`.
-- `ime`: duplicate input guard options: `duplicateGuard`, `duplicateWindowMs`, and `repeatedTextWindowMs`.
 - `plugins.enabled`: relative plugin paths under the config directory.
 
 Plugins must be placed under `~/.config/fpasoterm/User/plugins/`. `.js` and `.ts` plugins are supported. TypeScript plugins are transpiled to `~/.config/fpasoterm/User/cache/plugins/` at launch and then loaded into the renderer. New convenience behavior should normally be implemented as a plugin rather than added to the core application.

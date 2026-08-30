@@ -55,6 +55,34 @@ body {
   -webkit-app-region: drag;
 }
 
+#ime-status {
+  position: fixed;
+  z-index: 10025;
+  right: 8px;
+  bottom: 8px;
+  max-width: calc(100vw - 16px);
+  padding: 3px 7px;
+  overflow: hidden;
+  border: 1px solid #f5d76e;
+  border-radius: 4px;
+  background: rgba(16, 19, 23, 0.94);
+  overflow: hidden;
+  color: #f5d76e;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 2px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#ime-status[hidden] {
+  display: none;
+}
+
 #window-controls {
   position: relative;
   display: flex;
@@ -216,6 +244,32 @@ body {
   white-space: pre-wrap;
 }
 
+/* Mirrors marked IME text when a platform WebView keeps it only in xterm's
+ * hidden textarea. This is visual-only and never writes to the PTY. */
+#ime-preedit {
+  position: fixed;
+  z-index: 10010;
+  max-width: calc(100vw - 12px);
+  overflow: hidden;
+  padding: 0 2px;
+  border-bottom: 1px solid #f5d76e;
+  background: rgba(16, 19, 23, 0.82);
+  color: #ffffff;
+  pointer-events: none;
+  text-overflow: clip;
+  white-space: pre;
+}
+
+#ime-preedit::before {
+  content: "IME ";
+  color: #f5d76e;
+  font-weight: 700;
+}
+
+#ime-preedit[hidden] {
+  display: none;
+}
+
 .terminal-broadcast-card {
   width: 100%;
   max-width: 100%;
@@ -251,6 +305,35 @@ body {
   color: #e8edf2;
   font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   padding: 8px;
+}
+
+#terminal-broadcast-hint {
+  margin-top: 4px;
+  color: #aebdca;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-broadcast-focus-status {
+  margin-top: 4px;
+  color: #f5d76e;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-broadcast-dialog :is(textarea, select, button, input):focus,
+#terminal-broadcast-dialog :is(textarea, select, button, input):focus-visible,
+#terminal-broadcast-dialog :is(textarea, select, button, input).keyboard-focus {
+  outline: 3px solid #f5d76e;
+  outline-offset: 2px;
+  border-color: #f5d76e;
+  background: #314156;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.92), 0 0 0 5px rgba(245, 215, 110, 0.62);
+}
+
+#terminal-broadcast-target-list label:focus-within,
+#terminal-broadcast-target-list label.keyboard-focus {
+  background: rgba(245, 215, 110, 0.14);
+  outline: 3px solid #f5d76e;
+  outline-offset: 1px;
 }
 
 #terminal-broadcast-control-picker {
@@ -700,13 +783,30 @@ body {
   pointer-events: none !important;
 }
 
-.xterm .xterm-helper-textarea,
-.xterm .composition-view {
+.xterm .xterm-helper-textarea {
   color: transparent !important;
   background: transparent !important;
   caret-color: transparent !important;
   -webkit-text-fill-color: transparent !important;
   text-shadow: none !important;
+}
+
+/* Windows WebView renders marked IME text in this xterm-owned element. */
+.xterm .composition-view {
+  color: #ffffff !important;
+  background: rgba(16, 19, 23, 0.82) !important;
+  border-bottom: 1px solid #f5d76e;
+  caret-color: transparent !important;
+  -webkit-text-fill-color: #ffffff !important;
+  text-shadow: none !important;
+}
+
+/* The positioned fpasoterm overlay is clearer than xterm's hidden helper. */
+body.ime-preedit-overlay .xterm .composition-view {
+  color: transparent !important;
+  background: transparent !important;
+  border-color: transparent !important;
+  -webkit-text-fill-color: transparent !important;
 }
 
 .xterm .xterm-char-measure-element {

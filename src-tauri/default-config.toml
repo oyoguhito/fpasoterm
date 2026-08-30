@@ -19,13 +19,16 @@ cursorBlink = true
 cursorStyle = "block"
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
-lineHeight = 0.92
+lineHeight = 1
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
 shell = ""
+# Enables enhanced Kitty keyboard negotiation for compatible TUIs. Keep false
+# unless needed; this is separate from the currently disabled graphics addon.
+kittyKeyboard = false
 
 # [terminal.images] is reserved for a future stable renderer.
 # Current builds ignore this section. Do not add it to config.toml.
