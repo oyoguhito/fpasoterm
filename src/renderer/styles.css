@@ -555,6 +555,17 @@ body {
   font: inherit;
 }
 
+#terminal-encoding-select {
+  max-width: 112px;
+  height: 22px;
+  min-width: 86px;
+  border: 1px solid #3b4652;
+  border-radius: 4px;
+  background: #222932;
+  color: #e8edf2;
+  font: inherit;
+}
+
 #terminal-log-search {
   width: min(170px, 20vw);
   height: 22px;
@@ -577,6 +588,7 @@ body {
 #terminal-log-search-next,
 #terminal-log-delete-selected,
 #terminal-log-delete-all,
+#terminal-encoding-apply,
 #close-diagnostics {
   height: 22px;
   border: 1px solid #3b4652;

@@ -253,6 +253,7 @@ rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
 scrollback = 1000
 termName = "xterm-256color"
+encoding = "utf-8"
 shell = ""
 
 # enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化します。
@@ -374,6 +375,20 @@ maxBytes = 10485760
 
 macOSではbox/block glyphのmetricsがmacOS Terminalに近い`Menlo`を既定fontの先頭にします。`SF Mono`はfallbackとして維持します。
 
+### 文字コード
+
+`terminal.encoding` の既定値は `utf-8` です。Unixでは、親processからUTF-8ではないlocaleを
+継承した場合にも、UTF-8 PTYへUTF-8 localeを設定します。これによりmacOSの`ls`などが
+日本語pathを`?`へ置換することを防ぎます。legacy programが出力するbyte列を使用する場合だけ、
+`shift-jis` または `euc-jp` を設定してください。文字コードの自動判定は曖昧で誤表示を起こすため
+実装しません。**Diagnostics > Capability Test** のselectorで保存でき、decoderとshell localeを
+適用するにはwindowを再起動します。
+
+```toml
+[terminal]
+encoding = "utf-8"
+```
+
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
@@ -396,7 +411,7 @@ minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 ```
 - `keybindings`: application shortcut の設定。`prefix = "Mod+Shift"` はWindows/Linuxでは`Ctrl+Shift`、macOSでは`Cmd+Shift`を表します。Windowsでkeyboard layoutまたは他applicationが`Ctrl+Shift`を捕捉する場合は、`prefix = "Ctrl+Alt"`へ変更してください。この変更は共通modifierを置換するため、従来の`Ctrl+Shift` application shortcutは実行されなくなります。prefix tokenは大文字小文字を区別しませんが、`Ctrl`/`Control`、`Alt`/`Option`、`Shift`、`Meta`/`Cmd`/`Command`、`Mod`だけが使用できます。`Ctrl+Esc`は`Esc`がmodifierではなくaction keyのため無効です。無効なprefixは`Mod+Shift`へfallbackし、menuのtooltipで確認できます。一文字のaction valueは`prefix`を継承し、full shortcut はそのactionだけを上書きします。action keyには`Escape`、`F1`、`ArrowUp`、`KeyN`/`Digit1`などを使用できます。例: `newWindow = "Ctrl+Alt+KeyN"`、`kill = "Ctrl+Alt+Escape"`。`KeyN`のような値はphysical keyboard keyで照合するため、keyboard layoutによる`event.key`の違いを避けられます。window menuの先頭には有効なprefixを表示し、各actionはキーだけを表示します。menuを開くと最初のitemへfocusし、`Tab`/`Shift+Tab`と矢印キーで移動、`Escape`で閉じてterminalへfocusを戻します。再起動またはruntime config fileの適用でmenu labelとbindingを更新します。
-fpasoterm は IME composition event を仮入力表示のためだけに監視します。xterm.js と WebView のnativeな入力配送をそのまま使い、fpasoterm が IME text を抑止・再送・置換・直接確定することはありません。ChromeOS/Linuxでは、新しいcompositionの開始時にまだ新しい仮入力textが入っていないため、hidden helper textareaに過去の確定textが残っている場合だけclearします。後続変換が過去の確定textを継承することを防ぎ、terminal textとPTY payloadは変更しません。全OSで、xtermのhelper textareaが隠れていても変換中のtextが見えるように、`IME`と明示する表示専用の仮入力overlayを表示します。overlayはPTYへ送信しません。terminal面のoverlayをWebViewが描画しない場合にも確認できるよう、同じ値をwindow下部に`IME: ...`として固定表示します。WebViewが仮入力文字列を公開しない場合は、両方に`IME composing...`を表示します。
+fpasoterm は IME composition event を仮入力表示のためだけに監視します。xterm.js と WebView のnativeな入力配送をそのまま使い、fpasoterm が IME text を抑止・再送・置換・直接確定することはありません。ChromeOS/Linuxでは、新しいcompositionの開始時にまだ新しい仮入力textが入っていないため、hidden helper textareaに過去の確定textが残っている場合だけclearします。後続変換が過去の確定textを継承することを防ぎ、terminal textとPTY payloadは変更しません。Windows/LinuxではWebViewがxtermのhelper textareaを描画しない場合にだけ、表示専用の`IME` fallbackを使います。macOSはWebKit nativeのmarked text描画を使い、このfallbackを追加しないため、確定後にIME overlayが残りません。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: diagnostics と明示的に送信した broadcast command を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。`commands` は短寿命の共有 command を許可し、`commandTtlSeconds` は実行可能な時間を制限します。詳細は [Sync Folder](sync.ja.md) を参照してください。
 - `logging`: terminal output logging 設定。hamburger menu に `Log Start (^S)` / `Log Stop (^S)` と `Log Show (^P)` を表示します。`Ctrl+Shift+L` はlog操作にfocusした状態でmenuを開き、`Ctrl+Shift+S` は記録を直接切り替え、`Ctrl+Shift+P` はcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。制御シーケンスを除去した readable terminal output を local file に記録します。自動生成されるlog名には titlebar の title と timestamp が入り、例は `terminal-work-<timestamp>.log` です。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。

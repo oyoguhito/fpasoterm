@@ -30,7 +30,9 @@ settings and representative CJK, half-width kana, box drawing, symbol, and
 Nerd Font glyphs. See [Font and Glyph Diagnostics](docs/font-diagnostics.en.md).
 Use `Diagnostics > Capability Test` to inspect the terminal environment and
 verify truecolor, OSC 52, OSC 8, bracketed-paste, and bell behavior. See
-[Terminal Capability Diagnostics](docs/capability-diagnostics.en.md).
+[Terminal Capability Diagnostics](docs/capability-diagnostics.en.md). The same
+panel can persist an explicit UTF-8, Shift_JIS, or EUC-JP output decoder for a
+new terminal session.
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 

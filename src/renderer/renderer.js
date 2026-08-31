@@ -15,6 +15,8 @@ const terminalLogShowSelectedButton = document.getElementById('terminal-log-show
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
 const checkForUpdatesButton = document.getElementById('check-for-updates');
+const terminalEncodingSelectElement = document.getElementById('terminal-encoding-select');
+const terminalEncodingApplyButton = document.getElementById('terminal-encoding-apply');
 const terminalLogConfirmElement = document.getElementById('terminal-log-confirm');
 const terminalLogConfirmMessageElement = document.getElementById('terminal-log-confirm-message');
 const terminalLogConfirmOkButton = document.getElementById('terminal-log-confirm-ok');
@@ -101,6 +103,7 @@ const fallbackConfig = {
     backgroundOpacity: 0.65,
     scrollback: 1000,
     termName: 'xterm-256color',
+    encoding: 'utf-8',
     theme: {
       background: 'rgba(16, 19, 23, 0.65)',
       foreground: '#e8edf2',
@@ -361,6 +364,7 @@ function installTauriApiAdapter() {
     checkForUpdate: () => invoke('update_check'),
     getPluginCatalog: () => invoke('plugin_catalog'),
     getTerminalCapabilities: () => invoke('terminal_capabilities'),
+    setTerminalEncoding: (encoding) => invoke('config_set_terminal_encoding', { encoding }),
     getConfig: () => invoke('config_get'),
     applyConfigPath: (path) => invoke('config_apply_path', { path }),
     syncStatus: () => invoke('sync_status'),
@@ -481,7 +485,9 @@ function focusTerminalInput() {
 // Some supported WebViews keep marked text exclusively in xterm's hidden
 // textarea. The overlay is visual-only and does not affect PTY input.
 function needsImePreeditOverlay() {
-  return true;
+  // macOS WebKit owns marked-text painting. A separate overlay can outlive a
+  // composition there, so retain the fallback only for Windows/Linux webviews.
+  return !/Mac/i.test(navigator.platform || navigator.userAgent || '');
 }
 
 // Keeps a platform-independent conversion indicator visible when a WebView
@@ -541,6 +547,7 @@ function clearImePreedit(delay = 0) {
     imePreeditClearTimer = null;
     imePreeditElement.hidden = true;
     imePreeditElement.textContent = '';
+    document.body.classList.remove('ime-preedit-overlay');
     updateImeStatus('');
     return;
   }
@@ -548,6 +555,7 @@ function clearImePreedit(delay = 0) {
     imePreeditClearTimer = null;
     imePreeditElement.hidden = true;
     imePreeditElement.textContent = '';
+    document.body.classList.remove('ime-preedit-overlay');
     updateImeStatus('');
   }, delay);
 }
@@ -699,6 +707,7 @@ function appendDiagnosticLine(message) {
 // Restores the shared panel's regular text body after another diagnostics view.
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
+  setTerminalEncodingControlsVisible(false);
   if (checkForUpdatesButton) {
     checkForUpdatesButton.hidden = true;
   }
@@ -795,6 +804,12 @@ function normalizePasteText(text) {
   return String(text || '').replace(/\r\n/g, '\r').replace(/\n/g, '\r');
 }
 
+// Uses the native pasteboard on macOS because it preserves UTF-8 text more
+// reliably than some WebKit clipboard bridges for Japanese filenames.
+function isMacPlatform() {
+  return /Mac/i.test(navigator.platform || navigator.userAgent || '');
+}
+
 // Reads the OS clipboard in a user-triggered event and sends it to the shell.
 // WebKitGTK owns the ChromeOS clipboard integration, so prefer its API before
 // shell helpers such as wl-paste. A successful helper with an empty selection
@@ -802,19 +817,23 @@ function normalizePasteText(text) {
 async function pasteClipboardToTerminal() {
   let text = '';
   const errors = [];
-  try {
-    if (navigator.clipboard?.readText) {
-      text = await navigator.clipboard.readText();
+  const readers = isMacPlatform()
+    ? [
+      async () => window.fpasoterm.readClipboard(),
+      async () => navigator.clipboard?.readText?.() || '',
+    ]
+    : [
+      async () => navigator.clipboard?.readText?.() || '',
+      async () => window.fpasoterm.readClipboard(),
+    ];
+  for (const read of readers) {
+    if (text) {
+      break;
     }
-  } catch (browserError) {
-    errors.push(`browser clipboard: ${browserError}`);
-  }
-
-  if (!text) {
     try {
-      text = await window.fpasoterm.readClipboard();
-    } catch (backendError) {
-      errors.push(`backend clipboard: ${backendError}`);
+      text = await read();
+    } catch (error) {
+      errors.push(String(error));
     }
   }
 
@@ -852,6 +871,14 @@ async function writeClipboardText(text) {
 
   const errors = [];
   let wrote = false;
+  if (isMacPlatform()) {
+    try {
+      await window.fpasoterm.writeClipboard(value);
+      return value.length;
+    } catch (error) {
+      throw new Error(`macOS pasteboard write failed: ${error}`);
+    }
+  }
   try {
     await writeBrowserClipboardText(value);
     wrote = true;
@@ -1978,6 +2005,8 @@ function diagnosticsPanelFocusItems() {
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
     checkForUpdatesButton,
+    terminalEncodingSelectElement,
+    terminalEncodingApplyButton,
     closeDiagnosticsButton,
     diagnosticsElement,
     fontGlyphPreviewElement,
@@ -2482,6 +2511,15 @@ function setTerminalLogPickerVisible(visible) {
   }
 }
 
+// Shows the persistent decoder selector only in the capability diagnostics view.
+function setTerminalEncodingControlsVisible(visible) {
+  for (const element of [terminalEncodingSelectElement, terminalEncodingApplyButton]) {
+    if (element) {
+      element.hidden = !visible;
+    }
+  }
+}
+
 // Displays representative glyphs using the same configured font values as xterm.js.
 function showFontGlyphTest() {
   if (!fontGlyphPreviewElement) {
@@ -2495,6 +2533,7 @@ function showFontGlyphTest() {
 
   diagnosticsPanelMode = 'font-glyph-test';
   setTerminalLogPickerVisible(false);
+  setTerminalEncodingControlsVisible(false);
   setWindowMenuOpen(false);
   diagnosticsTitleElement.textContent = 'Font / Glyph Diagnostics';
   diagnosticsElement.hidden = true;
@@ -2534,6 +2573,7 @@ async function showTerminalCapabilityTest() {
   const capabilities = await window.fpasoterm.getTerminalCapabilities();
   diagnosticsPanelMode = 'terminal-capability-test';
   setTerminalLogPickerVisible(false);
+  setTerminalEncodingControlsVisible(true);
   setWindowMenuOpen(false);
   diagnosticsTitleElement.textContent = 'Terminal Capability Diagnostics';
   diagnosticsElement.hidden = true;
@@ -2544,6 +2584,7 @@ async function showTerminalCapabilityTest() {
     `TERM: ${capabilities.term}`,
     `COLORTERM: ${capabilities.colorterm}`,
     `locale: ${capabilities.locale}`,
+    `output encoding: ${capabilities.encoding || 'utf-8'}`,
     `shell: ${capabilities.shell}`,
     '',
     'Truecolor: advertised (xterm.js renderer)',
@@ -2554,7 +2595,12 @@ async function showTerminalCapabilityTest() {
     'OSC 8 hyperlink: passed through to xterm.js; rendering and opening behavior depend on the webview.',
     'Bracketed paste: xterm.js input supports bracketed paste; shell/TUI enables it with DECSET 2004.',
     'Bell: BEL is passed to xterm.js; audible/visual feedback depends on OS and webview settings.',
+    '',
+    'Output encoding: select UTF-8, Shift_JIS, or EUC-JP above. Saving updates config.toml; restart this window before the decoder and shell locale change.',
   ].join('\n');
+  if (terminalEncodingSelectElement) {
+    terminalEncodingSelectElement.value = capabilities.encoding || 'utf-8';
+  }
   diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
   diagnosticsPanel.hidden = false;
   terminalCapabilityPreviewElement.focus({ preventScroll: true });
@@ -2802,6 +2848,16 @@ fontGlyphTestButton.addEventListener('click', () => {
 
 terminalCapabilityTestButton.addEventListener('click', () => {
   showTerminalCapabilityTest().catch((error) => showDiagnostic(`terminal capability diagnostics failed: ${error}`));
+});
+
+terminalEncodingApplyButton?.addEventListener('click', () => {
+  const encoding = terminalEncodingSelectElement?.value || 'utf-8';
+  window.fpasoterm.setTerminalEncoding(encoding).then((configPath) => {
+    showDiagnostic(`terminal encoding ${encoding} saved to ${configPath}; restart this window to apply it`);
+    return showTerminalCapabilityTest();
+  }).catch((error) => {
+    showDiagnostic(`terminal encoding save failed: ${error}`);
+  });
 });
 
 logMenuToggleButton.addEventListener('click', () => {

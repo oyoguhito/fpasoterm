@@ -15,6 +15,8 @@ rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans CJK JP\", \"BIZ UDGothic\", \"Hiragino Sans\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 termName = "xterm-256color"
+# Keep UTF-8 unless a legacy program explicitly emits Shift_JIS or EUC-JP.
+encoding = "utf-8"
 # Leave empty for the platform default shell.
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
