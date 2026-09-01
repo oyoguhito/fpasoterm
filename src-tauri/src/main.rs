@@ -20,7 +20,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent,
+};
 #[cfg(not(target_os = "windows"))]
 use tauri::{WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "windows")]
@@ -43,6 +45,8 @@ use windows_sys::Win32::System::Threading::{
     GetExitCodeProcess, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
     PROCESS_TERMINATE,
 };
+#[cfg(target_os = "windows")]
+use windows_sys::Win32::UI::Shell::ShellExecuteW;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::UI::WindowsAndMessaging::{
     MessageBoxW, IDOK, MB_ICONWARNING, MB_OKCANCEL, MB_SETFOREGROUND, MB_TASKMODAL, MB_TOPMOST,
@@ -78,6 +82,7 @@ struct Config {
     plugins: serde_json::Value,
     sync: serde_json::Value,
     logging: serde_json::Value,
+    security: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -124,6 +129,53 @@ struct TerminalSize {
     pixel_width: u16,
     #[serde(default)]
     pixel_height: u16,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// One SSHFS mount request. Password values are never persisted or logged.
+struct SshfsMountRequest {
+    host: String,
+    user: String,
+    port: u16,
+    remote_path: String,
+    mount_name: String,
+    identity_file: Option<String>,
+    password: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A mount result that can be safely shown in the management window.
+struct SshfsMountResult {
+    mount_point: String,
+    message: String,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Persistent, non-secret description of one FpasoTerm-managed mount.
+struct SshfsMountRecord {
+    host: String,
+    user: String,
+    port: u16,
+    remote_path: String,
+    mount_name: String,
+    identity_file: Option<String>,
+    // Windows SSHFS-Win mounts network drives rather than User/mounts paths.
+    // Keep the assigned drive so a later Unmount addresses the same resource.
+    #[serde(default)]
+    mount_point: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Safe manager state shown in the renderer; credentials are deliberately absent.
+struct SshfsStatus {
+    mount_root: String,
+    available: bool,
+    program_path: String,
+    mounts: Vec<SshfsMountRecord>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -678,6 +730,7 @@ fn main() {
     }
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
         .manage(AppState::default())
         .setup(|app| {
             let mut config = runtime_config();
@@ -762,6 +815,7 @@ fn main() {
             diagnostics_log,
             clipboard_read,
             clipboard_write,
+            open_external_url,
             app_version,
             update_check,
             plugin_catalog,
@@ -779,6 +833,11 @@ fn main() {
             window_arrange,
             window_close_all,
             window_new,
+            window_new_at_cwd,
+            sshfs_mount,
+            sshfs_unmount,
+            sshfs_unmount_all,
+            sshfs_status,
             window_confirm_close_all,
             window_close_all_confirmed,
             window_focus_main,
@@ -1808,17 +1867,690 @@ fn window_new() -> Result<String, String> {
     Ok("opened a new fpasoterm window".to_string())
 }
 
+#[tauri::command]
+// Starts another terminal process with an OSC 7-reported local directory.
+fn window_new_at_cwd(cwd: String, host: Option<String>) -> Result<String, String> {
+    let directory = validated_start_directory(&cwd, host.as_deref())?;
+    spawn_new_instance_in_directory(&directory)?;
+    Ok(format!(
+        "opened a new fpasoterm window in {}",
+        directory.display()
+    ))
+}
+
+#[tauri::command]
+// Mounts through the installed SSHFS implementation without persisting secrets.
+#[cfg(not(windows))]
+fn sshfs_mount(
+    _window: WebviewWindow,
+    request: SshfsMountRequest,
+) -> Result<SshfsMountResult, String> {
+    validate_sshfs_request(&request)?;
+    let mount_point = sshfs_mount_root().join(&request.mount_name);
+    fs::create_dir_all(&mount_point)
+        .map_err(|error| format!("cannot create mount point: {error}"))?;
+    let sshfs_program = sshfs_program();
+    let mut command = Command::new(&sshfs_program);
+    command
+        .arg(format!(
+            "{}@{}:{}",
+            request.user, request.host, request.remote_path
+        ))
+        .arg(&mount_point)
+        .args(["-p", &request.port.to_string()])
+        .args([
+            "-o",
+            "reconnect",
+            "-o",
+            "ServerAliveInterval=15",
+            "-o",
+            "ServerAliveCountMax=3",
+        ])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::piped());
+    command.args(sshfs_local_owner_options());
+    if let Some(identity_file) = request
+        .identity_file
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+    {
+        let identity = PathBuf::from(identity_file);
+        if !identity.is_file() {
+            return Err("SSH identity file does not exist or is not a regular file".to_string());
+        }
+        command.args(["-o", &format!("IdentityFile={}", identity.display())]);
+    }
+    let password = request.password.filter(|value| !value.is_empty());
+    if password.is_some() {
+        command.args(["-o", "password_stdin"]);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("cannot start {}: {error}", sshfs_program.display()))?;
+    if let Some(password) = password {
+        if let Some(mut stdin) = child.stdin.take() {
+            stdin
+                .write_all(format!("{password}\n").as_bytes())
+                .map_err(|error| format!("cannot provide SSHFS password: {error}"))?;
+        }
+    }
+    // macFUSE keeps sshfs attached to the mount after a successful mount.
+    // Waiting for that process here blocks Tauri's invoke response forever and
+    // leaves the SSHFS manager modal unresponsive. The process owns the mount,
+    // so record the requested mount and let the manager return immediately.
+    #[cfg(target_os = "macos")]
+    drop(child);
+
+    // Linux sshfs normally daemonizes after mounting, so retain its exit-status
+    // check to report authentication and option errors to the caller.
+    #[cfg(not(target_os = "macos"))]
+    {
+        let output = child
+            .wait_with_output()
+            .map_err(|error| error.to_string())?;
+        if !output.status.success() {
+            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+            return Err(if detail.is_empty() {
+                "sshfs mount failed".to_string()
+            } else {
+                format!("sshfs mount failed: {detail}")
+            });
+        }
+    }
+    let record = SshfsMountRecord {
+        host: request.host,
+        user: request.user,
+        port: request.port,
+        remote_path: request.remote_path,
+        mount_name: request.mount_name,
+        identity_file: request
+            .identity_file
+            .filter(|value| !value.trim().is_empty()),
+        mount_point: None,
+    };
+    let mut mounts = read_sshfs_mount_records();
+    mounts.retain(|existing| existing.mount_name != record.mount_name);
+    mounts.push(record);
+    write_sshfs_mount_records(&mounts)?;
+    Ok(SshfsMountResult {
+        mount_point: mount_point.display().to_string(),
+        message: sshfs_mount_ready_message(),
+    })
+}
+
+// macFUSE retains the sshfs process after mounting, so completion means the
+// request was handed to SSHFS rather than that its process exited.
+#[cfg(target_os = "macos")]
+fn sshfs_mount_ready_message() -> String {
+    "SSHFS mount was started; use this path from the terminal or another local application"
+        .to_string()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn sshfs_mount_ready_message() -> String {
+    "SSHFS mount is ready; use this path from the terminal or another local application".to_string()
+}
+
+// SSHFS-Win officially exposes SSHFS mounts as mapped network drives. Calling
+// its Cygwin sshfs.exe directly from a GUI process produces orphaned FUSE
+// mounts, so use Windows' network-drive API and matching disconnect API.
+#[cfg(windows)]
+#[tauri::command]
+fn sshfs_mount(
+    window: WebviewWindow,
+    request: SshfsMountRequest,
+) -> Result<SshfsMountResult, String> {
+    validate_sshfs_request(&request)?;
+    // Windows credentials belong to SSHFS-Win's own interactive dialog. Never
+    // forward the optional UI value to a process argument or persistent state.
+    let _password_entered_in_ui = request
+        .password
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty());
+    if request
+        .identity_file
+        .as_deref()
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(
+            "Windows SSHFS-Win mapped drives do not accept an identity-file option. Use a host alias and the supported SSHFS-Win key configuration, then leave identity file empty."
+                .to_string(),
+        );
+    }
+
+    let mount_point = windows_available_drive_letter()?;
+    let remote = windows_sshfs_unc(&request);
+    // A real owner keeps the native SSHFS-Win credential dialog above this
+    // terminal and lets Windows restore focus when the dialog closes.
+    let owner = window
+        .hwnd()
+        .map(|handle| handle.0)
+        .unwrap_or(std::ptr::null_mut());
+    windows_mount_network_drive(&mount_point, &remote, owner)?;
+    windows_verify_network_drive(&mount_point)?;
+
+    let record = SshfsMountRecord {
+        host: request.host,
+        user: request.user,
+        port: request.port,
+        remote_path: request.remote_path,
+        mount_name: request.mount_name,
+        identity_file: None,
+        mount_point: Some(mount_point.clone()),
+    };
+    let mut mounts = read_sshfs_mount_records();
+    mounts.retain(|existing| existing.mount_name != record.mount_name);
+    mounts.push(record);
+    write_sshfs_mount_records(&mounts)?;
+    Ok(SshfsMountResult {
+        mount_point,
+        message:
+            "SSHFS-Win network drive is ready; use this drive from the terminal or File Explorer"
+                .to_string(),
+    })
+}
+
+// Unmounts only the recorded Windows network drive. The remote credentials are never retained.
+#[cfg(windows)]
+#[tauri::command]
+fn sshfs_unmount(mount_name: String) -> Result<SshfsMountResult, String> {
+    sshfs_managed_mount_point(&mount_name)?;
+    let mount_point = read_sshfs_mount_records()
+        .into_iter()
+        .find(|record| record.mount_name == mount_name)
+        .and_then(|record| record.mount_point)
+        .ok_or_else(|| {
+            "this saved mount was created by an older FpasoTerm version without a Windows drive letter; remove its old SSHFS-Win mount manually, then mount it again with this version"
+                .to_string()
+    })?;
+    // SSHFS-Win can acknowledge a normal network-drive disconnect while its
+    // provider process keeps the drive alive. Use the normal API first; only
+    // offer the explicitly confirmed process fallback when it remains mapped.
+    if windows_unmount_network_drive(&mount_point)
+        .and_then(|_| windows_verify_network_drive_unmounted(&mount_point))
+        .is_err()
+    {
+        if !windows_confirm_force_sshfs_unmount(&mount_point) {
+            return Ok(SshfsMountResult {
+                mount_point,
+                message: "SSHFS unmount canceled; the network drive remains active".to_string(),
+            });
+        }
+        windows_force_unmount_network_drive(&mount_point)?;
+    }
+    let mut mounts = read_sshfs_mount_records();
+    mounts.retain(|record| record.mount_name != mount_name);
+    write_sshfs_mount_records(&mounts)?;
+    Ok(SshfsMountResult {
+        mount_point,
+        message: "SSHFS mount was removed".to_string(),
+    })
+}
+
+// Unmounts only an FpasoTerm-managed Unix mount path.
+#[cfg(not(windows))]
+#[tauri::command]
+fn sshfs_unmount(mount_name: String) -> Result<SshfsMountResult, String> {
+    let mount_point = sshfs_managed_mount_point(&mount_name)?
+        .display()
+        .to_string();
+    let candidates: Vec<(&str, Vec<String>)> = vec![
+        ("fusermount3", vec!["-u".to_string(), mount_point.clone()]),
+        ("fusermount", vec!["-u".to_string(), mount_point.clone()]),
+        ("umount", vec![mount_point.clone()]),
+    ];
+    let mut last_error = String::new();
+    for (program, args) in candidates {
+        match Command::new(program)
+            .args(&args)
+            .stdin(Stdio::null())
+            .output()
+        {
+            Ok(output) if output.status.success() => {
+                let mut mounts = read_sshfs_mount_records();
+                mounts.retain(|record| record.mount_name != mount_name);
+                write_sshfs_mount_records(&mounts)?;
+                return Ok(SshfsMountResult {
+                    mount_point: mount_point.clone(),
+                    message: "SSHFS mount was removed".to_string(),
+                });
+            }
+            Ok(output) => last_error = String::from_utf8_lossy(&output.stderr).trim().to_string(),
+            Err(error) => last_error = error.to_string(),
+        }
+    }
+    Err(format!("cannot unmount {}: {last_error}", mount_point))
+}
+
+#[tauri::command]
+fn sshfs_unmount_all() -> Result<String, String> {
+    let mut failures = Vec::new();
+    for mount in read_sshfs_mount_records() {
+        if let Err(error) = sshfs_unmount(mount.mount_name.clone()) {
+            failures.push(format!("{}: {error}", mount.mount_name));
+        }
+    }
+    if failures.is_empty() {
+        Ok("all SSHFS mounts were removed".to_string())
+    } else {
+        Err(format!(
+            "could not unmount all SSHFS mounts: {}",
+            failures.join("; ")
+        ))
+    }
+}
+
+#[tauri::command]
+// Reports the managed root and whether sshfs is available without making a network connection.
+fn sshfs_status() -> Result<SshfsStatus, String> {
+    let root = sshfs_mount_root();
+    fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let sshfs_program = sshfs_program();
+    // SSHFS-Win documents the direct Cygwin executable as unsuitable for GUI
+    // use. Running `sshfs.exe --version` here can flash a helper window, so
+    // Windows availability is determined from the installed executable path.
+    #[cfg(windows)]
+    let available = sshfs_program.is_file();
+    #[cfg(not(windows))]
+    let available = Command::new(&sshfs_program)
+        .arg("--version")
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|status| status.success())
+        .unwrap_or(false);
+    Ok(SshfsStatus {
+        mount_root: root.display().to_string(),
+        available,
+        program_path: sshfs_program.display().to_string(),
+        mounts: read_sshfs_mount_records(),
+    })
+}
+
+// Keeps mounts under the per-user FpasoTerm directory instead of accepting arbitrary system paths.
+fn sshfs_mount_root() -> PathBuf {
+    PathBuf::from(runtime_config().config_dir).join("mounts")
+}
+
+fn sshfs_mount_records_path() -> PathBuf {
+    sshfs_mount_root().join("sshfs-mounts.json")
+}
+
+fn read_sshfs_mount_records() -> Vec<SshfsMountRecord> {
+    fs::read_to_string(sshfs_mount_records_path())
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
+}
+
+fn write_sshfs_mount_records(records: &[SshfsMountRecord]) -> Result<(), String> {
+    fs::create_dir_all(sshfs_mount_root()).map_err(|error| error.to_string())?;
+    fs::write(
+        sshfs_mount_records_path(),
+        serde_json::to_string_pretty(records).map_err(|error| error.to_string())?,
+    )
+    .map_err(|error| error.to_string())
+}
+
+fn sshfs_managed_mount_point(name: &str) -> Result<PathBuf, String> {
+    if name.is_empty()
+        || !name.chars().all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+        })
+    {
+        return Err(
+            "mount name may contain only letters, numbers, dot, hyphen, and underscore".to_string(),
+        );
+    }
+    Ok(sshfs_mount_root().join(name))
+}
+
+fn validate_sshfs_request(request: &SshfsMountRequest) -> Result<(), String> {
+    let valid_name = |value: &str| {
+        !value.is_empty()
+            && value.len() <= 253
+            && value.chars().all(|character| {
+                character.is_ascii_alphanumeric() || matches!(character, '.' | '-' | '_')
+            })
+    };
+    if !valid_name(&request.host) || !valid_name(&request.user) {
+        return Err(
+            "SSH host and user may contain only letters, numbers, dot, hyphen, and underscore"
+                .to_string(),
+        );
+    }
+    if request.port == 0
+        || !request.remote_path.starts_with('/')
+        || request.remote_path.contains('\0')
+    {
+        return Err("SSH port must be valid and remote path must be an absolute path".to_string());
+    }
+    sshfs_managed_mount_point(&request.mount_name).map(|_| ())
+}
+
+fn sshfs_program() -> PathBuf {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(path) = env::var_os("FPASOTERM_SSHFS_PATH")
+            .filter(|path| !path.is_empty())
+            .map(PathBuf::from)
+        {
+            return path;
+        }
+        for variable in ["ProgramW6432", "ProgramFiles", "ProgramFiles(x86)"] {
+            if let Some(root) = env::var_os(variable) {
+                let candidate = PathBuf::from(root)
+                    .join("SSHFS-Win")
+                    .join("bin")
+                    .join("sshfs.exe");
+                if candidate.is_file() {
+                    return candidate;
+                }
+            }
+        }
+        PathBuf::from("sshfs.exe")
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        PathBuf::from("sshfs")
+    }
+}
+
+// Finds an available drive letter for SSHFS-Win without relying on shell output
+// or locale-specific parsing of `net use`.
+#[cfg(windows)]
+fn windows_available_drive_letter() -> Result<String, String> {
+    use windows_sys::Win32::Storage::FileSystem::GetLogicalDrives;
+
+    let drives = unsafe { GetLogicalDrives() };
+    for letter in (b'D'..=b'Z').rev() {
+        let bit = 1u32 << u32::from(letter - b'A');
+        if drives & bit == 0 {
+            return Ok(format!("{}:", char::from(letter)));
+        }
+    }
+    Err("no unused Windows drive letter is available for SSHFS-Win".to_string())
+}
+
+// Builds SSHFS-Win's root-directory UNC syntax without invoking a shell.
+#[cfg(windows)]
+fn windows_sshfs_unc(request: &SshfsMountRequest) -> String {
+    let path = request
+        .remote_path
+        .trim_start_matches('/')
+        .replace('/', "\\");
+    let remote = format!(
+        r"\\sshfs.r\{}@{}!{}",
+        request.user, request.host, request.port
+    );
+    // SSHFS-Win documents the root mapping without a trailing separator. A
+    // trailing `\\` is treated differently by some provider versions and can
+    // fail after the credential dialog with ERROR_NETNAME_DELETED (64).
+    if path.is_empty() {
+        remote
+    } else {
+        format!(r"{remote}\{path}")
+    }
+}
+
+// Ask the SSHFS-Win network provider to create a normal Windows drive mapping.
+// SSHFS-Win owns the credential dialog, matching Explorer and `net use`.
+#[cfg(windows)]
+fn windows_mount_network_drive(
+    mount_point: &str,
+    remote: &str,
+    owner: windows_sys::Win32::Foundation::HWND,
+) -> Result<(), String> {
+    use windows_sys::Win32::NetworkManagement::WNet::{
+        WNetAddConnection3W, CONNECT_INTERACTIVE, CONNECT_PROMPT, CONNECT_TEMPORARY, NETRESOURCEW,
+        RESOURCETYPE_DISK,
+    };
+
+    let mut local = windows_wide(mount_point);
+    let mut remote = windows_wide(remote);
+    let resource = NETRESOURCEW {
+        // SSHFS-Win implements a disk provider. RESOURCETYPE_ANY is rejected
+        // by some provider versions with Windows error 66.
+        dwType: RESOURCETYPE_DISK,
+        lpLocalName: local.as_mut_ptr(),
+        lpRemoteName: remote.as_mut_ptr(),
+        ..Default::default()
+    };
+    let result = unsafe {
+        WNetAddConnection3W(
+            owner,
+            &resource,
+            std::ptr::null(),
+            std::ptr::null(),
+            CONNECT_TEMPORARY | CONNECT_INTERACTIVE | CONNECT_PROMPT,
+        )
+    };
+    // The provider may have already removed the drive while returning this
+    // status. The verification immediately after this call is authoritative.
+    if result == 0 || result == 2250 {
+        Ok(())
+    } else {
+        let guidance = " SSHFS-Win should show its credential dialog; verify that WinFsp and SSHFS-Win are installed and retry.";
+        Err(format!(
+            "SSHFS-Win network-drive mount failed (Windows error {result}: {}){guidance}",
+            std::io::Error::from_raw_os_error(result as i32),
+        ))
+    }
+}
+
+// Requests explicit consent before ending the SSHFS-Win provider process.
+// SSHFS-Win cannot reliably associate a mapped drive with one process, so this
+// may also disconnect other SSHFS-Win mounts owned by the current Windows user.
+#[cfg(windows)]
+fn windows_confirm_force_sshfs_unmount(mount_point: &str) -> bool {
+    let message: Vec<u16> = format!(
+        "SSHFS-Win did not release {mount_point}.\n\nFpasoTerm can force the disconnect by ending sshfs.exe. This can disconnect other SSHFS-Win mounts available to this Windows user.\n\nContinue?"
+    )
+    .encode_utf16()
+    .chain(std::iter::once(0))
+    .collect();
+    let title: Vec<u16> = "Force SSHFS-Win unmount?"
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
+    unsafe {
+        MessageBoxW(
+            ptr::null_mut(),
+            message.as_ptr(),
+            title.as_ptr(),
+            MB_OKCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL | MB_TOPMOST,
+        ) == IDOK
+    }
+}
+
+// Ends the provider only after the native confirmation, then verifies that the
+// recorded drive is genuinely gone before deleting its FpasoTerm record.
+#[cfg(windows)]
+fn windows_force_unmount_network_drive(mount_point: &str) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let output = Command::new("taskkill")
+        .args(["/F", "/IM", "sshfs.exe"])
+        .creation_flags(CREATE_NO_WINDOW)
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("could not start taskkill for SSHFS-Win: {error}"))?;
+
+    // A provider process may already have exited. Always try the disconnect
+    // and let the following mapping check decide whether recovery succeeded.
+    let _ = windows_unmount_network_drive(mount_point);
+    if windows_verify_network_drive_unmounted(mount_point).is_ok() {
+        return Ok(());
+    }
+
+    let details = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    let details = if details.is_empty() {
+        String::from_utf8_lossy(&output.stdout).trim().to_string()
+    } else {
+        details
+    };
+    Err(format!(
+        "SSHFS-Win still reports {mount_point} as mapped after ending sshfs.exe{}",
+        if details.is_empty() {
+            String::new()
+        } else {
+            format!(": {details}")
+        }
+    ))
+}
+
+// WNet can report a successful provider interaction before a drive letter is
+// usable. Verify the mapping in this logon session before persisting it.
+#[cfg(windows)]
+fn windows_verify_network_drive(mount_point: &str) -> Result<(), String> {
+    use windows_sys::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+
+    let mount_point = windows_wide(mount_point);
+    let mut remote = vec![0u16; 32_768];
+    let mut length = remote.len() as u32;
+    let result =
+        unsafe { WNetGetConnectionW(mount_point.as_ptr(), remote.as_mut_ptr(), &mut length) };
+    if result != 0 {
+        return Err(format!(
+            "SSHFS-Win did not create the assigned drive {} (Windows error {result}: {})",
+            String::from_utf16_lossy(&mount_point[..mount_point.len().saturating_sub(1)]),
+            std::io::Error::from_raw_os_error(result as i32),
+        ));
+    }
+    let actual = String::from_utf16_lossy(&remote[..usize::try_from(length).unwrap_or(0)]);
+    if actual.trim_matches('\0').is_empty() {
+        return Err("SSHFS-Win created an empty network-drive mapping".to_string());
+    }
+    Ok(())
+}
+
+// Waits briefly for the network provider to release the local device name.
+// A successful cancel call alone does not prove that the mapped drive is gone.
+#[cfg(windows)]
+fn windows_verify_network_drive_unmounted(mount_point: &str) -> Result<(), String> {
+    use windows_sys::Win32::NetworkManagement::WNet::WNetGetConnectionW;
+
+    let mount_point_wide = windows_wide(mount_point);
+    for delay in [0, 100, 300] {
+        if delay > 0 {
+            std::thread::sleep(Duration::from_millis(delay));
+        }
+        let mut remote = vec![0u16; 32_768];
+        let mut length = remote.len() as u32;
+        let result = unsafe {
+            WNetGetConnectionW(mount_point_wide.as_ptr(), remote.as_mut_ptr(), &mut length)
+        };
+        // ERROR_NOT_CONNECTED means the drive mapping is no longer present.
+        if result == 2250 {
+            return Ok(());
+        }
+        if result != 0 {
+            return Err(format!(
+                "could not verify SSHFS-Win unmount for {mount_point} (Windows error {result}: {})",
+                std::io::Error::from_raw_os_error(result as i32),
+            ));
+        }
+    }
+    Err(format!(
+        "SSHFS-Win still reports {mount_point} as mapped after unmount; close applications using the drive and retry"
+    ))
+}
+
+// WNetCancelConnection2W reverses the temporary mapping made by the mount API.
+#[cfg(windows)]
+fn windows_unmount_network_drive(mount_point: &str) -> Result<(), String> {
+    use windows_sys::Win32::NetworkManagement::WNet::WNetCancelConnection2W;
+
+    let mount_point = windows_wide(mount_point);
+    let result = unsafe { WNetCancelConnection2W(mount_point.as_ptr(), 0, 1) };
+    if result == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "cannot unmount {mount_point:?} (Windows error {result}: {})",
+            std::io::Error::from_raw_os_error(result as i32)
+        ))
+    }
+}
+
+// Converts strings to the null-terminated UTF-16 form expected by Windows APIs.
+#[cfg(windows)]
+fn windows_wide(value: &str) -> Vec<u16> {
+    value.encode_utf16().chain(std::iter::once(0)).collect()
+}
+
+// Linux SSHFS otherwise exposes remote numeric ownership, which commonly appears as root:root.
+#[cfg(unix)]
+fn sshfs_local_owner_options() -> Vec<String> {
+    use std::os::unix::fs::MetadataExt;
+    fs::metadata(home_dir())
+        .map(|metadata| {
+            vec![
+                "-o".to_string(),
+                "idmap=user".to_string(),
+                "-o".to_string(),
+                format!("uid={}", metadata.uid()),
+                "-o".to_string(),
+                format!("gid={}", metadata.gid()),
+            ]
+        })
+        .unwrap_or_default()
+}
+
 // Runs the current executable again without inheriting per-instance runtime
 // overrides. The child loads the base config and claims its own title suffix.
 fn spawn_new_instance() -> Result<(), String> {
+    spawn_new_instance_in_directory(&PathBuf::from(home_dir()))
+}
+
+// Runs another fpasoterm process with a validated PTY starting directory.
+fn spawn_new_instance_in_directory(directory: &Path) -> Result<(), String> {
     let executable = env::current_exe().map_err(|error| error.to_string())?;
     Command::new(executable)
+        .current_dir(directory)
+        .env("FPASOTERM_START_CWD", directory)
         .env_remove("FPASOTERM_RUNTIME_CONFIG_JSON")
         .env_remove("FPASOTERM_RUNTIME_CONFIG_SOURCE")
         .env_remove("FPASOTERM_RUNTIME_CONFIG_OWNER_PID")
         .spawn()
         .map(|_| ())
         .map_err(|error| error.to_string())
+}
+
+// Accepts only an existing local absolute directory for a new OSC 7 window.
+fn validated_start_directory(value: &str, osc_host: Option<&str>) -> Result<PathBuf, String> {
+    if let Some(host) = osc_host.map(str::trim).filter(|host| !host.is_empty()) {
+        if !is_local_osc_host(host) {
+            return Err("OSC 7 current directory belongs to a remote host".to_string());
+        }
+    }
+    let path = Path::new(value.trim());
+    if value.len() > 4096 || value.chars().any(char::is_control) || !path.is_absolute() {
+        return Err("OSC 7 current directory must be a local absolute path".to_string());
+    }
+    let metadata = fs::metadata(path)
+        .map_err(|error| format!("OSC 7 current directory is unavailable: {error}"))?;
+    if !metadata.is_dir() {
+        return Err("OSC 7 current directory is not a directory".to_string());
+    }
+    Ok(path.to_path_buf())
+}
+
+// Accepts the host spellings emitted by local shell integrations and rejects
+// OSC 7 reports from remote SSH hosts before any local filesystem access.
+fn is_local_osc_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    let normalized = host.trim_end_matches('.');
+    let local_hostname = env::var("HOSTNAME")
+        .ok()
+        .or_else(|| env::var("COMPUTERNAME").ok())
+        .unwrap_or_default();
+    normalized.eq_ignore_ascii_case(local_hostname.trim_end_matches('.'))
 }
 
 // Detaches GUI launches entered from a macOS fpasoterm shell so the invoking
@@ -1942,7 +2674,13 @@ fn window_cancel_close_all(app: AppHandle) -> Result<(), String> {
 
 // Broadcasts the close request from the independent confirmation window.
 #[tauri::command]
-fn window_close_all_confirmed(app: AppHandle) -> Result<String, String> {
+fn window_close_all_confirmed(
+    app: AppHandle,
+    unmount_sshfs: Option<bool>,
+) -> Result<String, String> {
+    if unmount_sshfs.unwrap_or(false) {
+        sshfs_unmount_all()?;
+    }
     broadcast_close_all_request()?;
     if let Some(window) = app.get_webview_window("close-all-confirm") {
         let _ = window.close();
@@ -2601,6 +3339,15 @@ fn default_runtime_config() -> RuntimeConfig {
                 "directory": "",
                 "autoStart": false,
                 "maxBytes": 10485760
+            }),
+            security: serde_json::json!({
+                "osc52": "trusted",
+                "osc52MaxBytes": 65536,
+                "osc7": true,
+                "osc133": true,
+                "osc8Open": false,
+                "oscNotifications": false,
+                "oscNotificationMinIntervalMs": 5000
             }),
         },
         config_dir: config_dir.clone(),
@@ -5196,16 +5943,21 @@ fn terminal_start(
             shell, size.cols, size.rows, size.pixel_width, size.pixel_height
         ),
     );
-    let mut command = CommandBuilder::new(shell);
+    let mut command = CommandBuilder::new(&shell);
     if !cfg!(windows) {
         command.arg("-i");
     }
-    command.cwd(home_dir());
+    let start_directory = env::var("FPASOTERM_START_CWD")
+        .ok()
+        .and_then(|value| validated_start_directory(&value, None).ok())
+        .unwrap_or_else(|| PathBuf::from(home_dir()));
+    command.cwd(&start_directory);
     command.env("TERM", "xterm-256color");
     // xterm.js renders 24-bit ANSI colors. Advertise that separately from the
     // xterm-256color terminfo entry so TUI applications choose their truecolor path.
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "fpasoterm");
+    configure_osc7_shell_integration(&mut command, &shell);
     configure_utf8_terminal_locale(&mut command, output_encoding);
     if let Some(path_value) = terminal_path_with_app_dir() {
         if cfg!(windows) {
@@ -5302,6 +6054,30 @@ fn terminal_start(
     drop(terminal);
     start_terminal_broadcast_listener(app, state.inner());
     Ok(())
+}
+
+// Adds a Bash prompt hook so the renderer can learn the local directory through
+// OSC 7. Other shells may provide their own OSC 7 shell integration unchanged.
+fn configure_osc7_shell_integration(command: &mut CommandBuilder, shell: &str) {
+    let is_bash = Path::new(shell)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            name.eq_ignore_ascii_case("bash") || name.eq_ignore_ascii_case("bash.exe")
+        });
+    if !is_bash {
+        return;
+    }
+    // This hook is injected only into a locally-started Bash. Use the stable
+    // localhost spelling instead of $HOSTNAME because ChromeOS containers can
+    // expose different host names to the shell and Tauri process.
+    let report = r#"printf '\033]7;file://localhost%s\007' "$PWD""#;
+    let prompt_command = env::var("PROMPT_COMMAND")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .map(|value| format!("{value}; {report}"))
+        .unwrap_or_else(|| report.to_string());
+    command.env("PROMPT_COMMAND", prompt_command);
 }
 
 #[tauri::command]
@@ -7082,6 +7858,81 @@ fn clipboard_write(text: String) -> Result<(), String> {
             &text,
         )
     }
+}
+
+// Opens only an explicitly confirmed HTTP(S) URL. Terminal output never invokes
+// this command on its own, and platform-specific launchers receive the URL as a
+// single argument rather than a shell command string.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    let value = validated_external_url(&url)?;
+
+    #[cfg(target_os = "windows")]
+    {
+        let operation = windows_wide("open");
+        let target = windows_wide(&value);
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                operation.as_ptr(),
+                target.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                1,
+            )
+        };
+        if (result as isize) <= 32 {
+            return Err(format!(
+                "Windows could not open the URL (ShellExecute error {})",
+                result as isize
+            ));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(&value)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not open URL with macOS open command: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(&value)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not open URL with xdg-open: {error}"))?;
+        Ok(())
+    }
+}
+
+// Performs a narrow URL validation before a user-confirmed browser launch.
+fn validated_external_url(url: &str) -> Result<String, String> {
+    let value = url.trim();
+    if value.is_empty() || value.len() > 8192 || value.chars().any(char::is_control) {
+        return Err("URL is empty, too long, or contains a control character".to_string());
+    }
+    let without_scheme = if let Some(rest) = value.strip_prefix("https://") {
+        rest
+    } else if let Some(rest) = value.strip_prefix("http://") {
+        rest
+    } else {
+        return Err("only http:// and https:// URLs may be opened".to_string());
+    };
+    let authority = without_scheme.split('/').next().unwrap_or_default();
+    if authority.is_empty() || authority.starts_with('@') {
+        return Err("URL must include a host name".to_string());
+    }
+    Ok(value.to_string())
 }
 
 #[tauri::command]

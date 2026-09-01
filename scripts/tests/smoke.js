@@ -43,6 +43,10 @@ assert.equal(platformDefaultConfig('linux', 'x64').terminal.minimumContrastRatio
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.rescaleOverlappingGlyphs, false);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.kittyKeyboard, false);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.encoding, 'utf-8');
+assert.equal(platformDefaultConfig('linux', 'x64').security.osc8Open, false);
+assert.equal(platformDefaultConfig('linux', 'x64').security.oscNotifications, false);
+assert.equal(platformDefaultConfig('linux', 'x64').security.oscNotificationMinIntervalMs, 5000);
+assert.equal(platformDefaultConfig('linux', 'x64').keybindings.openCwd, 'o');
 assert.match(platformDefaultConfig('darwin', 'arm64').terminal.fontFamily, /^Menlo, "SF Mono"/);
 assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /^"DejaVu Sans Mono"/);
 assert.match(platformDefaultConfig('win32', 'x64').terminal.fontFamily, /"Noto Sans CJK KR"/);
@@ -148,6 +152,10 @@ for (const file of [
   'docs/security.ja.md',
   'docs/sync.en.md',
   'docs/sync.ja.md',
+  'docs/sshfs.en.md',
+  'docs/sshfs.ja.md',
+  'docs/capability-diagnostics.en.md',
+  'docs/capability-diagnostics.ja.md',
   'examples/apply-default-appearance.sh',
   'examples/apply-default-appearance.ps1',
   'examples/apply-default-appearance.bat',
@@ -187,6 +195,8 @@ for (const file of [
   'src/renderer/vendor/addon-fit/addon-fit.js',
   'src/renderer/vendor/addon-image/addon-image.js',
   'src/renderer/vendor/addon-image/LICENSE',
+  'src/renderer/vendor/addon-web-links/addon-web-links.js',
+  'src/renderer/vendor/addon-web-links/LICENSE',
   'src-tauri/Cargo.toml',
   'src-tauri/build.rs',
   'src-tauri/default-config.toml',
@@ -1116,6 +1126,11 @@ assert.match(indexHtml, /id="terminal-broadcast-focus-status"/);
 assert.match(indexHtml, />Send \(Shift\+Enter\)</);
 assert.match(indexHtml, /id="terminal-broadcast-confirm"/);
 assert.match(indexHtml, /id="terminal-broadcast-confirm-ok"/);
+assert.match(indexHtml, /id="new-window-cwd"/);
+assert.match(indexHtml, /id="diagnostics-menu-items"[\s\S]*id="terminal-kill"/);
+assert.match(indexHtml, /id="terminal-url-dialog"/);
+assert.match(indexHtml, /id="terminal-url-copy"/);
+assert.match(indexHtml, /id="terminal-url-open"/);
 assert.match(indexHtml, />Send Anyway</);
 assert.match(indexHtml, /Ctrl\+C \(0x03\)/);
 assert.match(indexHtml, /Ctrl\+X \(0x18\)/);
@@ -1134,6 +1149,7 @@ assert.match(indexHtml, /id="sync-status"/);
 assert.match(indexHtml, /id="sync-clean"/);
 assert.match(indexHtml, /id="sync-menu-toggle"/);
 assert.match(indexHtml, /id="sync-menu-items"/);
+assert.match(indexHtml, /id="sync-menu-items"[\s\S]*id="sshfs-manager"/);
 assert.doesNotMatch(indexHtml, /id="sync-copy"/);
 assert.doesNotMatch(indexHtml, /id="sync-paste"/);
 assert.doesNotMatch(indexHtml, /id="sync-diagnostics"/);
@@ -1154,6 +1170,41 @@ assert.match(indexHtml, /id="diagnostics-menu-items"/);
 assert.match(indexHtml, /id="window-actions-menu-toggle"/);
 assert.match(indexHtml, /id="window-actions-menu-items"/);
 assert.match(indexHtml, /id="window-actions-menu-items"[\s\S]*id="new-window"/);
+assert.ok(indexHtml.indexOf('id="sshfs-manager"') < indexHtml.indexOf('id="window-actions-menu-items"'));
+assert.match(indexHtml, /id="sshfs-manager-dialog"/);
+assert.match(indexHtml, /id="sshfs-manager-form"/);
+assert.match(indexHtml, /id="sshfs-manager-unmount-all"/);
+assert.match(indexHtml, /id="sshfs-manager-password-toggle"/);
+assert.match(indexHtml, /id="sshfs-manager-local-path"/);
+assert.match(rustMain, /fn sshfs_mount/);
+assert.match(rustMain, /FPASOTERM_SSHFS_PATH/);
+assert.match(rustMain, /SSHFS-Win/);
+assert.match(rustMain, /fn windows_available_drive_letter/);
+assert.match(rustMain, /fn windows_sshfs_unc/);
+assert.match(rustMain, /if path\.is_empty\(\)/);
+assert.match(rustMain, /let available = sshfs_program\.is_file\(\)/);
+assert.match(rustMain, /WNetAddConnection3W/);
+assert.match(rustMain, /WNetGetConnectionW/);
+assert.match(rustMain, /fn windows_verify_network_drive/);
+assert.match(rustMain, /fn windows_verify_network_drive_unmounted/);
+assert.match(rustMain, /write_sshfs_mount_records\(&mounts\)\?/);
+assert.match(rustMain, /window\s*\.hwnd\(\)/);
+assert.match(rustMain, /WNetCancelConnection2W/);
+assert.match(rustMain, /fn windows_confirm_force_sshfs_unmount/);
+assert.match(rustMain, /fn windows_force_unmount_network_drive/);
+assert.match(rustMain, /taskkill/);
+assert.match(rustMain, /fn windows_mount_network_drive/);
+assert.match(rustMain, /RESOURCETYPE_DISK/);
+assert.match(rustMain, /CONNECT_TEMPORARY \| CONNECT_INTERACTIVE \| CONNECT_PROMPT/);
+assert.match(rustMain, /program_path/);
+assert.match(rustMain, /password_stdin/);
+assert.match(rustMain, /fn sshfs_unmount/);
+assert.match(read('docs/sshfs.en.md'), /ssh-agent/);
+assert.match(read('docs/sshfs.en.md'), /network-drive interface/);
+assert.match(read('docs/sshfs.en.md'), /forced recovery.*SSHFS-Win/i);
+assert.match(read('docs/sshfs.ja.md'), /password_stdin/);
+assert.match(read('docs/sshfs.ja.md'), /ディスク型network drive/);
+assert.match(read('docs/sshfs.ja.md'), /強制復旧/);
 assert.match(indexHtml, /id="terminal-copy"/);
 assert.match(indexHtml, /id="terminal-paste"/);
 assert.match(indexHtml, /id="keybinding-prefix"/);
@@ -2125,7 +2176,22 @@ assert.match(renderer, /Nerd Font \(Powerline\):/);
 assert.match(renderer, /terminalBroadcastTargets/);
 assert.match(renderer, /renderTerminalBroadcastTargets/);
 assert.match(renderer, /targetInstanceIds/);
-assert.match(renderer, /\\x1b\\\]\(777\|52\);/);
+assert.match(renderer, /\\x1b\\\]\(777\|52\|7\|133\|9\|99\);/);
+assert.match(renderer, /function applyOsc7WorkingDirectory/);
+assert.match(renderer, /function openWindowAtCurrentDirectory/);
+assert.match(renderer, /newWindowAtCwd/);
+assert.match(renderer, /cwdHost/);
+assert.match(renderer, /New CWD is unavailable until the shell reports its current directory/);
+assert.match(rustMain, /file:\/\/localhost%s/);
+assert.match(rustMain, /fn configure_osc7_shell_integration/);
+assert.match(rustMain, /PROMPT_COMMAND/);
+assert.match(renderer, /function applyOsc133ShellIntegration/);
+assert.match(renderer, /function applyOscNotification/);
+assert.match(renderer, /oscSecurityConfig\(\)\.osc8Open/);
+assert.match(renderer, /oscSecurityConfig\(\)\.oscNotifications/);
+assert.match(renderer, /openExternalUrl/);
+assert.match(renderer, /function osc52MaximumBytes/);
+assert.match(renderer, /security\.osc52/);
 assert.match(renderer, /key === 'config'/);
 assert.match(renderer, /key === 'opacity'/);
 assert.match(renderer, /CSS\.supports\('color'/);
@@ -2214,12 +2280,16 @@ assert.match(renderer, /setRangeText/);
 const capabilityDiagnosticsEn = read('docs/capability-diagnostics.en.md');
 const capabilityDiagnosticsJa = read('docs/capability-diagnostics.ja.md');
 assert.match(capabilityDiagnosticsEn, /OSC 52/);
+assert.match(capabilityDiagnosticsEn, /OSC 9 \/ OSC 99/);
+assert.match(capabilityDiagnosticsEn, /New CWD/);
 assert.match(capabilityDiagnosticsEn, /Bracketed paste/);
 assert.match(capabilityDiagnosticsJa, /truecolor/);
 assert.match(capabilityDiagnosticsJa, /OSC 8/);
+assert.match(capabilityDiagnosticsJa, /OSC 9 \/ OSC 99/);
+assert.match(capabilityDiagnosticsJa, /New CWD/);
 assert.match(styles, /\.window-menu-submenu-items/);
 assert.match(styles, /white-space: pre-wrap/);
-assert.match(styles, /padding: 0 2px 8px/);
+assert.match(styles, /padding: 0 0 8px/);
 assert.match(styles, /\.resize-edge-bottom\s*\{[^}]*height: 4px/s);
 assert.match(styles, /\.resize-edge-bottom\s*\{[^}]*left: 96px/s);
 assert.match(styles, /\.resize-edge-left\s*\{[^}]*bottom: 64px/s);
@@ -2337,6 +2407,19 @@ assert.match(launcher, /writeUserConfig/);
 assert.match(renderer, /function pluginScriptSource\(plugin\)/);
 assert.match(renderer, /convertFileSrc/);
 assert.match(renderer, /failed to load plugin \$\{plugin\.name\} source=\$\{source\}/);
+assert.match(renderer, /function openSshfsManagerModal/);
+assert.match(renderer, /sshfsManagerPasswordToggleButton\.addEventListener/);
+assert.match(renderer, /sshfsManagerLocalPathElement\.addEventListener/);
+assert.match(renderer, /SSHFS mount ready: \$\{mounted\.mountPoint\}/);
+assert.doesNotMatch(renderer, /openSshfsManager: \(\) => invoke\('sshfs_manager_open'\)/);
+assert.match(renderer, /mountSshfs: \(request\)/);
+assert.match(renderer, /function copyTerminalLink/);
+assert.match(renderer, /function installTerminalPathLinks/);
+assert.match(renderer, /WebLinksAddon/);
+assert.match(read('src/renderer/index.html'), /vendor\/addon-web-links\/addon-web-links\.js/);
+const buildScript = read('src-tauri/build.rs');
+assert.match(buildScript, /fn watch_frontend_assets/);
+assert.match(buildScript, /src\/renderer/);
 
 const desktop = read('extra/linux/io.github.oyoguhito.fpasoterm.desktop');
 assert.match(desktop, /^Name=fpasoterm$/m);

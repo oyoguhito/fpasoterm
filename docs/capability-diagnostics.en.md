@@ -34,11 +34,28 @@ printf '\033[38;2;255;80;80mred \033[38;2;80;220;140mgreen \033[38;2;90;150;255m
 ## Control Sequences
 
 - **OSC 52 clipboard:** fpasoterm accepts received text clipboard payloads and
-  writes them to the operating-system clipboard. It is intended for trusted
-  local tools such as tmux, screen, byobu, and herdr.
-- **OSC 8 hyperlinks:** sequences pass through to xterm.js. Visual rendering
-  and opening a link depend on the platform webview; do not use it as a
-  security boundary.
+  writes them to the operating-system clipboard when `security.osc52` is
+  `trusted`. `security.osc52MaxBytes` limits the decoded payload. Set
+  `security.osc52 = "disabled"` when terminal output is not trusted.
+- **OSC 7 current directory:** received `file://` reports are retained only as
+  diagnostics metadata. Use `Ctrl+Shift+o` or **Window > New CWD** to open a
+  separate terminal in an existing local absolute directory reported by OSC 7.
+  Remote-host reports and unavailable paths are rejected. fpasoterm does not
+  open, inspect, or synchronize the reported path. fpasoterm configures Bash
+  to report OSC 7 at each prompt; other shells need their own OSC 7 integration.
+- **OSC 133 shell integration:** prompt and command lifecycle markers are
+  retained only as diagnostics metadata. They do not execute a command or
+  replace the shell, multiplexer, or TUI workflow.
+- **OSC 8 hyperlinks:** clicking a rendered OSC 8 link or plain `http(s)` URL
+  opens an explicit confirmation dialog. Copy remains available. External
+  browser opening is disabled by default and additionally requires
+  `security.osc8Open = true`; links are never opened automatically. Absolute
+  and `~/` paths remain copy-only links.
+- **OSC 9 / OSC 99 notifications:** desktop notifications are disabled by
+  default. Set `security.oscNotifications = true` to allow them. The first use
+  can request operating-system notification permission, and
+  `security.oscNotificationMinIntervalMs` limits notifications to one per
+  1,000--60,000 ms (default 5,000 ms).
 - **Bracketed paste:** xterm.js handles terminal input. A shell or TUI enables
   bracketed paste with DECSET 2004, then receives pasted text as a bracketed
   sequence.
@@ -54,5 +71,7 @@ the current terminal session.
 1. Start fpasoterm and open **Diagnostics > Capability Test**.
 2. Confirm `TERM` is `xterm-256color` and `COLORTERM` is `truecolor`.
 3. Run the displayed truecolor command and confirm all three colors differ.
-4. If a TUI behaves differently, record this panel together with
+4. Run `printf 'https://example.com /tmp/fpasoterm-link-test\n'`, click each
+   item, and paste into a trusted text field to confirm URL/path copying.
+5. If a TUI behaves differently, record this panel together with
    `fpasoterm --diagnostics` when filing an issue.

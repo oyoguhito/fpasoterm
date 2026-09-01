@@ -7,6 +7,7 @@
     "core:default",
     "core:event:default",
     "core:event:allow-listen",
-    "core:window:allow-start-resize-dragging"
+    "core:window:allow-start-resize-dragging",
+    "notification:default"
   ]
 }

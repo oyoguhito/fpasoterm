@@ -18,9 +18,10 @@
   <body>
     <main role="dialog" aria-modal="true" aria-labelledby="title">
       <h1 id="title">Close all fpasoterm windows?</h1>
-      <p>This will terminate every running fpasoterm window.</p>
+      <p id="message">This will terminate every running fpasoterm window.</p>
       <footer>
         <button id="cancel" type="button">Cancel</button>
+        <button id="unmount" type="button" hidden>Unmount & Close</button>
         <button id="ok" type="button">OK</button>
       </footer>
     </main>
@@ -29,6 +30,14 @@
       const currentWindow = window.__TAURI__.window.getCurrentWindow();
       const ok = document.getElementById('ok');
       const cancel = document.getElementById('cancel');
+      const unmount = document.getElementById('unmount');
+      const message = document.getElementById('message');
+      invoke('sshfs_status').then((status) => {
+        if (status.mounts?.length) {
+          message.textContent += `\n\n${status.mounts.length} SSHFS mount(s) will remain active. Reopen FpasoTerm and use Window > SSHFS Mounts to unmount them.`;
+          unmount.hidden = false;
+        }
+      }).catch(() => {});
       const focusConfirmWindow = () => {
         currentWindow.setFocus().catch(() => {});
         cancel.focus({ preventScroll: true });
@@ -38,7 +47,8 @@
       setTimeout(focusConfirmWindow, 80);
       const focusMainAndClose = () => invoke('window_cancel_close_all').catch(() => currentWindow.close().catch(() => {}));
       const closeConfirmWindow = () => currentWindow.close().catch(() => {});
-      ok.addEventListener('click', () => invoke('window_close_all_confirmed').catch(closeConfirmWindow));
+      ok.addEventListener('click', () => invoke('window_close_all_confirmed', { unmountSshfs: false }).catch(closeConfirmWindow));
+      unmount.addEventListener('click', () => invoke('window_close_all_confirmed', { unmountSshfs: true }).catch(closeConfirmWindow));
       cancel.addEventListener('click', focusMainAndClose);
       window.addEventListener('keydown', (event) => {
         if (event.key === 'Tab') {
