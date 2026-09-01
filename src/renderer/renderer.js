@@ -25,6 +25,8 @@ const closeWindowButton = document.getElementById('close-window');
 const minimizeWindowButton = document.getElementById('minimize-window');
 const maximizeWindowButton = document.getElementById('maximize-window');
 const newWindowButton = document.getElementById('new-window');
+const newWindowCwdButton = document.getElementById('new-window-cwd');
+const sshfsManagerButton = document.getElementById('sshfs-manager');
 const arrangeWindowButton = document.getElementById('arrange-window');
 const closeAllWindowsButton = document.getElementById('close-all-windows');
 const keyboardShortcutsHelpButton = document.getElementById('keyboard-shortcuts-help');
@@ -37,6 +39,7 @@ const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
+const sshfsMountStatusElement = document.getElementById('sshfs-mount-status');
 const imeStatusElement = document.getElementById('ime-status');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
@@ -77,6 +80,21 @@ const terminalBroadcastConfirmElement = document.getElementById('terminal-broadc
 const terminalBroadcastConfirmMessageElement = document.getElementById('terminal-broadcast-confirm-message');
 const terminalBroadcastConfirmOkButton = document.getElementById('terminal-broadcast-confirm-ok');
 const terminalBroadcastConfirmCancelButton = document.getElementById('terminal-broadcast-confirm-cancel');
+const terminalUrlDialog = document.getElementById('terminal-url-dialog');
+const terminalUrlMessageElement = document.getElementById('terminal-url-message');
+const terminalUrlCopyButton = document.getElementById('terminal-url-copy');
+const terminalUrlOpenButton = document.getElementById('terminal-url-open');
+const terminalUrlCancelButton = document.getElementById('terminal-url-cancel');
+const sshfsManagerDialog = document.getElementById('sshfs-manager-dialog');
+const sshfsManagerResult = document.getElementById('sshfs-manager-result');
+const sshfsManagerSavedMounts = document.getElementById('sshfs-manager-saved-mounts');
+const sshfsManagerForm = document.getElementById('sshfs-manager-form');
+const sshfsManagerCloseButton = document.getElementById('sshfs-manager-close');
+const sshfsManagerUnmountButton = document.getElementById('sshfs-manager-unmount');
+const sshfsManagerUnmountAllButton = document.getElementById('sshfs-manager-unmount-all');
+const sshfsManagerPasswordElement = document.getElementById('sshfs-manager-password');
+const sshfsManagerPasswordToggleButton = document.getElementById('sshfs-manager-password-toggle');
+const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-local-path');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
@@ -137,6 +155,7 @@ const fallbackConfig = {
     menu: 'M',
     help: 'H',
     newWindow: 'N',
+    openCwd: 'O',
     broadcast: 'B',
     kill: 'K',
     tile: 'T',
@@ -159,6 +178,15 @@ const fallbackConfig = {
     autoStart: false,
     maxBytes: 10485760,
   },
+  security: {
+    osc52: 'trusted',
+    osc52MaxBytes: 65536,
+    osc7: true,
+    osc133: true,
+    osc8Open: false,
+    oscNotifications: false,
+    oscNotificationMinIntervalMs: 5000,
+  },
 };
 let appConfig = fallbackConfig;
 let activeConfigPath = '';
@@ -180,6 +208,17 @@ let terminalResizeTimer = null;
 let terminalDeferredResizeTimer = null;
 let xtermOverlayObserver = null;
 let pendingOscData = '';
+let pendingTerminalUrl = '';
+let lastOscNotificationAt = 0;
+// OSC 7/133 are metadata only. They never run shell commands or access paths.
+const oscSessionMetadata = {
+  cwd: '',
+  cwdHost: '',
+  commandState: 'unknown',
+  lastExitCode: '',
+  lastMarker: '',
+  lastNotification: '',
+};
 let diagnosticsPanelMode = 'diagnostics';
 let syncDiagnosticsEnabled = false;
 let syncDiagnosticsTimer = null;
@@ -289,6 +328,7 @@ function applyKeybindingLabels() {
     [terminalCopyButton, 'copy', 'Copy'],
     [terminalPasteButton, 'paste', 'Paste'],
     [newWindowButton, 'newWindow', 'New'],
+    [newWindowCwdButton, 'openCwd', 'New CWD'],
     [arrangeWindowButton, 'tile', 'Tile'],
     [closeAllWindowsButton, 'closeAll', 'Close All'],
     [keyboardShortcutsHelpButton, 'help', 'Help'],
@@ -360,6 +400,7 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
+    openExternalUrl: (url) => invoke('open_external_url', { url }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
     getPluginCatalog: () => invoke('plugin_catalog'),
@@ -370,10 +411,15 @@ function installTauriApiAdapter() {
     syncStatus: () => invoke('sync_status'),
     syncClean: () => invoke('sync_clean'),
     syncWriteDiagnostics: () => invoke('sync_write_diagnostics'),
+    getSshfsStatus: () => invoke('sshfs_status'),
+    mountSshfs: (request) => invoke('sshfs_mount', { request }),
+    unmountSshfs: (mountName) => invoke('sshfs_unmount', { mountName }),
+    unmountAllSshfs: () => invoke('sshfs_unmount_all'),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
     newWindow: () => invoke('window_new'),
+    newWindowAtCwd: (cwd, host) => invoke('window_new_at_cwd', { cwd, host: host || null }),
     arrangeWindows: (screen) => invoke('window_arrange', { screen }),
     closeAllWindows: () => invoke('window_close_all'),
     confirmCloseAllWindows: () => invoke('window_confirm_close_all'),
@@ -394,6 +440,19 @@ window.addEventListener('error', (event) => {
 window.addEventListener('unhandledrejection', (event) => {
   console.error(`renderer unhandled rejection: ${event.reason}`);
 });
+
+// Shows a compact titlebar indicator for managed SSHFS mounts without exposing remote credentials.
+async function refreshSshfsMountStatus() {
+  if (!sshfsMountStatusElement || !window.fpasoterm.getSshfsStatus) return;
+  try {
+    const status = await window.fpasoterm.getSshfsStatus();
+    const count = Array.isArray(status.mounts) ? status.mounts.length : 0;
+    sshfsMountStatusElement.hidden = count === 0;
+    sshfsMountStatusElement.textContent = `SSHFS (${count})`;
+  } catch (_) {
+    sshfsMountStatusElement.hidden = true;
+  }
+}
 
 // Fits xterm.js to the available element size and resizes the PTY.
 function fitAndResize() {
@@ -939,6 +998,128 @@ async function copyTerminalSelection() {
   return copiedLength;
 }
 
+// Copies a terminal link without opening it. This keeps OSC 8 URLs and paths
+// usable in remote sessions without delegating untrusted output to the browser.
+async function copyTerminalLink(text, kind = 'link') {
+  const value = String(text || '').trim();
+  if (!value) {
+    return;
+  }
+  try {
+    await writeClipboardText(value);
+    showDiagnostic(`${kind} copied: ${value}`);
+  } catch (error) {
+    showDiagnostic(`${kind} copy failed: ${error}`);
+  }
+}
+
+// Only HTTP(S) links can reach the explicit external-browser action.
+function isExternalHttpUrl(value) {
+  try {
+    const url = new URL(String(value || '').trim());
+    return (url.protocol === 'http:' || url.protocol === 'https:') && Boolean(url.host);
+  } catch (_) {
+    return false;
+  }
+}
+
+// Keeps keyboard navigation inside the confirmation dialog.
+function terminalUrlFocusItems() {
+  if (!terminalUrlDialog || terminalUrlDialog.hidden) {
+    return [];
+  }
+  return [terminalUrlCopyButton, terminalUrlOpenButton, terminalUrlCancelButton]
+    .filter((element) => element && !element.hidden && !element.disabled);
+}
+
+function closeTerminalUrlDialog() {
+  if (terminalUrlDialog) {
+    terminalUrlDialog.hidden = true;
+  }
+  pendingTerminalUrl = '';
+  focusTerminalInput();
+}
+
+// Opens a confirmation dialog for terminal-provided URLs instead of navigating automatically.
+function showTerminalUrlDialog(value, kind = 'URL') {
+  const url = String(value || '').trim();
+  if (!isExternalHttpUrl(url) || !terminalUrlDialog || !terminalUrlMessageElement) {
+    copyTerminalLink(url, kind);
+    return;
+  }
+  pendingTerminalUrl = url;
+  const openingEnabled = oscSecurityConfig().osc8Open === true;
+  terminalUrlMessageElement.textContent = openingEnabled
+    ? `${kind} from terminal output:\n${url}\n\nCopy it, or explicitly open it in the external browser.`
+    : `${kind} from terminal output:\n${url}\n\nExternal opening is disabled by [security] osc8Open = false. You can still copy the URL.`;
+  terminalUrlOpenButton.hidden = !openingEnabled;
+  terminalUrlDialog.hidden = false;
+  terminalUrlCopyButton.focus({ preventScroll: true });
+}
+
+async function openPendingTerminalUrl() {
+  const url = pendingTerminalUrl;
+  if (!url || oscSecurityConfig().osc8Open !== true) {
+    showDiagnostic('external URL open skipped because security.osc8Open is disabled');
+    return;
+  }
+  try {
+    await window.fpasoterm.openExternalUrl(url);
+    showDiagnostic(`external URL opened after confirmation: ${url}`);
+    closeTerminalUrlDialog();
+  } catch (error) {
+    showDiagnostic(`external URL open failed: ${error}`);
+  }
+}
+
+// Registers local absolute and home-relative paths that are not covered by
+// the URL addon. The terminal buffer uses 1-based link positions.
+function installTerminalPathLinks() {
+  if (!term || typeof term.registerLinkProvider !== 'function') {
+    return;
+  }
+  const pathPattern = /(?:~\/|\/(?:[^\s'"`<>()[\]{}|]+)|[A-Za-z]:\\(?:[^\s'"`<>()[\]{}|]+))/g;
+  term.registerLinkProvider({
+    provideLinks(y, callback) {
+      const line = term.buffer.active.getLine(y - 1);
+      const lineText = line?.translateToString(true) || '';
+      const links = [];
+      for (const match of lineText.matchAll(pathPattern)) {
+        const text = match[0].replace(/[),;]+$/, '');
+        if (!text) {
+          continue;
+        }
+        const start = Number(match.index || 0);
+        links.push({
+          text,
+          range: {
+            start: { x: start + 1, y },
+            end: { x: start + text.length, y },
+          },
+          activate: () => copyTerminalLink(text, 'path'),
+        });
+      }
+      callback(links);
+    },
+  });
+}
+
+// Installs plain URL and OSC 8 handlers. Browser navigation is always explicit.
+function installTerminalLinkHandlers() {
+  if (!term) {
+    return;
+  }
+  if (window.WebLinksAddon?.WebLinksAddon) {
+    const webLinksAddon = new window.WebLinksAddon.WebLinksAddon((_, uri) => {
+      showTerminalUrlDialog(uri, 'URL');
+    });
+    term.loadAddon(webLinksAddon);
+  } else {
+    showDiagnostic('xterm web links addon is unavailable');
+  }
+  installTerminalPathLinks();
+}
+
 // Returns true for editable UI controls other than xterm's hidden IME textarea.
 // The xterm textarea must be treated as terminal focus so paste reaches the PTY.
 function isNonTerminalEditableControl(element) {
@@ -1059,6 +1240,13 @@ function installTerminalPasteHandlers() {
       return;
     }
 
+    if (matchesKeybinding(event, 'openCwd')) {
+      event.preventDefault();
+      event.stopPropagation();
+      openWindowAtCurrentDirectory();
+      return;
+    }
+
     const isArrangeShortcut = matchesKeybinding(event, 'tile');
     if (isArrangeShortcut) {
       event.preventDefault();
@@ -1130,6 +1318,17 @@ function installTerminalPasteHandlers() {
   });
 }
 
+// Resolves OSC controls without accepting unsupported values from terminal output.
+function oscSecurityConfig() {
+  return mergeConfig(fallbackConfig.security, appConfig.security || {});
+}
+
+// Limits OSC 52 payloads before base64 decoding to avoid clipboard abuse.
+function osc52MaximumBytes() {
+  const configured = Number(oscSecurityConfig().osc52MaxBytes);
+  return Number.isFinite(configured) ? Math.max(0, Math.min(1048576, configured)) : 65536;
+}
+
 // Decodes the base64 payload used by terminal OSC 52 clipboard commands.
 function decodeOsc52Text(encodedText) {
   const binary = atob(String(encodedText || ''));
@@ -1142,8 +1341,23 @@ function applyOsc52Clipboard(selection, encodedText) {
   if (!encodedText) {
     return;
   }
+  const security = oscSecurityConfig();
+  if (security.osc52 !== 'trusted') {
+    showDebugDiagnostic('ignored OSC 52 clipboard request because security.osc52 is disabled');
+    return;
+  }
+  const maxBytes = osc52MaximumBytes();
+  // Base64 takes at least four characters per three decoded bytes.
+  if (String(encodedText).length > Math.ceil(maxBytes / 3) * 4 + 4) {
+    showDiagnostic(`ignored OSC 52 clipboard request exceeding ${maxBytes} bytes`);
+    return;
+  }
   try {
     const text = decodeOsc52Text(encodedText);
+    if (new TextEncoder().encode(text).length > maxBytes) {
+      showDiagnostic(`ignored OSC 52 clipboard request exceeding ${maxBytes} bytes`);
+      return;
+    }
     window.fpasoterm.writeClipboard(text).then(() => {
       showDiagnostic(`OSC 52 clipboard wrote bytes=${text.length} selection=${selection || 'clipboard'}`);
     }).catch((error) => {
@@ -1151,6 +1365,115 @@ function applyOsc52Clipboard(selection, encodedText) {
     });
   } catch (error) {
     showDiagnostic(`OSC 52 clipboard decode failed: ${error}`);
+  }
+}
+
+// Records a shell-reported working directory without opening or inspecting it.
+function applyOsc7WorkingDirectory(value) {
+  if (oscSecurityConfig().osc7 !== true) {
+    return;
+  }
+  try {
+    const uri = new URL(String(value || ''));
+    if (uri.protocol !== 'file:') {
+      return;
+    }
+    const path = decodeURIComponent(uri.pathname || '');
+    if (!path || path.length > 4096) {
+      return;
+    }
+    oscSessionMetadata.cwd = path;
+    oscSessionMetadata.cwdHost = uri.hostname || '';
+    showDebugDiagnostic(`OSC 7 cwd updated: ${oscSessionMetadata.cwd}`);
+  } catch (_) {
+    showDebugDiagnostic('ignored malformed OSC 7 working-directory report');
+  }
+}
+
+// Opens a separate terminal only after OSC 7 supplied a local working directory.
+function openWindowAtCurrentDirectory() {
+  const cwd = String(oscSessionMetadata.cwd || '').trim();
+  if (!cwd) {
+    showTerminalError('New CWD is unavailable until the shell reports its current directory. Wait for the prompt, then try again.');
+    showDiagnostic('new CWD window skipped: no local OSC 7 current directory was reported by the shell');
+    return;
+  }
+  window.fpasoterm.newWindowAtCwd(cwd, oscSessionMetadata.cwdHost)
+    .then((message) => showDiagnostic(message))
+    .catch((error) => showDiagnostic(`new CWD window failed: ${error}`));
+}
+
+// Tracks OSC 133 shell integration markers for diagnostics and future log views.
+function applyOsc133ShellIntegration(value) {
+  if (oscSecurityConfig().osc133 !== true) {
+    return;
+  }
+  const [marker, detail = ''] = String(value || '').split(';', 2);
+  const normalized = marker.trim().toUpperCase();
+  if (!['A', 'B', 'C', 'D', 'E', 'F', 'G'].includes(normalized)) {
+    return;
+  }
+  oscSessionMetadata.lastMarker = normalized;
+  if (normalized === 'C') {
+    oscSessionMetadata.commandState = 'running';
+    oscSessionMetadata.lastExitCode = '';
+  } else if (normalized === 'D') {
+    oscSessionMetadata.commandState = 'idle';
+    oscSessionMetadata.lastExitCode = detail.trim();
+  } else if (normalized === 'A') {
+    oscSessionMetadata.commandState = 'prompt';
+  }
+  showDebugDiagnostic(`OSC 133 marker=${normalized}${detail ? ` detail=${detail}` : ''}`);
+}
+
+// Limits OSC 9/99 notifications because terminal output is not a trusted UI channel.
+function oscNotificationMinimumInterval() {
+  const configured = Number(oscSecurityConfig().oscNotificationMinIntervalMs);
+  return Number.isFinite(configured) ? Math.max(1000, Math.min(60000, configured)) : 5000;
+}
+
+function normalizedOscNotificationText(value) {
+  return String(value || '')
+    .replace(/[\u0000-\u001f\u007f-\u009f]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 512);
+}
+
+// Sends an opt-in, rate-limited desktop notification for OSC 9/99 output.
+async function applyOscNotification(sequence, value) {
+  if (oscSecurityConfig().oscNotifications !== true) {
+    return;
+  }
+  const text = normalizedOscNotificationText(value);
+  if (!text) {
+    return;
+  }
+  const now = Date.now();
+  if (now - lastOscNotificationAt < oscNotificationMinimumInterval()) {
+    showDebugDiagnostic(`ignored OSC ${sequence} notification due to rate limit`);
+    return;
+  }
+  const notification = window.__TAURI__?.notification;
+  if (!notification?.isPermissionGranted || !notification?.requestPermission || !notification?.sendNotification) {
+    showDiagnostic(`OSC ${sequence} notification is unavailable in this runtime`);
+    return;
+  }
+  try {
+    let granted = await notification.isPermissionGranted();
+    if (!granted) {
+      granted = (await notification.requestPermission()) === 'granted';
+    }
+    if (!granted) {
+      showDiagnostic(`OSC ${sequence} notification permission was not granted`);
+      return;
+    }
+    await notification.sendNotification({ title: 'fpasoterm', body: text });
+    lastOscNotificationAt = now;
+    oscSessionMetadata.lastNotification = new Date(now).toISOString();
+    showDebugDiagnostic(`OSC ${sequence} notification delivered`);
+  } catch (error) {
+    showDiagnostic(`OSC ${sequence} notification failed: ${error}`);
   }
 }
 
@@ -1186,15 +1509,6 @@ async function loadRuntimeConfig() {
     appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
     activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
-    if (runtimeConfig.diagnostics?.opaqueTerminal) {
-      appConfig = mergeConfig(appConfig, {
-        window: { backgroundColor: '#101317' },
-        terminal: {
-          allowTransparency: false,
-          theme: { background: '#101317' },
-        },
-      });
-    }
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
@@ -1417,6 +1731,12 @@ function processRuntimeOsc(data) {
       if (separator !== -1) {
         applyOsc52Clipboard(match[2].slice(0, separator), match[2].slice(separator + 1));
       }
+    } else if (match[1] === '7') {
+      applyOsc7WorkingDirectory(match[2]);
+    } else if (match[1] === '133') {
+      applyOsc133ShellIntegration(match[2]);
+    } else if (match[1] === '9' || match[1] === '99') {
+      applyOscNotification(match[1], match[2]);
     }
     lastMatchEnd = oscPattern.lastIndex;
   }
@@ -1424,7 +1744,7 @@ function processRuntimeOsc(data) {
   if (lastMatchEnd > 0) {
     pendingOscData = pendingOscData.slice(lastMatchEnd);
   }
-  if (pendingOscData.length > 8192 || !/\x1b\](777|52);/.test(pendingOscData)) {
+  if (pendingOscData.length > 8192 || !/\x1b\](777|52|7|133|9|99);/.test(pendingOscData)) {
     pendingOscData = pendingOscData.slice(-64);
   }
 }
@@ -1529,6 +1849,9 @@ function createTerminal() {
     screenReaderMode: false,
     // Keep this opt-in until it is verified not to interfere with IME input.
     vtExtensions: { kittyKeyboard: appConfig.terminal?.kittyKeyboard === true },
+    linkHandler: {
+      activate: (_, uri) => showTerminalUrlDialog(uri, 'OSC 8 link'),
+    },
   });
   if (typeof term.onTitleChange === 'function') {
     term.onTitleChange((title) => setRuntimeWindowTitle(title));
@@ -1559,6 +1882,7 @@ function createTerminal() {
     showDiagnostic('xterm image addon is unavailable; terminal graphics are disabled');
   }
   term.open(terminalElement);
+  installTerminalLinkHandlers();
   installXtermOverlayPruner();
   logXtermCanvasDiagnostics();
   logXtermTextDiagnostics();
@@ -2592,7 +2916,11 @@ async function showTerminalCapabilityTest() {
     'Expected: three visibly different RGB color words.',
     '',
     'OSC 52 clipboard: supported for received OSC 52 text payloads; writes OS clipboard.',
-    'OSC 8 hyperlink: passed through to xterm.js; rendering and opening behavior depend on the webview.',
+    `OSC 52 safety: ${oscSecurityConfig().osc52}; maximum payload: ${osc52MaximumBytes()} bytes.`,
+    `OSC 8 hyperlink: click a URL to show copy/open confirmation; external opening: ${oscSecurityConfig().osc8Open === true ? 'enabled' : 'disabled'}.`,
+    `OSC 9/99 notifications: ${oscSecurityConfig().oscNotifications === true ? `enabled; minimum interval ${oscNotificationMinimumInterval()} ms` : 'disabled'}${oscSessionMetadata.lastNotification ? `; last: ${oscSessionMetadata.lastNotification}` : ''}.`,
+    `OSC 7 current directory: ${oscSessionMetadata.cwd || '(not reported by shell)'}.`,
+    `OSC 133 shell integration: ${oscSessionMetadata.commandState}; last marker: ${oscSessionMetadata.lastMarker || '(none)'}${oscSessionMetadata.lastExitCode ? `; exit: ${oscSessionMetadata.lastExitCode}` : ''}.`,
     'Bracketed paste: xterm.js input supports bracketed paste; shell/TUI enables it with DECSET 2004.',
     'Bell: BEL is passed to xterm.js; audible/visual feedback depends on OS and webview settings.',
     '',
@@ -2626,6 +2954,7 @@ async function showKeyboardShortcutsHelp() {
     `${keybindingLabel('menu')}  Open or close the window menu`,
     `${keybindingLabel('help')}  Show this keyboard shortcut list`,
     `${keybindingLabel('newWindow')}  Open a new terminal window`,
+    `${keybindingLabel('openCwd')}  Open a new terminal window in the OSC 7 current directory`,
     `${keybindingLabel('broadcast')}  Broadcast input to local windows or the synced channel`,
     `${keybindingLabel('kill')}  Kill the running terminal command and keep its shell open`,
     `${keybindingLabel('tile')}  Tile all fpasoterm windows`,
@@ -3003,6 +3332,35 @@ terminalBroadcastConfirmCancelButton.addEventListener('click', () => {
   resolveDangerousBroadcastConfirmation(false);
 });
 
+terminalUrlCopyButton?.addEventListener('click', () => {
+  copyTerminalLink(pendingTerminalUrl, 'URL').finally(closeTerminalUrlDialog);
+});
+
+terminalUrlOpenButton?.addEventListener('click', () => {
+  openPendingTerminalUrl();
+});
+
+terminalUrlCancelButton?.addEventListener('click', closeTerminalUrlDialog);
+
+terminalUrlDialog?.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    closeTerminalUrlDialog();
+    return;
+  }
+  if (event.key !== 'Tab') {
+    return;
+  }
+  const items = terminalUrlFocusItems();
+  if (items.length === 0) {
+    return;
+  }
+  event.preventDefault();
+  const index = items.indexOf(document.activeElement);
+  const delta = event.shiftKey ? -1 : 1;
+  items[(index + delta + items.length) % items.length].focus({ preventScroll: true });
+});
+
 // Handles Broadcast keys at document capture time so xterm.js cannot reclaim
 // focus and turn a requested send into terminal input.
 function handleTerminalBroadcastKeyboard(event) {
@@ -3194,9 +3552,25 @@ document.addEventListener('pointerdown', (event) => {
 });
 
 
+// Confirms a close that would leave a managed remote filesystem mounted.
+async function requestWindowClose() {
+  const status = await window.fpasoterm.getSshfsStatus?.();
+  if (status?.mounts?.length && !await confirmSshfsWindowClose(status.mounts)) return;
+  window.fpasoterm.closeWindow();
+}
+
+// Reuses the app's keyboard-accessible confirmation overlay instead of a native browser dialog.
+function confirmSshfsWindowClose(mounts) {
+  closeAllConfirmMessageElement.textContent =
+    `Keep ${mounts.length} SSHFS mount(s) active after closing this terminal window?\n\nUse Window > SSHFS Mounts to unmount them later.`;
+  closeAllConfirmElement.hidden = false;
+  closeAllConfirmOkButton.focus({ preventScroll: true });
+  return new Promise((resolve) => { closeAllConfirmResolver = resolve; });
+}
+
 // Closes the frameless window from the custom titlebar.
 closeWindowButton.addEventListener('click', () => {
-  window.fpasoterm.closeWindow();
+  requestWindowClose().catch((error) => showDiagnostic(`window close failed: ${error}`));
 });
 
 // Minimizes the frameless window from the custom titlebar.
@@ -3217,6 +3591,178 @@ maximizeWindowButton.addEventListener('click', () => {
 newWindowButton.addEventListener('click', () => {
   setWindowMenuOpen(false);
   window.fpasoterm.newWindow?.().catch((error) => showDiagnostic(`new window failed: ${error}`));
+});
+
+newWindowCwdButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  openWindowAtCurrentDirectory();
+});
+
+function sshfsDialogValue(name) {
+  return document.getElementById(`sshfs-manager-${name}`).value.trim();
+}
+
+function setSshfsDialogResult(message) {
+  sshfsManagerResult.textContent = String(message);
+  sshfsManagerResult.focus({ preventScroll: true });
+  // The result is above the form controls. Bring it back into view after a
+  // failed operation so a short native window does not hide the error.
+  sshfsManagerResult.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
+
+let sshfsDialogMounts = [];
+let sshfsDialogMountRoot = '';
+
+// Keeps the managed local mount path visible and copyable after a refresh.
+function setSshfsDialogLocalPath(path) {
+  const value = String(path || '').trim();
+  sshfsManagerLocalPathElement.textContent = value || 'Not mounted';
+  sshfsManagerLocalPathElement.dataset.path = value;
+  if (!value) {
+    sshfsManagerLocalPathElement.removeAttribute('href');
+    sshfsManagerLocalPathElement.removeAttribute('title');
+    sshfsManagerLocalPathElement.setAttribute('aria-disabled', 'true');
+    return;
+  }
+  const normalized = value.replaceAll('\\', '/');
+  sshfsManagerLocalPathElement.href = normalized.startsWith('/')
+    ? `file://${encodeURI(normalized)}`
+    : `file:///${encodeURI(normalized)}`;
+  sshfsManagerLocalPathElement.title = 'Click to copy this path';
+  sshfsManagerLocalPathElement.setAttribute('aria-disabled', 'false');
+}
+
+// Clears the one-time password and restores the safer masked presentation.
+function clearSshfsPassword() {
+  sshfsManagerPasswordElement.value = '';
+  sshfsManagerPasswordElement.type = 'password';
+  sshfsManagerPasswordToggleButton.textContent = 'Show';
+  sshfsManagerPasswordToggleButton.setAttribute('aria-pressed', 'false');
+}
+
+// Windows records a drive letter while Unix records use the managed mount root.
+function sshfsDialogMountPath(mount) {
+  if (mount.mountPoint) return mount.mountPoint;
+  if (!sshfsDialogMountRoot) return '';
+  const separator = sshfsDialogMountRoot.includes('\\') ? '\\' : '/';
+  return `${sshfsDialogMountRoot.replace(/[\\/]$/, '')}${separator}${mount.mountName}`;
+}
+
+function applySshfsDialogMount(name) {
+  const mount = sshfsDialogMounts.find((item) => item.mountName === name);
+  if (!mount) return;
+  document.getElementById('sshfs-manager-host').value = mount.host;
+  document.getElementById('sshfs-manager-user').value = mount.user;
+  document.getElementById('sshfs-manager-port').value = mount.port;
+  document.getElementById('sshfs-manager-remote-path').value = mount.remotePath;
+  document.getElementById('sshfs-manager-mount-name').value = mount.mountName;
+  document.getElementById('sshfs-manager-identity-file').value = mount.identityFile || '';
+  setSshfsDialogLocalPath(sshfsDialogMountPath(mount));
+  clearSshfsPassword();
+}
+
+async function refreshSshfsDialog(showResult = true) {
+  const status = await window.fpasoterm.getSshfsStatus();
+  const selected = sshfsManagerSavedMounts.value;
+  sshfsDialogMountRoot = status.mountRoot || '';
+  sshfsDialogMounts = Array.isArray(status.mounts) ? status.mounts : [];
+  sshfsManagerSavedMounts.replaceChildren(new Option('Select a saved mount', ''));
+  sshfsDialogMounts.forEach((mount) => sshfsManagerSavedMounts.add(
+    new Option(`${mount.mountName}: ${mount.user}@${mount.host}:${mount.remotePath}`, mount.mountName),
+  ));
+  sshfsManagerSavedMounts.value = sshfsDialogMounts.some((mount) => mount.mountName === selected) ? selected : '';
+  if (!sshfsManagerSavedMounts.value) setSshfsDialogLocalPath('');
+  if (showResult) setSshfsDialogResult(`${status.available ? 'sshfs is available' : 'sshfs was not found'}; program: ${status.programPath}; managed mounts: ${sshfsDialogMounts.length}`);
+  refreshSshfsMountStatus();
+}
+
+// Uses the same in-window modal on every platform, avoiding a fragile second WebView.
+async function openSshfsManagerModal() {
+  sshfsManagerDialog.hidden = false;
+  sshfsManagerDialog.scrollTop = 0;
+  try {
+    await refreshSshfsDialog();
+    if (sshfsDialogMounts.length === 1) {
+      sshfsManagerSavedMounts.value = sshfsDialogMounts[0].mountName;
+      applySshfsDialogMount(sshfsDialogMounts[0].mountName);
+    }
+    (sshfsManagerSavedMounts.value ? sshfsManagerSavedMounts : document.getElementById('sshfs-manager-host')).focus({ preventScroll: true });
+  } catch (error) {
+    setSshfsDialogResult(`SSHFS check failed: ${error}`);
+  }
+}
+
+function closeSshfsManagerModal() {
+  clearSshfsPassword();
+  sshfsManagerDialog.hidden = true;
+  sshfsManagerButton.focus({ preventScroll: true });
+  terminalElement.focus({ preventScroll: true });
+}
+
+sshfsManagerSavedMounts.addEventListener('change', () => applySshfsDialogMount(sshfsManagerSavedMounts.value));
+// Path links deliberately use the WebView clipboard only. Calling the backend
+// fallback can launch PowerShell when the native clipboard is temporarily busy.
+sshfsManagerLocalPathElement.addEventListener('click', async (event) => {
+  event.preventDefault();
+  const path = sshfsManagerLocalPathElement.dataset.path || '';
+  if (!path) return;
+  try {
+    await writeBrowserClipboardText(path);
+    setSshfsDialogResult(`Local path copied: ${path}`);
+  } catch (error) {
+    setSshfsDialogResult(`Could not copy local path: ${error}`);
+  }
+});
+// Allows a user to verify a one-time password without changing its persistence policy.
+sshfsManagerPasswordToggleButton.addEventListener('click', () => {
+  const visible = sshfsManagerPasswordElement.type === 'text';
+  sshfsManagerPasswordElement.type = visible ? 'password' : 'text';
+  sshfsManagerPasswordToggleButton.textContent = visible ? 'Show' : 'Hide';
+  sshfsManagerPasswordToggleButton.setAttribute('aria-pressed', String(!visible));
+  sshfsManagerPasswordElement.focus({ preventScroll: true });
+});
+sshfsManagerForm.addEventListener('submit', async (event) => {
+  event.preventDefault();
+  try {
+    const mounted = await window.fpasoterm.mountSshfs({
+      host: sshfsDialogValue('host'), user: sshfsDialogValue('user'), port: Number(sshfsDialogValue('port')),
+      remotePath: sshfsDialogValue('remote-path'), mountName: sshfsDialogValue('mount-name'),
+      identityFile: sshfsDialogValue('identity-file') || null,
+      password: sshfsManagerPasswordElement.value || null,
+    });
+    clearSshfsPassword();
+    setSshfsDialogLocalPath(mounted.mountPoint);
+    setSshfsDialogResult(`${mounted.message}: ${mounted.mountPoint}`);
+    await refreshSshfsDialog(false);
+    // A successful mount needs no further form input. Close the manager after
+    // persisting the record; reopening it keeps the drive path and Unmount UI.
+    closeSshfsManagerModal();
+    showDiagnostic(`SSHFS mount ready: ${mounted.mountPoint}`);
+  } catch (error) {
+    clearSshfsPassword();
+    setSshfsDialogResult(`Mount failed: ${error}`);
+  }
+});
+sshfsManagerUnmountButton.addEventListener('click', async () => {
+  const mountName = sshfsDialogValue('mount-name') || sshfsManagerSavedMounts.value;
+  if (!mountName) return setSshfsDialogResult('Select a saved mount or enter its local mount name before unmounting.');
+  try { const result = await window.fpasoterm.unmountSshfs(mountName); setSshfsDialogResult(`${result.message}: ${result.mountPoint}`); await refreshSshfsDialog(false); }
+  catch (error) { setSshfsDialogResult(`Unmount failed: ${error}`); }
+});
+sshfsManagerUnmountAllButton.addEventListener('click', async () => {
+  if (!sshfsDialogMounts.length) return setSshfsDialogResult('No saved SSHFS mounts to remove.');
+  try { setSshfsDialogResult(await window.fpasoterm.unmountAllSshfs()); await refreshSshfsDialog(false); }
+  catch (error) { setSshfsDialogResult(`Unmount all failed: ${error}`); }
+});
+sshfsManagerCloseButton.addEventListener('click', closeSshfsManagerModal);
+sshfsManagerDialog.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') { event.preventDefault(); closeSshfsManagerModal(); }
+});
+
+// Opens the shared SSHFS manager without creating another native WebView window.
+sshfsManagerButton.addEventListener('click', () => {
+  setWindowMenuOpen(false);
+  openSshfsManagerModal();
 });
 
 // Requests a grid layout for all currently running fpasoterm windows.
@@ -3507,6 +4053,8 @@ async function initialize() {
   pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();
   await refreshTerminalLogControl();
+  await refreshSshfsMountStatus();
+  window.setInterval(refreshSshfsMountStatus, 5000);
   if (debugKeys) {
     window.fpasoterm.getDiagnosticsPath().then((logPath) => {
       diagnosticsPathElement.textContent = logPath;

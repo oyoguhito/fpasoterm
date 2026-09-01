@@ -47,7 +47,7 @@ git status --short
 git log -1 --oneline
 npm ci
 npm run check
-npm run build:artifacts -- --bundles-only
+npm run build:bundles
 ```
 
 The empty `git status --short` and the final `git log` line confirm the exact
@@ -135,7 +135,7 @@ git status --short
 git log -1 --oneline
 npm ci
 npm run check
-npm run build:artifacts -- --bundles-only
+npm run build:bundles
 ./src-tauri/target/release/fpasoterm --version
 node ./bin/fpasoterm
 tail -40 ~/.cache/fpasoterm/launcher.log

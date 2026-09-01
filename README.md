@@ -29,10 +29,17 @@ Use `Font / Glyph Test` in the window menu to inspect the active terminal font
 settings and representative CJK, half-width kana, box drawing, symbol, and
 Nerd Font glyphs. See [Font and Glyph Diagnostics](docs/font-diagnostics.en.md).
 Use `Diagnostics > Capability Test` to inspect the terminal environment and
-verify truecolor, OSC 52, OSC 8, bracketed-paste, and bell behavior. See
+verify truecolor, OSC 52, OSC 8, OSC 9/99, OSC 7, OSC 133, bracketed-paste, and bell behavior. See
 [Terminal Capability Diagnostics](docs/capability-diagnostics.en.md). The same
 panel can persist an explicit UTF-8, Shift_JIS, or EUC-JP output decoder for a
 new terminal session.
+
+When the shell reports its local directory with OSC 7, use `Ctrl+Shift+o` or
+**Window > New CWD** to open another fpasoterm window in that directory.
+
+Terminal-output URLs and OSC 8 hyperlinks open an explicit confirmation dialog.
+They can always be copied; opening a URL externally also requires
+`[security] osc8Open = true`. Absolute paths remain copy-only links.
 
 On Linux, Tauri uses WebKitGTK. If ChromeOS/Baguette shows black, white, or flickering surfaces while testing transparent windows, disable the DMA-BUF renderer for that launch:
 
@@ -224,6 +231,8 @@ fpasoterm --config ~/.config/fpasoterm/User/work.toml
 fpasoterm --size 1200x760
 fpasoterm --width 1200 --height 760
 fpasoterm --shell pwsh.exe
+fpasoterm --cwd .
+fpasoterm --cwd ~/work/project --title project
 fpasoterm --command "tmux attach -t work"
 fpasoterm --title work --titlebar-color '#2e7d32'
 fpasoterm --reset-config
@@ -593,3 +602,6 @@ Release workflow.
 - [Pull request review](docs/pr-review.en.md)
 - [Debugging guide](docs/debugging.en.md)
 - [Release checklist](docs/release-checklist.en.md)
+### SSHFS mounts
+
+Use **Sync > SSHFS Mounts** to mount a remote directory under `User/mounts/<name>`. It uses your normal SSH keys, config, and agent by default; an optional password is used only for that mount and is never saved. See [SSHFS mounts](docs/sshfs.en.md).

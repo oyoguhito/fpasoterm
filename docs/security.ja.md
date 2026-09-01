@@ -20,6 +20,10 @@ HMACはsecretを持つdeviceがcommandを作成したことを確認します。
 
 Broadcast dialogは`rm`や`git reset --hard`など一部の破壊的patternで確認を求めます。これは誤操作防止であり、command authorizationではありません。CLI Broadcast、plugin、shell alias、heuristicに一致しないcommandは引き続き実行できます。送信前にcommandとtargetを確認してください。
 
+### Terminal control sequence
+
+terminal outputはauthorization channelではありません。OSC 8 URLは明示的な確認dialogを必ず表示し、自動openしません。外部browserでのopenは既定で無効です（`security.osc8Open = false`）。OSC 9/99 desktop notificationも既定で無効です（`security.oscNotifications = false`）。有効化した場合もrate limitします。OSC 52 clipboard writeは`security.osc52`で設定できるため、trustedではないterminal outputでは無効にしてください。
+
 ## 報告と保守
 
 secret、private log内容、sync path、command secretをpublic Issueへ掲載しないでください。GitHubのprivate vulnerability reportingが利用できる場合はそれを使い、利用できない場合はrepository ownerへprivateに連絡してください。

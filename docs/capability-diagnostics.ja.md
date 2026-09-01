@@ -31,10 +31,21 @@ printf '\033[38;2;255;80;80mred \033[38;2;80;220;140mgreen \033[38;2;90;150;255m
 
 ## Control Sequence
 
-- **OSC 52 clipboard:** 受信したtext clipboard payloadをOS clipboardへ書き込みます。tmux、screen、
-  byobu、herdrなどtrustedなlocal toolでの使用を想定しています。
-- **OSC 8 hyperlink:** sequenceはxterm.jsへ渡します。link表示とopen動作はplatform webviewに依存する
-  ため、security boundaryとしては扱わないでください。
+- **OSC 52 clipboard:** `security.osc52`が`trusted`の場合だけ受信したtext clipboard
+  payloadをOS clipboardへ書き込みます。`security.osc52MaxBytes`でdecode後のsizeを制限します。
+  terminal outputをtrustedできない場合は`security.osc52 = "disabled"`を設定してください。
+- **OSC 7 current directory:** 受信した`file://` reportはdiagnostics metadataとして保持します。
+  `Ctrl+Shift+o`または**Window > New CWD**で、OSC 7が通知したexisting local absolute directoryから別windowを開けます。
+  remote hostのreportまたは存在しないpathは拒否します。報告されたpathをopen、参照、syncしません。
+  fpasotermはBash promptごとにOSC 7を通知するよう設定します。ほかのshellでは、そのshell側のOSC 7 integrationが必要です。
+- **OSC 133 shell integration:** promptとcommand lifecycle markerはdiagnostics metadataとしてだけ
+  保持します。commandを実行したりshell、multiplexer、TUIのworkflowを置き換えたりしません。
+- **OSC 8 hyperlink:** 表示されたOSC 8 linkまたは通常の`http(s)` URLをclickすると明示的な確認dialogを表示します。
+  URLのcopyは常に可能です。外部browserでopenするには`security.osc8Open = true`も必要です。自動openはしません。
+  absolute pathと`~/` pathはcopy-onlyです。
+- **OSC 9 / OSC 99通知:** desktop notificationは既定で無効です。`security.oscNotifications = true`で有効化できます。
+  最初の使用時にはOS notification permissionを確認することがあります。`security.oscNotificationMinIntervalMs`は通知間隔を
+  1,000--60,000 msに制限します（既定5,000 ms）。
 - **Bracketed paste:** xterm.jsがterminal inputを処理します。shellまたはTUIがDECSET 2004を有効にすると、
   paste textはbracketed sequenceとして届きます。
 - **Bell:** BELはxterm.jsへ渡します。音またはvisual feedbackはOSとwebviewの設定に依存するため、
@@ -48,4 +59,5 @@ panelはclipboard書込み、URL open、bellを自動実行せず、対応経路
 1. fpasotermを起動し、**Diagnostics > Capability Test** を開きます。
 2. `TERM`が`xterm-256color`、`COLORTERM`が`truecolor`であることを確認します。
 3. 表示されたtruecolor commandを実行し、3色が異なることを確認します。
-4. TUIの挙動に問題がある場合は、このpanelの内容と`fpasoterm --diagnostics`を合わせてIssueへ記載します。
+4. `printf 'https://example.com /tmp/fpasoterm-link-test\n'`を実行し、各項目をclickしてtrustedなtext fieldへpasteし、URL/pathがcopyされることを確認します。
+5. TUIの挙動に問題がある場合は、このpanelの内容と`fpasoterm --diagnostics`を合わせてIssueへ記載します。

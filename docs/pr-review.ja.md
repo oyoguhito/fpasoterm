@@ -46,7 +46,7 @@ git status --short
 git log -1 --oneline
 npm ci
 npm run check
-npm run build:artifacts -- --bundles-only
+npm run build:bundles
 ```
 
 `git status --short` が空であることと、最後の `git log` の出力により、package化する
@@ -130,7 +130,7 @@ git status --short
 git log -1 --oneline
 npm ci
 npm run check
-npm run build:artifacts -- --bundles-only
+npm run build:bundles
 ./src-tauri/target/release/fpasoterm --version
 node ./bin/fpasoterm
 tail -40 ~/.cache/fpasoterm/launcher.log

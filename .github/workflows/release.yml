@@ -159,7 +159,7 @@ jobs:
         run: npm run check
 
       - name: Build platform artifacts
-        run: npm run build:artifacts -- --bundles-only
+        run: npm run build:bundles
         env:
           FPASOTERM_ARTIFACT_LABEL: ${{ matrix.label }}
 
