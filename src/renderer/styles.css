@@ -689,10 +689,13 @@ body {
 
 #sshfs-manager-dialog {
   /* Keep every form field and error reachable in a short native window. */
-  display: grid;
-  align-items: start;
-  justify-items: center;
-  align-content: start;
+  position: fixed;
+  top: var(--titlebar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10020;
+  display: block;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -702,7 +705,7 @@ body {
   width: 100%;
   max-width: 680px;
   max-height: none;
-  margin: 0 auto;
+  margin: 0 auto 16px;
 }
 
 .sshfs-manager-card form {

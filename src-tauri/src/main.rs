@@ -12,6 +12,8 @@ use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Component, Path, PathBuf};
+#[cfg(target_os = "macos")]
+use std::process::Child;
 #[cfg(not(target_os = "windows"))]
 use std::process::Output;
 use std::process::{Command, Stdio};
@@ -175,6 +177,7 @@ struct SshfsStatus {
     available: bool,
     program_path: String,
     mounts: Vec<SshfsMountRecord>,
+    active_mount_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -783,6 +786,7 @@ fn main() {
             sshfs_mount,
             sshfs_unmount,
             sshfs_unmount_all,
+            sshfs_forget,
             sshfs_status,
             window_confirm_close_all,
             window_close_all_confirmed,
@@ -1893,6 +1897,70 @@ fn window_new_at_cwd(cwd: String, host: Option<String>) -> Result<String, String
     ))
 }
 
+// Checks the native mount table instead of treating a persistent record as a
+// mounted filesystem. macOS has no mountpoint utility, while `mount` is
+// available on every supported Unix platform.
+#[cfg(not(windows))]
+fn unix_mount_table_contains(mount_point: &Path) -> Result<bool, String> {
+    let output = Command::new("mount")
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("cannot inspect mounted filesystems: {error}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "cannot inspect mounted filesystems: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
+    let path = mount_point.display().to_string();
+    let macos_prefix = format!(" on {path} (");
+    let linux_prefix = format!(" on {path} type ");
+    Ok(String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .any(|line| line.contains(&macos_prefix) || line.contains(&linux_prefix)))
+}
+
+#[cfg(not(windows))]
+fn wait_for_unix_mount_state(mount_point: &Path, expected_active: bool) -> Result<bool, String> {
+    for _ in 0..30 {
+        if unix_mount_table_contains(mount_point)? == expected_active {
+            return Ok(true);
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    Ok(false)
+}
+
+// macFUSE retains sshfs after a successful mount, so wait for the mount table
+// rather than waiting for the child process to exit.
+#[cfg(target_os = "macos")]
+fn wait_for_macos_sshfs_mount(child: &mut Child, mount_point: &Path) -> Result<(), String> {
+    for _ in 0..50 {
+        if unix_mount_table_contains(mount_point)? {
+            return Ok(());
+        }
+        if let Some(status) = child
+            .try_wait()
+            .map_err(|error| format!("cannot monitor SSHFS mount: {error}"))?
+        {
+            let mut detail = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut detail);
+            }
+            let detail = detail.trim();
+            return Err(if detail.is_empty() {
+                format!("sshfs exited before the mount became active ({status})")
+            } else {
+                format!("sshfs exited before the mount became active: {detail}")
+            });
+        }
+        std::thread::sleep(Duration::from_millis(100));
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+    Err("SSHFS did not become active within 5 seconds; check the host key, credentials, and SSHFS output".to_string())
+}
+
 #[tauri::command]
 // Mounts through the installed SSHFS implementation without persisting secrets.
 #[cfg(not(windows))]
@@ -1924,6 +1992,11 @@ fn sshfs_mount(
         .stdin(Stdio::piped())
         .stdout(Stdio::null())
         .stderr(Stdio::piped());
+    // macFUSE can lazily create its XPC mount channel. Keeping sshfs in the
+    // foreground avoids the older daemonize path that reports FD_CLOEXEC and
+    // can lose that channel when launched by a GUI process.
+    #[cfg(target_os = "macos")]
+    command.arg("-f");
     command.args(sshfs_local_owner_options());
     if let Some(identity_file) = request
         .identity_file
@@ -1951,11 +2024,10 @@ fn sshfs_mount(
         }
     }
     // macFUSE keeps sshfs attached to the mount after a successful mount.
-    // Waiting for that process here blocks Tauri's invoke response forever and
-    // leaves the SSHFS manager modal unresponsive. The process owns the mount,
-    // so record the requested mount and let the manager return immediately.
+    // Do not wait for process exit, but require a real mount-table entry before
+    // reporting success or persisting the FpasoTerm mount record.
     #[cfg(target_os = "macos")]
-    drop(child);
+    wait_for_macos_sshfs_mount(&mut child, &mount_point)?;
 
     // Linux sshfs normally daemonizes after mounting, so retain its exit-status
     // check to report authentication and option errors to the caller.
@@ -1971,6 +2043,9 @@ fn sshfs_mount(
             } else {
                 format!("sshfs mount failed: {detail}")
             });
+        }
+        if !wait_for_unix_mount_state(&mount_point, true)? {
+            return Err("sshfs exited successfully but no mounted filesystem appeared at the requested path".to_string());
         }
     }
     let record = SshfsMountRecord {
@@ -1994,12 +2069,11 @@ fn sshfs_mount(
     })
 }
 
-// macFUSE retains the sshfs process after mounting, so completion means the
-// request was handed to SSHFS rather than that its process exited.
+// macFUSE retains the sshfs process after mounting, but the mount table has
+// already confirmed the requested filesystem is usable before this is called.
 #[cfg(target_os = "macos")]
 fn sshfs_mount_ready_message() -> String {
-    "SSHFS mount was started; use this path from the terminal or another local application"
-        .to_string()
+    "SSHFS mount is ready; use this path from the terminal or another local application".to_string()
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -2107,9 +2181,14 @@ fn sshfs_unmount(mount_name: String) -> Result<SshfsMountResult, String> {
 #[cfg(not(windows))]
 #[tauri::command]
 fn sshfs_unmount(mount_name: String) -> Result<SshfsMountResult, String> {
-    let mount_point = sshfs_managed_mount_point(&mount_name)?
-        .display()
-        .to_string();
+    let mount_path = sshfs_managed_mount_point(&mount_name)?;
+    if !unix_mount_table_contains(&mount_path)? {
+        return Err(format!(
+            "SSHFS mount is not active at {}; its saved record was kept so it can be mounted again",
+            mount_path.display()
+        ));
+    }
+    let mount_point = mount_path.display().to_string();
     let candidates: Vec<(&str, Vec<String>)> = vec![
         ("fusermount3", vec!["-u".to_string(), mount_point.clone()]),
         ("fusermount", vec!["-u".to_string(), mount_point.clone()]),
@@ -2123,19 +2202,61 @@ fn sshfs_unmount(mount_name: String) -> Result<SshfsMountResult, String> {
             .output()
         {
             Ok(output) if output.status.success() => {
-                let mut mounts = read_sshfs_mount_records();
-                mounts.retain(|record| record.mount_name != mount_name);
-                write_sshfs_mount_records(&mounts)?;
-                return Ok(SshfsMountResult {
-                    mount_point: mount_point.clone(),
-                    message: "SSHFS mount was removed".to_string(),
-                });
+                if wait_for_unix_mount_state(&mount_path, false)? {
+                    let mut mounts = read_sshfs_mount_records();
+                    mounts.retain(|record| record.mount_name != mount_name);
+                    write_sshfs_mount_records(&mounts)?;
+                    return Ok(SshfsMountResult {
+                        mount_point: mount_point.clone(),
+                        message: "SSHFS mount was removed".to_string(),
+                    });
+                }
+                last_error = "unmount command returned success but the filesystem remains mounted"
+                    .to_string();
             }
             Ok(output) => last_error = String::from_utf8_lossy(&output.stderr).trim().to_string(),
             Err(error) => last_error = error.to_string(),
         }
     }
     Err(format!("cannot unmount {}: {last_error}", mount_point))
+}
+
+// Removes only an inactive saved record, without touching a live filesystem.
+#[tauri::command]
+fn sshfs_forget(mount_name: String) -> Result<SshfsMountResult, String> {
+    let managed_path = sshfs_managed_mount_point(&mount_name)?;
+    let mut mounts = read_sshfs_mount_records();
+    let record = mounts
+        .iter()
+        .find(|record| record.mount_name == mount_name)
+        .ok_or_else(|| "no saved SSHFS mount has that name".to_string())?
+        .clone();
+    #[cfg(not(windows))]
+    if unix_mount_table_contains(&managed_path)? {
+        return Err(format!(
+            "SSHFS mount is still active at {}; unmount it before forgetting the saved record",
+            managed_path.display()
+        ));
+    }
+    #[cfg(windows)]
+    if record
+        .mount_point
+        .as_deref()
+        .is_some_and(|mount_point| windows_verify_network_drive(mount_point).is_ok())
+    {
+        return Err(
+            "SSHFS-Win drive is still active; unmount it before forgetting the saved record"
+                .to_string(),
+        );
+    }
+    mounts.retain(|item| item.mount_name != mount_name);
+    write_sshfs_mount_records(&mounts)?;
+    Ok(SshfsMountResult {
+        mount_point: record
+            .mount_point
+            .unwrap_or_else(|| managed_path.display().to_string()),
+        message: "inactive SSHFS saved mount was forgotten".to_string(),
+    })
 }
 
 #[tauri::command]
@@ -2162,6 +2283,7 @@ fn sshfs_status() -> Result<SshfsStatus, String> {
     let root = sshfs_mount_root();
     fs::create_dir_all(&root).map_err(|error| error.to_string())?;
     let sshfs_program = sshfs_program();
+    let mounts = read_sshfs_mount_records();
     // SSHFS-Win documents the direct Cygwin executable as unsuitable for GUI
     // use. Running `sshfs.exe --version` here can flash a helper window, so
     // Windows availability is determined from the installed executable path.
@@ -2176,11 +2298,31 @@ fn sshfs_status() -> Result<SshfsStatus, String> {
         .status()
         .map(|status| status.success())
         .unwrap_or(false);
+    #[cfg(not(windows))]
+    let active_mount_names = mounts
+        .iter()
+        .filter(|record| {
+            unix_mount_table_contains(&sshfs_mount_root().join(&record.mount_name)).unwrap_or(false)
+        })
+        .map(|record| record.mount_name.clone())
+        .collect();
+    #[cfg(windows)]
+    let active_mount_names = mounts
+        .iter()
+        .filter(|record| {
+            record
+                .mount_point
+                .as_deref()
+                .is_some_and(|path| windows_verify_network_drive(path).is_ok())
+        })
+        .map(|record| record.mount_name.clone())
+        .collect();
     Ok(SshfsStatus {
         mount_root: root.display().to_string(),
         available,
         program_path: sshfs_program.display().to_string(),
-        mounts: read_sshfs_mount_records(),
+        mounts,
+        active_mount_names,
     })
 }
 

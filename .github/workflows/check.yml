@@ -61,9 +61,6 @@ jobs:
       - name: Validate desktop file
         run: desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 
-      - name: Run security checks
-        run: npm run security
-
       - name: Build artifacts
         run: npm run build:artifacts
 

@@ -92,6 +92,7 @@ const sshfsManagerForm = document.getElementById('sshfs-manager-form');
 const sshfsManagerCloseButton = document.getElementById('sshfs-manager-close');
 const sshfsManagerUnmountButton = document.getElementById('sshfs-manager-unmount');
 const sshfsManagerUnmountAllButton = document.getElementById('sshfs-manager-unmount-all');
+const sshfsManagerForgetButton = document.getElementById('sshfs-manager-forget');
 const sshfsManagerPasswordElement = document.getElementById('sshfs-manager-password');
 const sshfsManagerPasswordToggleButton = document.getElementById('sshfs-manager-password-toggle');
 const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-local-path');
@@ -309,7 +310,7 @@ function keybindingActionLabel(name) {
   const key = keybindingSpec(name).split('+').map((token) => token.trim()).filter(Boolean).pop() || '';
   const physicalLetter = /^Key([A-Z])$/i.exec(key);
   const physicalDigit = /^Digit([0-9])$/i.exec(key);
-  return physicalLetter?.[1].toUpperCase() || physicalDigit?.[1] || key;
+  return physicalLetter?.[1].toLowerCase() || physicalDigit?.[1] || key.toLowerCase();
 }
 
 // Resolves the common prefix separately so each menu item can stay compact.
@@ -415,6 +416,7 @@ function installTauriApiAdapter() {
     mountSshfs: (request) => invoke('sshfs_mount', { request }),
     unmountSshfs: (mountName) => invoke('sshfs_unmount', { mountName }),
     unmountAllSshfs: () => invoke('sshfs_unmount_all'),
+    forgetSshfs: (mountName) => invoke('sshfs_forget', { mountName }),
     closeWindow: () => invoke('window_close'),
     minimizeWindow: () => invoke('window_minimize'),
     toggleMaximizeWindow: () => invoke('window_toggle_maximize'),
@@ -446,7 +448,7 @@ async function refreshSshfsMountStatus() {
   if (!sshfsMountStatusElement || !window.fpasoterm.getSshfsStatus) return;
   try {
     const status = await window.fpasoterm.getSshfsStatus();
-    const count = Array.isArray(status.mounts) ? status.mounts.length : 0;
+    const count = Array.isArray(status.activeMountNames) ? status.activeMountNames.length : 0;
     sshfsMountStatusElement.hidden = count === 0;
     sshfsMountStatusElement.textContent = `SSHFS (${count})`;
   } catch (_) {
@@ -3661,18 +3663,26 @@ function applySshfsDialogMount(name) {
   clearSshfsPassword();
 }
 
+// Unmounting and forgetting must target an explicit saved record, never a
+// stale value left in the editable mount-name field after another selection.
+function selectedSshfsMountName() {
+  const mountName = sshfsManagerSavedMounts.value;
+  return sshfsDialogMounts.some((mount) => mount.mountName === mountName) ? mountName : '';
+}
+
 async function refreshSshfsDialog(showResult = true) {
   const status = await window.fpasoterm.getSshfsStatus();
   const selected = sshfsManagerSavedMounts.value;
   sshfsDialogMountRoot = status.mountRoot || '';
   sshfsDialogMounts = Array.isArray(status.mounts) ? status.mounts : [];
+  const activeMountNames = new Set(Array.isArray(status.activeMountNames) ? status.activeMountNames : []);
   sshfsManagerSavedMounts.replaceChildren(new Option('Select a saved mount', ''));
   sshfsDialogMounts.forEach((mount) => sshfsManagerSavedMounts.add(
-    new Option(`${mount.mountName}: ${mount.user}@${mount.host}:${mount.remotePath}`, mount.mountName),
+    new Option(`${mount.mountName}: ${mount.user}@${mount.host}:${mount.remotePath}${activeMountNames.has(mount.mountName) ? '' : ' (not mounted)'}`, mount.mountName),
   ));
   sshfsManagerSavedMounts.value = sshfsDialogMounts.some((mount) => mount.mountName === selected) ? selected : '';
   if (!sshfsManagerSavedMounts.value) setSshfsDialogLocalPath('');
-  if (showResult) setSshfsDialogResult(`${status.available ? 'sshfs is available' : 'sshfs was not found'}; program: ${status.programPath}; managed mounts: ${sshfsDialogMounts.length}`);
+  if (showResult) setSshfsDialogResult(`${status.available ? 'sshfs is available' : 'sshfs was not found'}; program: ${status.programPath}; active: ${activeMountNames.size}; saved: ${sshfsDialogMounts.length}`);
   refreshSshfsMountStatus();
 }
 
@@ -3744,8 +3754,8 @@ sshfsManagerForm.addEventListener('submit', async (event) => {
   }
 });
 sshfsManagerUnmountButton.addEventListener('click', async () => {
-  const mountName = sshfsDialogValue('mount-name') || sshfsManagerSavedMounts.value;
-  if (!mountName) return setSshfsDialogResult('Select a saved mount or enter its local mount name before unmounting.');
+  const mountName = selectedSshfsMountName();
+  if (!mountName) return setSshfsDialogResult('Select the saved mount to unmount.');
   try { const result = await window.fpasoterm.unmountSshfs(mountName); setSshfsDialogResult(`${result.message}: ${result.mountPoint}`); await refreshSshfsDialog(false); }
   catch (error) { setSshfsDialogResult(`Unmount failed: ${error}`); }
 });
@@ -3753,6 +3763,17 @@ sshfsManagerUnmountAllButton.addEventListener('click', async () => {
   if (!sshfsDialogMounts.length) return setSshfsDialogResult('No saved SSHFS mounts to remove.');
   try { setSshfsDialogResult(await window.fpasoterm.unmountAllSshfs()); await refreshSshfsDialog(false); }
   catch (error) { setSshfsDialogResult(`Unmount all failed: ${error}`); }
+});
+sshfsManagerForgetButton.addEventListener('click', async () => {
+  const mountName = selectedSshfsMountName();
+  if (!mountName) return setSshfsDialogResult('Select the saved mount to forget.');
+  try {
+    const result = await window.fpasoterm.forgetSshfs(mountName);
+    setSshfsDialogResult(`${result.message}: ${result.mountPoint}`);
+    await refreshSshfsDialog(false);
+  } catch (error) {
+    setSshfsDialogResult(`Forget saved mount failed: ${error}`);
+  }
 });
 sshfsManagerCloseButton.addEventListener('click', closeSshfsManagerModal);
 sshfsManagerDialog.addEventListener('keydown', (event) => {

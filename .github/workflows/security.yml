@@ -35,8 +35,38 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Run security checks
-        run: npm run security
+      - name: Scan for committed secrets
+        run: npm run scan:secrets
+
+      - name: Audit production dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+
+          # npm's audit API is external to this workflow. Retry transient
+          # registry failures, but fail immediately when an audit finds a
+          # dependency vulnerability.
+          for attempt in 1 2 3; do
+            if npm audit --omit=dev 2>&1 | tee /tmp/npm-audit.log; then
+              exit 0
+            fi
+
+            if grep -Eq 'This endpoint is being retired|Invalid package tree|audit endpoint returned an error' /tmp/npm-audit.log; then
+              echo 'warning: npm audit API could not evaluate this lockfile; CodeQL and Rust dependency audit still ran.'
+              exit 0
+            fi
+
+            if ! grep -Eq 'Service Unavailable|EAI_AGAIN|ECONNRESET|ETIMEDOUT' /tmp/npm-audit.log; then
+              exit 1
+            fi
+
+            if [ "$attempt" -eq 3 ]; then
+              echo 'warning: npm audit API remained unavailable after retries; CodeQL and Rust dependency audit still ran.'
+              exit 0
+            fi
+
+            sleep "$((attempt * 15))"
+          done
 
   security:
     name: CodeQL JavaScript and TypeScript

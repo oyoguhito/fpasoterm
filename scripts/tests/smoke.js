@@ -725,10 +725,16 @@ assert.doesNotMatch(releaseWorkflow, /ref: \$\{\{ github\.event_name == 'workflo
 
 const checkWorkflow = read('.github/workflows/check.yml');
 assert.match(checkWorkflow, /timeout-minutes: 30/);
-assert.match(checkWorkflow, /Run security checks/);
+assert.doesNotMatch(checkWorkflow, /Run security checks/);
 assert.match(checkWorkflow, /Swatinem\/rust-cache@v2/);
 assert.doesNotMatch(checkWorkflow, /github\.event_name == 'push' && github\.ref == 'refs\/heads\/main'/);
 assert.match(releaseWorkflow, /Swatinem\/rust-cache@v2/);
+
+const securityWorkflow = read('.github/workflows/security.yml');
+assert.match(securityWorkflow, /Scan for committed secrets/);
+assert.match(securityWorkflow, /Audit production dependencies/);
+assert.match(securityWorkflow, /set -o pipefail/);
+assert.match(securityWorkflow, /Invalid package tree/);
 
 const installDesktop = read('scripts/install-linux-desktop.js');
 assert.match(installDesktop, /XDG_BIN_HOME/);
@@ -1177,9 +1183,14 @@ assert.ok(indexHtml.indexOf('id="sshfs-manager"') < indexHtml.indexOf('id="windo
 assert.match(indexHtml, /id="sshfs-manager-dialog"/);
 assert.match(indexHtml, /id="sshfs-manager-form"/);
 assert.match(indexHtml, /id="sshfs-manager-unmount-all"/);
+assert.match(indexHtml, /id="sshfs-manager-forget"/);
 assert.match(indexHtml, /id="sshfs-manager-password-toggle"/);
 assert.match(indexHtml, /id="sshfs-manager-local-path"/);
 assert.match(rustMain, /fn sshfs_mount/);
+assert.match(rustMain, /fn unix_mount_table_contains/);
+assert.match(rustMain, /wait_for_macos_sshfs_mount/);
+assert.match(rustMain, /command\.arg\("-f"\)/);
+assert.match(rustMain, /active_mount_names/);
 assert.match(rustMain, /FPASOTERM_SSHFS_PATH/);
 assert.match(rustMain, /SSHFS-Win/);
 assert.match(rustMain, /fn windows_available_drive_letter/);
@@ -1202,6 +1213,7 @@ assert.match(rustMain, /CONNECT_TEMPORARY \| CONNECT_INTERACTIVE \| CONNECT_PROM
 assert.match(rustMain, /program_path/);
 assert.match(rustMain, /password_stdin/);
 assert.match(rustMain, /fn sshfs_unmount/);
+assert.match(rustMain, /fn sshfs_forget/);
 assert.match(read('docs/sshfs.en.md'), /ssh-agent/);
 assert.match(read('docs/sshfs.en.md'), /network-drive interface/);
 assert.match(read('docs/sshfs.en.md'), /forced recovery.*SSHFS-Win/i);
@@ -2243,6 +2255,8 @@ assert.match(styles, /#terminal-log-search-status/);
 assert.match(styles, /#terminal-log-confirm/);
 assert.match(styles, /\.terminal-log-confirm-card/);
 assert.match(styles, /#sshfs-manager-dialog \{[\s\S]*overflow-y: auto;/);
+assert.match(styles, /#sshfs-manager-dialog \{[\s\S]*position: fixed;/);
+assert.match(styles, /#sshfs-manager-dialog \{[\s\S]*top: var\(--titlebar-height\);/);
 assert.match(styles, /\.sshfs-manager-card \{[\s\S]*max-width: 680px;/);
 assert.match(styles, /#terminal-log-confirm-ok/);
 assert.match(styles, /#diagnostics-panel button:focus/);
@@ -2415,8 +2429,13 @@ assert.match(renderer, /convertFileSrc/);
 assert.match(renderer, /failed to load plugin \$\{plugin\.name\} source=\$\{source\}/);
 assert.match(renderer, /function openSshfsManagerModal/);
 assert.match(renderer, /sshfsManagerPasswordToggleButton\.addEventListener/);
+assert.match(renderer, /sshfsManagerForgetButton\.addEventListener/);
+assert.match(renderer, /function selectedSshfsMountName/);
+assert.match(renderer, /const mountName = selectedSshfsMountName\(\)/);
 assert.match(renderer, /sshfsManagerLocalPathElement\.addEventListener/);
 assert.match(renderer, /sshfsManagerResult\.scrollIntoView/);
+assert.match(renderer, /activeMountNames/);
+assert.match(renderer, /\(not mounted\)/);
 assert.match(renderer, /SSHFS mount ready: \$\{mounted\.mountPoint\}/);
 assert.doesNotMatch(renderer, /openSshfsManager: \(\) => invoke\('sshfs_manager_open'\)/);
 assert.match(renderer, /mountSshfs: \(request\)/);
