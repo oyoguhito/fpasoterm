@@ -13,6 +13,7 @@
       <div id="window-controls" aria-label="Window controls">
         <div id="window-menu">
           <span id="terminal-log-status" hidden aria-live="polite">Logging</span>
+          <span id="sshfs-mount-status" hidden aria-live="polite">SSHFS</span>
           <button id="window-menu-toggle" type="button" aria-label="Open window menu" aria-expanded="false" aria-keyshortcuts="Control+Shift+M Control+Shift+L">&#9776;</button>
           <div id="window-menu-items" role="menu" hidden>
             <div id="keybinding-prefix" role="note">Shortcut prefix: Ctrl+Shift</div>
@@ -28,6 +29,7 @@
               <div id="sync-menu-items" class="window-menu-submenu-items" role="menu" hidden>
                 <button id="sync-status" type="button" role="menuitem">Sync Status</button>
                 <button id="sync-clean" type="button" role="menuitem">Sync Clean</button>
+                <button id="sshfs-manager" type="button" role="menuitem" aria-label="Manage SSHFS mounts">SSHFS Mounts</button>
               </div>
             </div>
             <div class="window-menu-submenu" data-menu-submenu="diagnostics">
@@ -35,9 +37,9 @@
               <div id="diagnostics-menu-items" class="window-menu-submenu-items" role="menu" hidden>
                 <button id="font-glyph-test" type="button" role="menuitem" aria-label="Show font and glyph diagnostics">Font / Glyph Test</button>
                 <button id="terminal-capability-test" type="button" role="menuitem" aria-label="Show terminal capability diagnostics">Capability Test</button>
+                <button id="terminal-kill" type="button" role="menuitem" aria-label="Force-stop the current terminal process" aria-keyshortcuts="Control+Shift+K">Kill (K)</button>
               </div>
             </div>
-            <button id="terminal-kill" type="button" role="menuitem" aria-label="Force-stop the current terminal process" aria-keyshortcuts="Control+Shift+K">Kill (K)</button>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (C)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (V)</button>
             <div id="plugin-menu-section" class="window-menu-submenu" data-menu-submenu="plugins" hidden>
@@ -48,6 +50,7 @@
               <button id="window-actions-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="window-actions-menu-items" aria-expanded="false">Window</button>
               <div id="window-actions-menu-items" class="window-menu-submenu-items" role="menu" hidden>
                 <button id="new-window" type="button" role="menuitem" aria-label="Open a new fpasoterm window" aria-keyshortcuts="Control+Shift+N">New (N)</button>
+                <button id="new-window-cwd" type="button" role="menuitem" aria-label="Open a new terminal window in the OSC 7 current directory" aria-keyshortcuts="Control+Shift+O">New CWD (o)</button>
                 <button id="terminal-broadcast" type="button" role="menuitem" aria-label="Send text to all fpasoterm windows" aria-keyshortcuts="Control+Shift+B">Broadcast (B)</button>
                 <button id="arrange-window" type="button" role="menuitem" aria-label="Arrange fpasoterm windows" aria-keyshortcuts="Control+Shift+T">Tile (T)</button>
                 <button id="close-all-windows" type="button" role="menuitem" aria-label="Close all fpasoterm windows" aria-keyshortcuts="Control+Shift+X">Close All (X)</button>
@@ -156,6 +159,40 @@
         </div>
       </div>
     </section>
+    <section id="sshfs-manager-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="sshfs-manager-title">
+      <div class="terminal-log-confirm-card sshfs-manager-card">
+        <div id="sshfs-manager-title" class="panel-drag-title">SSHFS Mounts</div>
+        <p class="sshfs-manager-description">Mount a remote directory under FpasoTerm User/mounts. Passwords are used once and are never saved.</p>
+        <output id="sshfs-manager-result" tabindex="-1" aria-live="polite"></output>
+        <div class="sshfs-local-path-actions">
+          <span>Local path:</span>
+          <a id="sshfs-manager-local-path" aria-live="polite">Not mounted</a>
+        </div>
+        <label>Saved mount<select id="sshfs-manager-saved-mounts"><option value="">Select a saved mount</option></select></label>
+        <form id="sshfs-manager-form">
+          <label>SSH host<input id="sshfs-manager-host" required autocomplete="off" placeholder="host.example"></label>
+          <label>SSH user<input id="sshfs-manager-user" required autocomplete="off" placeholder="user"></label>
+          <label>SSH port<input id="sshfs-manager-port" type="number" min="1" max="65535" value="22" required></label>
+          <label>Remote absolute path<input id="sshfs-manager-remote-path" value="/" required autocomplete="off"></label>
+          <label>Local mount name<input id="sshfs-manager-mount-name" required pattern="[A-Za-z0-9._-]+" placeholder="project"></label>
+          <label>Optional SSH identity file<input id="sshfs-manager-identity-file" autocomplete="off" placeholder="Leave empty to use normal SSH selection"></label>
+          <label>Optional SSH password
+            <span class="sshfs-password-control">
+              <input id="sshfs-manager-password" type="password" autocomplete="new-password" placeholder="Never saved">
+              <button id="sshfs-manager-password-toggle" type="button" aria-controls="sshfs-manager-password" aria-pressed="false">Show</button>
+            </span>
+          </label>
+          <p class="sshfs-manager-warning">Password mode requires SSHFS support for <code>-o password_stdin</code>. Empty password uses normal SSH key, config, and agent selection.</p>
+          <div class="terminal-log-confirm-actions">
+            <button id="sshfs-manager-mount" type="submit">Mount</button>
+            <button id="sshfs-manager-unmount" type="button">Unmount</button>
+            <button id="sshfs-manager-unmount-all" type="button">Unmount All</button>
+            <button id="sshfs-manager-forget" type="button">Forget Saved</button>
+            <button id="sshfs-manager-close" type="button">Close</button>
+          </div>
+        </form>
+      </div>
+    </section>
     <section id="terminal-broadcast-confirm" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-broadcast-confirm-title">
       <div class="terminal-log-confirm-card">
         <div id="terminal-broadcast-confirm-title">Confirm Broadcast</div>
@@ -166,9 +203,21 @@
         </div>
       </div>
     </section>
+    <section id="terminal-url-dialog" hidden role="dialog" aria-modal="true" aria-labelledby="terminal-url-title">
+      <div class="terminal-log-confirm-card">
+        <div id="terminal-url-title">Terminal URL</div>
+        <pre id="terminal-url-message"></pre>
+        <div class="terminal-log-confirm-actions">
+          <button id="terminal-url-copy" type="button">Copy URL</button>
+          <button id="terminal-url-open" type="button">Open Externally</button>
+          <button id="terminal-url-cancel" type="button">Cancel</button>
+        </div>
+      </div>
+    </section>
     <script src="./vendor/xterm/xterm.js"></script>
     <script src="./vendor/addon-fit/addon-fit.js"></script>
     <script src="./vendor/addon-image/addon-image.js"></script>
+    <script src="./vendor/addon-web-links/addon-web-links.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

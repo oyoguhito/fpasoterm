@@ -97,6 +97,7 @@ const defaultConfig = Object.freeze({
     menu: 'M',
     help: 'H',
     newWindow: 'N',
+    openCwd: 'o',
     broadcast: 'B',
     kill: 'K',
     tile: 'T',
@@ -122,6 +123,19 @@ const defaultConfig = Object.freeze({
     directory: '',
     autoStart: false,
     maxBytes: 10485760,
+  },
+  security: {
+    // OSC 52 is emitted by trusted terminal tools such as tmux and herdr.
+    // Set disabled when terminal output must never alter the OS clipboard.
+    osc52: 'trusted',
+    osc52MaxBytes: 65536,
+    // OSC 7 and OSC 133 only record local terminal metadata for diagnostics.
+    osc7: true,
+    osc133: true,
+    // Opening terminal-provided URLs and desktop notifications require opt-in.
+    osc8Open: false,
+    oscNotifications: false,
+    oscNotificationMinIntervalMs: 5000,
   },
 });
 
@@ -271,6 +285,7 @@ paste = "V"
 menu = "M"
 help = "H"
 newWindow = "N"
+openCwd = "o"
 broadcast = "B"
 kill = "K"
 tile = "T"
@@ -308,9 +323,23 @@ directory = ""
 autoStart = false
 maxBytes = 10485760
 
+# OSC safety controls. OSC 52 can change the OS clipboard, so disable it when
+# terminal output is untrusted. OSC 7/133 only update local diagnostics.
+[security]
+osc52 = "trusted"
+osc52MaxBytes = 65536
+osc7 = true
+osc133 = true
+# OSC 8 URLs always require a confirmation dialog. Enable external browser
+# opening only for terminal output you trust. OSC 9/99 notifications are off
+# by default and rate-limited when enabled.
+osc8Open = false
+oscNotifications = false
+oscNotificationMinIntervalMs = 5000
+
 # Profiles are optional named overlays selected with --profile <name>.
-# They may contain [window], [terminal], [ime], [keybindings], [sync], or
-# [logging] settings. The selected profile overrides the normal sections.
+# They may contain [window], [terminal], [ime], [keybindings], [sync],
+# [logging], or [security] settings. The selected profile overrides them.
 #
 # [profiles.large-font.terminal]
 # fontSize = 18
@@ -544,6 +573,28 @@ function validateUserConfig(targetPath = configPath(), profileName = process.env
   const sync = userConfig.sync;
   if (sync?.commands === true && (typeof sync.commandSecret !== 'string' || sync.commandSecret.length < 32)) {
     result.warnings.push('sync.commands requires sync.commandSecret with at least 32 characters; run fpasoterm --setup-sync');
+  }
+
+  const security = userConfig.security;
+  if (security?.osc52 !== undefined && !['trusted', 'disabled'].includes(security.osc52)) {
+    result.warnings.push('security.osc52 must be "trusted" or "disabled"');
+  }
+  if (security?.osc52MaxBytes !== undefined
+    && (typeof security.osc52MaxBytes !== 'number' || !Number.isFinite(security.osc52MaxBytes)
+      || security.osc52MaxBytes < 0 || security.osc52MaxBytes > 1048576)) {
+    result.warnings.push('security.osc52MaxBytes must be a number from 0 to 1048576');
+  }
+  for (const key of ['osc7', 'osc133', 'osc8Open', 'oscNotifications']) {
+    if (security?.[key] !== undefined && typeof security[key] !== 'boolean') {
+      result.warnings.push(`security.${key} should be true or false`);
+    }
+  }
+  if (security?.oscNotificationMinIntervalMs !== undefined
+    && (typeof security.oscNotificationMinIntervalMs !== 'number'
+      || !Number.isFinite(security.oscNotificationMinIntervalMs)
+      || security.oscNotificationMinIntervalMs < 1000
+      || security.oscNotificationMinIntervalMs > 60000)) {
+    result.warnings.push('security.oscNotificationMinIntervalMs must be a number from 1000 to 60000');
   }
 
   const unsupported = pruneUnsupportedConfig(writableConfigDefaults(), userConfig).removed;

@@ -91,6 +91,7 @@ Options:
       --self-update-checkout    Update a clean git checkout with git pull, npm install, and desktop refresh.
       --update-desktop          Reinstall the local command, desktop entry, and launcher icons, then exit.
   -s, --shell <command>         Override the configured shell for this launch.
+  -o, --cwd <path>              Start the terminal in this directory. Relative paths are allowed.
   -e, --command <command>       Send a command to the shell after launch.
   -t, --title <text>            Override the titlebar title for this launch.
   -b, --titlebar-color <color>  Override the custom titlebar color for this launch.
@@ -107,8 +108,6 @@ Options:
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
   -k, --debug-keys              Enable key/composition diagnostics.
-      --x11                     Use the X11 GTK backend for Linux window placement diagnostics.
-      --debug-opaque-terminal   Use an opaque terminal background for renderer diagnostics.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
 Normal launches build and run the local Tauri binary when needed, then detach
@@ -439,6 +438,22 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--cwd' || arg === '-o') {
+      const directory = path.resolve(requireValue(argv, index, arg));
+      let metadata;
+      try {
+        metadata = fs.statSync(directory);
+      } catch (error) {
+        throw new Error(`${arg} directory is unavailable: ${error.message}`);
+      }
+      if (!metadata.isDirectory()) {
+        throw new Error(`${arg} must name an existing directory`);
+      }
+      env.FPASOTERM_START_CWD = directory;
+      index += 1;
+      continue;
+    }
+
     if (arg === '--title' || arg === '-t') {
       env.FPASOTERM_WINDOW_TITLE = requireValue(argv, index, arg);
       index += 1;
@@ -480,16 +495,6 @@ function parseArgs(argv) {
 
     if (arg === '--debug-keys' || arg === '-k') {
       env.FPASOTERM_DEBUG_KEYS = '1';
-      continue;
-    }
-
-    if (arg === '--x11') {
-      env.FPASOTERM_X11 = '1';
-      continue;
-    }
-
-    if (arg === '--debug-opaque-terminal') {
-      env.FPASOTERM_DEBUG_OPAQUE_TERMINAL = '1';
       continue;
     }
 
@@ -627,10 +632,10 @@ function validateArgs(argv) {
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--force', '--enable',
-    '--debug-keys', '-k', '--x11', '--debug-opaque-terminal', '--disable-dmabuf', '--broadcast-sync',
+    '--debug-keys', '-k', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
-    '--config', '-c', '--profile', '-p', '--shell', '-s', '--command', '-e', '--title', '-t',
+    '--config', '-c', '--profile', '-p', '--shell', '-s', '--cwd', '-o', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--plugin-uninstall', '--width', '-W',
     '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
     '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-install-file',

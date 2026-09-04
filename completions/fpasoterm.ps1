@@ -19,12 +19,12 @@ $fpasotermCompletion = {
     @('--update-config', 'Add missing config defaults'), @('--prune-config', 'Remove unsupported config settings'), @('--setup-sync', 'Configure a sync folder'),
     @('--sync-status', 'Show sync health'), @('--sync-clean', 'Remove expired sync commands'), @('--sync-diagnostics', 'Print sync diagnostics'),
     @('--self-update', 'Update an npm installation'), @('--self-update-checkout', 'Update a git checkout'), @('--update-desktop', 'Refresh desktop integration'),
-    @('--shell', 'Override shell'), @('-s', 'Override shell'), @('--command', 'Run command after launch'), @('-e', 'Run command after launch'),
+    @('--shell', 'Override shell'), @('-s', 'Override shell'), @('--cwd', 'Start terminal in this directory'), @('-o', 'Start terminal in this directory'), @('--command', 'Run command after launch'), @('-e', 'Run command after launch'),
     @('--title', 'Override titlebar title'), @('-t', 'Override titlebar title'), @('--titlebar-color', 'Override titlebar color'), @('-b', 'Override titlebar color'),
     @('--reset-window-state', 'Delete saved window size'), @('-r', 'Delete saved window size'), @('--reset-config', 'Restore default config'), @('-R', 'Restore default config'),
     @('--width', 'Override window width'), @('-W', 'Override window width'), @('--height', 'Override window height'), @('-H', 'Override window height'),
     @('--size', 'Override window size'), @('-z', 'Override window size'), @('--debug-keys', 'Enable key diagnostics'), @('-k', 'Enable key diagnostics'),
-    @('--x11', 'Use the X11 GTK backend'), @('--debug-opaque-terminal', 'Use opaque terminal background'), @('--disable-dmabuf', 'Disable Linux DMA-BUF renderer'),
+    @('--disable-dmabuf', 'Disable Linux DMA-BUF renderer'),
     @('--completion', 'Print completion script'), @('--completion-install', 'Install persistent completion'), @('--completion-uninstall', 'Remove persistent completion')
   )
 

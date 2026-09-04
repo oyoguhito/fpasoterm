@@ -65,6 +65,7 @@ _fpasoterm() {
     '--self-update-checkout[update a git checkout]' \
     '--update-desktop[refresh desktop integration]' \
     '(-s --shell)'{-s,--shell}'[override shell]:command:_command_names' \
+    '(-o --cwd)'{-o,--cwd}'[start terminal in this directory]:directory:_files -/' \
     '(-e --command)'{-e,--command}'[run command after launch]:command:' \
     '(-t --title)'{-t,--title}'[override titlebar title]:title:' \
     '(-b --titlebar-color)'{-b,--titlebar-color}'[override titlebar color]:color:' \
@@ -74,8 +75,6 @@ _fpasoterm() {
     '(-H --height)'{-H,--height}'[override window height]:pixels:' \
     '(-z --size)'{-z,--size}'[override window size]:width x height:' \
     '(-k --debug-keys)'{-k,--debug-keys}'[enable key diagnostics]' \
-    '--x11[use the X11 GTK backend]' \
-    '--debug-opaque-terminal[use opaque terminal background]' \
     '--disable-dmabuf[disable the Linux DMA-BUF renderer]'
 }
 

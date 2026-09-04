@@ -20,6 +20,15 @@ HMAC confirms that a command was created by a device holding the secret. It does
 
 The Broadcast dialog asks for confirmation for a small set of destructive patterns such as `rm` and `git reset --hard`. This is an accidental-operation guard, not command authorization. CLI Broadcast, plugins, shell aliases, and commands that do not match the heuristic remain capable of executing commands. Review the command and targets before sending it.
 
+### Terminal control sequences
+
+Terminal output is not an authorization channel. OSC 8 URLs require an explicit
+confirmation dialog and never open automatically. External opening is off by
+default (`security.osc8Open = false`). OSC 9/99 desktop notifications are also
+off by default (`security.oscNotifications = false`) and are rate-limited when
+enabled. OSC 52 clipboard writes remain configurable through `security.osc52`;
+disable them for untrusted terminal output.
+
 ## Reporting and Maintenance
 
 Do not publish secrets, private log contents, sync paths, or command secrets in public issues. Use GitHub private vulnerability reporting when available, or contact the repository owner privately for a security issue.

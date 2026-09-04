@@ -1,6 +1,6 @@
 [package]
 name = "fpasoterm"
-version = "1.5.14"
+version = "1.6.0"
 description = "Cross-platform terminal with Japanese IME support."
 authors = ["oyoguhito"]
 edition = "2021"
@@ -18,6 +18,7 @@ serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 sha2 = "0.10"
 tauri = { version = "2.9.2", features = ["image-png", "macos-private-api", "protocol-asset"] }
+tauri-plugin-notification = "=2.3.3"
 toml = "0.9.8"
 ureq = "2.12.1"
 
@@ -25,4 +26,4 @@ ureq = "2.12.1"
 libc = "0.2"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_WNet", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

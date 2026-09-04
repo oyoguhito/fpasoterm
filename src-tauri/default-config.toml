@@ -77,6 +77,7 @@ paste = "V"
 menu = "M"
 help = "H"
 newWindow = "N"
+openCwd = "o"
 broadcast = "B"
 kill = "K"
 tile = "T"
@@ -102,9 +103,23 @@ directory = ""
 autoStart = false
 maxBytes = 10485760
 
+# OSC safety controls. OSC 52 can change the OS clipboard, so disable it when
+# terminal output is untrusted. OSC 7/133 only update local diagnostics.
+[security]
+osc52 = "trusted"
+osc52MaxBytes = 65536
+osc7 = true
+osc133 = true
+# OSC 8 URLs always require a confirmation dialog. Enable external browser
+# opening only for terminal output you trust. OSC 9/99 notifications are off
+# by default and rate-limited when enabled.
+osc8Open = false
+oscNotifications = false
+oscNotificationMinIntervalMs = 5000
+
 # Profiles are optional named overlays selected with --profile <name>.
-# They may contain [window], [terminal], [ime], [keybindings], [sync], or
-# [logging] settings. The selected profile overrides the normal sections.
+# They may contain [window], [terminal], [ime], [keybindings], [sync],
+# [logging], or [security] settings. The selected profile overrides them.
 #
 # [profiles.large-font.terminal]
 # fontSize = 18

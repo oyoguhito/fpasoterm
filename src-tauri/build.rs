@@ -57,6 +57,25 @@ fn watch_jj_revision(root: &Path) {
     }
 }
 
+// Tauri bundles frontendDist from outside Cargo's normal source tree. Watch
+// every renderer asset so a cached native build cannot retain an older menu or
+// Help panel after a checkout changes only HTML, JavaScript, or CSS.
+fn watch_frontend_assets(path: &Path) {
+    println!("cargo:rerun-if-changed={}", path.display());
+    let Ok(entries) = fs::read_dir(path) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            watch_frontend_assets(&entry_path);
+        } else {
+            println!("cargo:rerun-if-changed={}", entry_path.display());
+        }
+    }
+}
+
 // Returns the current jj commit only in a jj checkout. Release archives and
 // regular Git clones intentionally continue through the Git fallback below.
 fn jj_working_copy_commit(root: &Path) -> Option<String> {
@@ -112,6 +131,7 @@ fn main() {
     println!("cargo:rerun-if-env-changed=FPASOTERM_BUILD_COMMIT");
     watch_git_revision(repository_root);
     watch_jj_revision(repository_root);
+    watch_frontend_assets(&repository_root.join("src/renderer"));
     println!(
         "cargo:rustc-env=FPASOTERM_BUILD_COMMIT={}",
         build_commit(repository_root)

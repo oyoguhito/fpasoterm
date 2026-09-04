@@ -1,6 +1,6 @@
 {
   "name": "fpasoterm",
-  "version": "1.5.14",
+  "version": "1.6.0",
   "description": "Cross-platform terminal with Japanese IME support.",
   "license": "MIT",
   "homepage": "https://github.com/oyoguhito/fpasoterm#readme",
@@ -64,13 +64,16 @@
     "install:desktop": "node scripts/install-linux-desktop.js",
     "update:desktop": "node scripts/install-linux-desktop.js",
     "uninstall:desktop": "node scripts/uninstall-desktop.js",
-    "build:artifacts": "node scripts/build-artifacts.js"
+    "build:artifacts": "node scripts/build-artifacts.js",
+    "build:bundles": "node scripts/build-artifacts.js --bundles-only"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/cli": "^2.11.4",
+    "@tauri-apps/plugin-notification": "^2.3.3",
     "@xterm/addon-fit": "0.12.0-beta.288",
     "@xterm/addon-image": "0.10.0-beta.288",
+    "@xterm/addon-web-links": "0.12.0",
     "@xterm/xterm": "6.1.0-beta.288",
     "smol-toml": "^1.4.2",
     "typescript": "^5.9.3"
