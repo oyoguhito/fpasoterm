@@ -78,8 +78,10 @@ jobs:
       - name: Validate desktop file
         run: desktop-file-validate extra/linux/io.github.oyoguhito.fpasoterm.desktop
 
-      - name: Run security checks
-        run: npm run security
+      # The dedicated Security workflow runs npm audit before merge. Keep the
+      # release build independent from the retired npm audit API endpoint.
+      - name: Scan for committed secrets
+        run: npm run scan:secrets
 
       - name: Build source artifacts
         run: npm run build:artifacts -- --source-only

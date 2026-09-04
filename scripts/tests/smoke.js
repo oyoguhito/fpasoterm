@@ -721,6 +721,8 @@ assert.match(releaseWorkflow, /--clobber/);
 assert.match(releaseWorkflow, /Verify macOS bundles/);
 assert.match(releaseWorkflow, /codesign --verify --deep --strict/);
 assert.match(releaseWorkflow, /hdiutil verify/);
+assert.match(releaseWorkflow, /Scan for committed secrets/);
+assert.doesNotMatch(releaseWorkflow, /npm run security/);
 assert.doesNotMatch(releaseWorkflow, /ref: \$\{\{ github\.event_name == 'workflow_dispatch' && inputs\.tag/);
 
 const checkWorkflow = read('.github/workflows/check.yml');
