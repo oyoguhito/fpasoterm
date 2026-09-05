@@ -38,10 +38,33 @@ $fpasotermCompletion = {
     }
     return
   }
+  if ($previous -eq '--plugin-install') {
+    $elements = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text })
+    $portsDirectory = ''
+    for ($index = 0; $index -lt $elements.Count; $index += 1) {
+      if ($elements[$index] -eq '--plugin-ports-dir' -and $index + 1 -lt $elements.Count) {
+        $portsDirectory = $elements[$index + 1].Trim("'\"")
+        break
+      }
+    }
+    if ($portsDirectory -and (Test-Path -LiteralPath (Join-Path $portsDirectory 'ports'))) {
+      $ports = Get-ChildItem -LiteralPath (Join-Path $portsDirectory 'ports') -Filter port.toml -File -Recurse -ErrorAction SilentlyContinue | ForEach-Object {
+        $_.DirectoryName.Substring((Join-Path $portsDirectory 'ports').Length).TrimStart('\', '/') -replace '\\', '/'
+      }
+    } else {
+      $ports = & fpasoterm --plugin-search 2>$null | ForEach-Object {
+        if ($_ -match '^    install: fpasoterm --plugin-install ([^ ]+) --enable$') { $Matches[1] }
+      }
+    }
+    foreach ($port in $ports | Where-Object { $_ -like "$wordToComplete*" }) {
+      [System.Management.Automation.CompletionResult]::new($port, $port, 'ParameterValue', 'Official public plugin port')
+    }
+    return
+  }
 
   foreach ($option in $options | Where-Object { $_[0] -like "$wordToComplete*" }) {
     [System.Management.Automation.CompletionResult]::new($option[0], $option[0], 'ParameterName', $option[1])
   }
 }
 
-Register-ArgumentCompleter -Native -CommandName fpasoterm, fpasoterm.cmd, fpasoterm.exe -ScriptBlock $fpasotermCompletion
+Register-ArgumentCompleter -Native -CommandName fpasoterm, fpasoterm.cmd, fpasoterm.exe, bin/fpasoterm, .\bin\fpasoterm -ScriptBlock $fpasotermCompletion

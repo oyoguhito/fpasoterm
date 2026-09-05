@@ -4,6 +4,21 @@ fpasoterm can print completion scripts for Bash, Zsh, Fish, and PowerShell.
 The scripts complete CLI options and the values for `--completion`; Bash and
 Zsh also query local profile and plugin lists for those options.
 
+For `--plugin-install`, Bash, Zsh, Fish, and PowerShell query the official
+public plugin `INDEX` through `fpasoterm --plugin-search` when Tab is pressed.
+This can require network access and returns no port candidates while offline.
+It does not download, install, or enable a plugin. For a local
+`fpasoterm-plugins` checkout, place `--plugin-ports-dir <path>` before
+`--plugin-install` to complete the local `ports/` entries without network
+access:
+
+```sh
+fpasoterm --plugin-ports-dir ../fpasoterm-plugins --plugin-install <Tab>
+```
+
+Bash and Zsh completion is registered for `fpasoterm`, `bin/fpasoterm`, and
+`./bin/fpasoterm`, so the repository launcher receives the same options.
+
 ```sh
 fpasoterm --completion bash
 fpasoterm --completion zsh

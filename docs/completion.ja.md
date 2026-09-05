@@ -4,6 +4,19 @@ fpasoterm は Bash、Zsh、Fish、PowerShell 向けのcompletion scriptを出力
 CLI optionと`--completion`の値を補完し、Bash/Zshでは`--profile`とplugin指定時に
 ローカルのprofile/plugin一覧も候補にします。
 
+`--plugin-install`のport候補は、Bash、Zsh、Fish、PowerShellのいずれもTab押下時に
+`fpasoterm --plugin-search`を使って公式public plugin `INDEX`から取得します。network接続が
+必要になることがあり、offline時は候補を表示しません。plugin sourceのdownload、install、enableは行いません。
+ローカルの`fpasoterm-plugins` checkoutを使う場合は、networkを使わずに`ports/`配下を候補に
+するため、`--plugin-ports-dir <path>`を`--plugin-install`より先に指定します。
+
+```sh
+fpasoterm --plugin-ports-dir ../fpasoterm-plugins --plugin-install <Tab>
+```
+
+Bash/Zshでは`fpasoterm`だけでなく、repository内で使う`bin/fpasoterm`と
+`./bin/fpasoterm`にもcompletionを登録します。
+
 ```sh
 fpasoterm --completion bash
 fpasoterm --completion zsh

@@ -8,6 +8,37 @@ _fpasoterm_plugin_names() {
   command fpasoterm --plugin-list 2>/dev/null | sed -n 's/^  plugins\/\([^ ]*\).*/\1/p'
 }
 
+_fpasoterm_public_plugin_ports() {
+  command fpasoterm --plugin-search 2>/dev/null \
+    | sed -n 's/^    install: fpasoterm --plugin-install \([^ ]*\) --enable$/\1/p'
+}
+
+_fpasoterm_local_plugin_ports() {
+  local ports_dir='' index manifest port_dir
+  for ((index = 0; index < ${#COMP_WORDS[@]}; index += 1)); do
+    if [[ "${COMP_WORDS[index]}" == '--plugin-ports-dir' ]]; then
+      ports_dir="${COMP_WORDS[index + 1]}"
+      break
+    fi
+  done
+  [[ -n "$ports_dir" && -d "$ports_dir/ports" ]] || return
+
+  while IFS= read -r manifest; do
+    port_dir="${manifest%/port.toml}"
+    printf '%s\n' "${port_dir#"$ports_dir"/ports/}"
+  done < <(find "$ports_dir/ports" -type f -name port.toml -print 2>/dev/null)
+}
+
+_fpasoterm_plugin_install_ports() {
+  local local_ports
+  local_ports="$(_fpasoterm_local_plugin_ports)"
+  if [[ -n "$local_ports" ]]; then
+    printf '%s\n' "$local_ports"
+  else
+    _fpasoterm_public_plugin_ports
+  fi
+}
+
 _fpasoterm() {
   local cur prev options
   cur="${COMP_WORDS[COMP_CWORD]}"
@@ -28,7 +59,7 @@ _fpasoterm() {
       return
       ;;
     --plugin-install)
-      COMPREPLY=( $(compgen -W 'terminal/hello terminal/welcome-banner terminal/status-banner terminal/theme appearance/amber appearance/teal appearance/high-contrast productivity/git-status productivity/session-marker' -- "$cur") )
+      COMPREPLY=( $(compgen -W "$(_fpasoterm_plugin_install_ports)" -- "$cur") )
       return
       ;;
     --plugin-ports-dir|--plugin-install-file)
@@ -52,4 +83,4 @@ _fpasoterm() {
   COMPREPLY=( $(compgen -W "$options" -- "$cur") )
 }
 
-complete -F _fpasoterm fpasoterm
+complete -F _fpasoterm fpasoterm bin/fpasoterm ./bin/fpasoterm

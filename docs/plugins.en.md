@@ -233,21 +233,32 @@ provides:
 - `config`: read the resolved runtime configuration, including `plugins.enabled`.
 - `log(message)`: write a plugin-prefixed diagnostic entry.
 - `version`: read the running fpasoterm version and build identifier.
+- `readClipboard()` / `writeClipboard(text)`: read or write plain UTF-8 text
+  through fpasoterm's native clipboard bridge.
+- `openExternalUrl(url)`: open an explicit HTTP(S) URL in the external browser.
+  Call it only from a user-initiated action; fpasoterm validates the scheme and
+  plugins must clearly explain when text is sent to an external service.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
   used by `fpasoterm --plugin-search`. It does not download, install, enable,
   or execute plugin source.
 - `onReady(callback)`: run code once after the terminal backend has started.
 - `registerCommand(id, title, handler)`: add an action button under the
-  hamburger menu's `Plugins` submenu. The submenu is shown only when at least
-  one loaded plugin registers a command. Enabling a plugin alone does not add a
-  button because fpasoterm has no action handler to invoke.
+  hamburger menu's `Plugins` submenu. The submenu is always available and
+  includes a built-in `Plugin Catalog` action. Enabling a plugin alone does not
+  add a button because fpasoterm has no action handler to invoke.
 
 All current in-tree samples register one command, so enabling current copies of
 `hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four
 buttons. If an older local sample does not register a command, it remains
 enabled and can still run its startup code, but it is intentionally absent from
-the menu. Use `--plugin-info <file>` to inspect its source/version and restart
+the menu. `Plugin Catalog` only displays official port metadata and install
+commands; it does not download, install, enable, or execute plugin source. Use
+`--plugin-info <file>` to inspect a local plugin's source/version and restart
 after replacing a local plugin file.
+
+`Plugin Catalog` fetches the official `INDEX` when opened. Its search field
+filters the already fetched entries by port ID, name, author, and description;
+it does not make an additional request or install a plugin.
 
 Keep plugins small and defensive. A plugin load error is reported in diagnostics
 and does not stop later enabled plugins from loading, but an invalid plugin can

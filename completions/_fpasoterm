@@ -12,6 +12,37 @@ _fpasoterm_plugin_names() {
   _describe -t plugins plugin plugins
 }
 
+_fpasoterm_public_plugin_ports() {
+  local -a ports
+  ports=("${(@f)$(command fpasoterm --plugin-search 2>/dev/null | sed -n 's/^    install: fpasoterm --plugin-install \([^ ]*\) --enable$/\1/p')}")
+  _describe -t ports port ports
+}
+
+_fpasoterm_local_plugin_ports() {
+  local ports_dir='' manifest port_dir index
+  for (( index = 1; index <= ${#words}; index += 1 )); do
+    if [[ "${words[index]}" == '--plugin-ports-dir' ]]; then
+      ports_dir="${words[index + 1]}"
+      break
+    fi
+  done
+  [[ -n "$ports_dir" && -d "$ports_dir/ports" ]] || return
+
+  while IFS= read -r manifest; do
+    port_dir="${manifest%/port.toml}"
+    print -r -- "${port_dir#$ports_dir/ports/}"
+  done < <(find "$ports_dir/ports" -type f -name port.toml -print 2>/dev/null)
+}
+
+_fpasoterm_plugin_install_ports() {
+  local -a ports
+  ports=("${(@f)$(_fpasoterm_local_plugin_ports)}")
+  if (( ${#ports} == 0 )); then
+    ports=("${(@f)$(command fpasoterm --plugin-search 2>/dev/null | sed -n 's/^    install: fpasoterm --plugin-install \([^ ]*\) --enable$/\1/p')}")
+  fi
+  _describe -t ports port ports
+}
+
 _fpasoterm() {
   _arguments -s -S \
     '(-h --help)'{-h,--help}'[show help]' \
@@ -44,7 +75,7 @@ _fpasoterm() {
     '--plugin-info=[show plugin information]:plugin:_fpasoterm_plugin_names' \
     '--plugin-uninstall=[remove local plugin files]:plugin:_fpasoterm_plugin_names' \
     '--plugin-search=[search official public plugin ports]:query:' \
-    '--plugin-install=[download an official public port]:port:(terminal/hello terminal/welcome-banner terminal/status-banner terminal/theme appearance/amber appearance/teal appearance/high-contrast productivity/git-status productivity/session-marker)' \
+    '--plugin-install=[install a public port or one from --plugin-ports-dir]:port:_fpasoterm_plugin_install_ports' \
     '--plugin-ports-dir=[install --plugin-install from this local fpasoterm-plugins checkout]:directory:_files -/' \
     '--plugin-install-file=[copy a trusted local JavaScript or TypeScript plugin]:plugin:_files -g "*.(js|ts)"' \
     '--force[replace an existing file during plugin install]' \
@@ -78,4 +109,5 @@ _fpasoterm() {
     '--disable-dmabuf[disable the Linux DMA-BUF renderer]'
 }
 
+compdef _fpasoterm fpasoterm bin/fpasoterm ./bin/fpasoterm
 _fpasoterm "$@"
