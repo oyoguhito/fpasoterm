@@ -25,8 +25,6 @@ use std::{ptr, slice};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent,
 };
-#[cfg(not(target_os = "windows"))]
-use tauri::{WebviewUrl, WebviewWindowBuilder};
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, INVALID_HANDLE_VALUE};
 #[cfg(target_os = "windows")]
@@ -788,10 +786,7 @@ fn main() {
             sshfs_unmount_all,
             sshfs_forget,
             sshfs_status,
-            window_confirm_close_all,
             window_close_all_confirmed,
-            window_focus_main,
-            window_cancel_close_all,
             window_save_bounds,
             window_get_bounds,
             window_set_bounds,
@@ -2065,20 +2060,10 @@ fn sshfs_mount(
     write_sshfs_mount_records(&mounts)?;
     Ok(SshfsMountResult {
         mount_point: mount_point.display().to_string(),
-        message: sshfs_mount_ready_message(),
+        message:
+            "SSHFS mount is ready; use this path from the terminal or another local application"
+                .to_string(),
     })
-}
-
-// macFUSE retains the sshfs process after mounting, but the mount table has
-// already confirmed the requested filesystem is usable before this is called.
-#[cfg(target_os = "macos")]
-fn sshfs_mount_ready_message() -> String {
-    "SSHFS mount is ready; use this path from the terminal or another local application".to_string()
-}
-
-#[cfg(not(target_os = "macos"))]
-fn sshfs_mount_ready_message() -> String {
-    "SSHFS mount is ready; use this path from the terminal or another local application".to_string()
 }
 
 // SSHFS-Win officially exposes SSHFS mounts as mapped network drives. Calling
@@ -2739,109 +2724,16 @@ fn detach_nested_macos_launch() -> bool {
     false
 }
 
-// Opens a separate native confirmation window so the prompt is visible even
-// when the terminal content is busy or visually obscured.
-#[tauri::command]
-fn window_confirm_close_all(app: AppHandle) -> Result<String, String> {
-    #[cfg(target_os = "windows")]
-    {
-        // A native dialog remains operable even if a secondary WebView fails to
-        // load, and Windows supplies keyboard navigation plus a working close button.
-        if let Some(window) = app.get_webview_window("close-all-confirm") {
-            let _ = window.close();
-        }
-        if windows_confirm_close_all() {
-            broadcast_close_all_request()?;
-            return Ok("closed all fpasoterm windows".to_string());
-        }
-        let _ = window_focus_main(app);
-        return Ok("close all canceled".to_string());
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        if let Some(window) = app.get_webview_window("close-all-confirm") {
-            let _ = window.show();
-            let _ = window.unminimize();
-            let _ = window.set_focus();
-            return Ok("close confirmation already open".to_string());
-        }
-        let window = WebviewWindowBuilder::new(
-            &app,
-            "close-all-confirm",
-            WebviewUrl::App("confirm.html".into()),
-        )
-        .title("Confirm close all fpasoterm windows")
-        .inner_size(600.0, 280.0)
-        .min_inner_size(520.0, 220.0)
-        .resizable(true)
-        .decorations(true)
-        .transparent(false)
-        .visible(true)
-        .always_on_top(true)
-        .focused(true)
-        .center()
-        .build()
-        .map_err(|error| error.to_string())?;
-        // Make the new native window receive keyboard input immediately.
-        let _ = window.set_focus();
-        Ok("close confirmation opened".to_string())
-    }
-}
-
-#[cfg(target_os = "windows")]
-// Uses the Windows standard modal dialog instead of a failure-prone secondary WebView.
-fn windows_confirm_close_all() -> bool {
-    let message: Vec<u16> =
-        "Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window."
-            .encode_utf16()
-            .chain(std::iter::once(0))
-            .collect();
-    let title: Vec<u16> = "Confirm close all fpasoterm windows"
-        .encode_utf16()
-        .chain(std::iter::once(0))
-        .collect();
-    unsafe {
-        MessageBoxW(
-            ptr::null_mut(),
-            message.as_ptr(),
-            title.as_ptr(),
-            MB_OKCANCEL | MB_ICONWARNING | MB_SETFOREGROUND | MB_TASKMODAL | MB_TOPMOST,
-        ) == IDOK
-    }
-}
-
-// Restores keyboard focus to the terminal after a confirmation window closes.
-#[tauri::command]
-fn window_focus_main(app: AppHandle) -> Result<(), String> {
-    let window = app
-        .get_webview_window("main")
-        .ok_or_else(|| "main window is not available".to_string())?;
-    window.set_focus().map_err(|error| error.to_string())
-}
-
-// Closes the confirmation window and restores focus to the terminal atomically.
-#[tauri::command]
-fn window_cancel_close_all(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window("close-all-confirm") {
-        let _ = window.close();
-    }
-    window_focus_main(app)
-}
-
-// Broadcasts the close request from the independent confirmation window.
+// Broadcasts the close request after the in-window confirmation overlay.
 #[tauri::command]
 fn window_close_all_confirmed(
-    app: AppHandle,
+    _app: AppHandle,
     unmount_sshfs: Option<bool>,
 ) -> Result<String, String> {
     if unmount_sshfs.unwrap_or(false) {
         sshfs_unmount_all()?;
     }
     broadcast_close_all_request()?;
-    if let Some(window) = app.get_webview_window("close-all-confirm") {
-        let _ = window.close();
-    }
     Ok("closed all fpasoterm windows".to_string())
 }
 
@@ -3065,6 +2957,7 @@ fn runtime_config() -> RuntimeConfig {
     };
     migrate_legacy_terminal_font_family(&mut config);
     migrate_legacy_terminal_line_height(&mut config);
+    migrate_legacy_log_keybindings(&mut config);
     apply_direct_cli_overrides(&mut config);
     config
 }
@@ -3160,6 +3053,41 @@ fn migrate_legacy_terminal_line_height(runtime: &mut RuntimeConfig) {
         || (env::consts::OS == "macos" && line_height == Some(0.9));
     if former_default {
         runtime.config.terminal["lineHeight"] = serde_json::json!(default_terminal_line_height());
+    }
+}
+
+// Reserves Ctrl+Shift+p for a future command palette and normalizes former
+// single-letter defaults. Full user-defined shortcuts are left unchanged.
+fn migrate_legacy_log_keybindings(runtime: &mut RuntimeConfig) {
+    let Some(keybindings) = runtime.config.keybindings.as_object_mut() else {
+        return;
+    };
+    for (name, legacy, replacement) in [
+        ("logShow", "P", "l"),
+        ("logToggle", "S", "s"),
+        ("copy", "C", "c"),
+        ("paste", "V", "v"),
+        ("menu", "M", "m"),
+        ("help", "H", "h"),
+        ("newWindow", "N", "n"),
+        ("broadcast", "B", "b"),
+        ("kill", "K", "k"),
+        ("tile", "T", "t"),
+        ("closeAll", "X", "x"),
+    ] {
+        if keybindings.get(name).and_then(serde_json::Value::as_str) == Some(legacy) {
+            keybindings.insert(
+                name.to_string(),
+                serde_json::Value::String(replacement.to_string()),
+            );
+        }
+    }
+    if keybindings
+        .get("logMenu")
+        .and_then(serde_json::Value::as_str)
+        == Some("L")
+    {
+        keybindings.remove("logMenu");
     }
 }
 
@@ -3276,6 +3204,7 @@ fn merge_runtime_config_from_path(
     config.config = serde_json::from_value(config_value).map_err(|error| error.to_string())?;
     migrate_legacy_terminal_font_family(&mut config);
     migrate_legacy_terminal_line_height(&mut config);
+    migrate_legacy_log_keybindings(&mut config);
     config.config_path = absolute_path.to_string_lossy().to_string();
     config.config_dir = absolute_path
         .parent()
@@ -3466,19 +3395,18 @@ fn default_runtime_config() -> RuntimeConfig {
             }),
             keybindings: serde_json::json!({
                 "prefix": "Mod+Shift",
-                "logMenu": "L",
-                "logToggle": "S",
-                "logShow": "P",
-                "copy": "C",
-                "paste": "V",
-                "menu": "M",
-                "help": "H",
-                "newWindow": "N",
+                "logToggle": "s",
+                "logShow": "l",
+                "copy": "c",
+                "paste": "v",
+                "menu": "m",
+                "help": "h",
+                "newWindow": "n",
                 "openCwd": "o",
-                "broadcast": "B",
-                "kill": "K",
-                "tile": "T",
-                "closeAll": "X"
+                "broadcast": "b",
+                "kill": "k",
+                "tile": "t",
+                "closeAll": "x"
             }),
             plugins: serde_json::json!({ "enabled": [] }),
             sync: serde_json::json!({
@@ -6410,8 +6338,8 @@ fn terminal_broadcast(
     request: TerminalBroadcastRequest,
 ) -> Result<TerminalBroadcastStatus, String> {
     let text = request.text;
-    if text.is_empty() {
-        return Err("broadcast text is empty".to_string());
+    if text.is_empty() && request.key_event.is_none() {
+        return Err("broadcast text and key event are empty".to_string());
     }
     let max_bytes = sync_max_bytes();
     if text.len() > max_bytes {
@@ -9206,11 +9134,48 @@ installPath = "appearance/other.ts"
         );
         assert!(config["terminal"].get("images").is_none());
         assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
-        assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("N"));
+        assert_eq!(config["keybindings"]["logShow"].as_str(), Some("l"));
+        assert_eq!(config["keybindings"]["logToggle"].as_str(), Some("s"));
+        assert!(config["keybindings"].get("logMenu").is_none());
+        assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("n"));
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commands"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commandSecret"].as_str(), Some(""));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
+    }
+
+    #[test]
+    fn legacy_keybindings_use_lowercase_defaults() {
+        let mut runtime = default_runtime_config();
+        runtime.config.keybindings = serde_json::json!({
+            "logMenu": "L",
+            "logShow": "P",
+            "logToggle": "S",
+            "copy": "C",
+            "paste": "V",
+            "menu": "M",
+            "help": "H",
+            "newWindow": "N",
+            "broadcast": "B",
+            "kill": "K",
+            "tile": "T",
+            "closeAll": "X"
+        });
+
+        migrate_legacy_log_keybindings(&mut runtime);
+
+        assert_eq!(runtime.config.keybindings["logShow"].as_str(), Some("l"));
+        assert_eq!(runtime.config.keybindings["logToggle"].as_str(), Some("s"));
+        assert_eq!(runtime.config.keybindings["copy"].as_str(), Some("c"));
+        assert_eq!(runtime.config.keybindings["paste"].as_str(), Some("v"));
+        assert_eq!(runtime.config.keybindings["menu"].as_str(), Some("m"));
+        assert_eq!(runtime.config.keybindings["help"].as_str(), Some("h"));
+        assert_eq!(runtime.config.keybindings["newWindow"].as_str(), Some("n"));
+        assert_eq!(runtime.config.keybindings["broadcast"].as_str(), Some("b"));
+        assert_eq!(runtime.config.keybindings["kill"].as_str(), Some("k"));
+        assert_eq!(runtime.config.keybindings["tile"].as_str(), Some("t"));
+        assert_eq!(runtime.config.keybindings["closeAll"].as_str(), Some("x"));
+        assert!(runtime.config.keybindings.get("logMenu").is_none());
     }
 
     #[test]

@@ -298,11 +298,11 @@ IME composition は表示専用です。WebView/xterm.js の入力経路で受�
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
-Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+B` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。`fpasoterm --broadcast "command"` でも同じ操作を実行でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
+Kitty Graphics Protocol、SIXEL、iTerm inline image は、image stream により Tauri/WebKitGTK renderer が停止することがあるため、現在は未対応です。`Ctrl+Shift+b` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。`fpasoterm --broadcast "command"` でも同じ操作を実行でき、trusted な同期フォルダを使う場合は別 machine で既に起動している全 instance にも短寿命 command を送れます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
 `fpasoterm --sync-status` で folder health と channel を確認でき、`fpasoterm --sync-clean` は期限切れの sync command file だけを削除します。
-terminal output log は hamburger menu の `Log Start (^S)` / `Log Stop (^S)` または `Ctrl+Shift+S` で取得し、`Log Show (^P)` または `Ctrl+Shift+P` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
+terminal output log は hamburger menu の `Log Start (^s)` / `Log Stop (^s)` または `Ctrl+Shift+s` で取得し、`Log Show (^l)` または `Ctrl+Shift+l` で active log または `Log Stop` で閉じた最後の log を表示できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
 log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
 npm registry から global install する場合:

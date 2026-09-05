@@ -167,7 +167,7 @@ versionは`--plugin-info <file>`で確認し、local plugin fileを差し替え�
 
 plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
 
-登録した command は既存 menu の Tab / 矢印キー操作で選択できます。`Ctrl+Shift+P` は `Log Show` に割り当て済みのため維持します。将来 command palette を追加する場合も、同じ command registry を plugin source の変更なしに利用できます。
+登録した command は既存 menu の Tab / 矢印キー操作で選択できます。`Ctrl+Shift+p` は将来のcommand palette用に予約します。command paletteを追加する場合も、同じ command registry を plugin source の変更なしに利用できます。
 
 ## Sample と Ports
 

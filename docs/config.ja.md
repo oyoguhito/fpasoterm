@@ -290,9 +290,8 @@ brightWhite = "#ffffff"
 prefix = "Mod+Shift"
 # 一文字の value は prefix を継承します。full shortcut はその操作だけ上書きします。
 # physical key の例: newWindow = "Ctrl+Alt+KeyN"
-logMenu = "L"
-logToggle = "S"
-logShow = "P"
+logToggle = "s"
+logShow = "l"
 copy = "C"
 paste = "V"
 menu = "M"
@@ -311,7 +310,7 @@ closeAll = "X"
 Windows/Linux の `Ctrl`、macOS の `Cmd` を表します。modifier の大文字小文字は区別しません。
 `Escape` など action key を `prefix` の一部にはできません。
 
-各 action には、`prefix` を継承する action key 一つ、または `Ctrl+Shift+KeyN` のような full
+各 action には、`prefix` を継承する action key 一つ、または `Ctrl+Shift+keyN` のような full
 shortcut 一つを指定できます。以下の名前を使用できます。
 
 | 種類 | 名前 | 照合 |
@@ -338,7 +337,7 @@ shortcut は fpasoterm に届かないことがあります。同じ full shortc
 `Ctrl+X` を押してから `N` を押す形式は、一つのshortcutではなく順序付きkey chordです。現行の
 config formatではkey chordには対応していません。
 
-Windows では `Ctrl+N` や `Ctrl+Shift+N` を fpasoterm の確認に使わないでください。WebView または
+Windows では `Ctrl+N` や `Ctrl+Shift+n` を fpasoterm の確認に使わないでください。WebView または
 IME が renderer より先に捕捉する場合があります。代わりに、OS予約と競合しにくい明示的なbindingを
 指定します。
 
@@ -415,13 +414,13 @@ rescaleOverlappingGlyphs = false
 fpasoterm は IME composition event を仮入力表示のためだけに監視します。xterm.js と WebView のnativeな入力配送をそのまま使い、fpasoterm が IME text を抑止・再送・置換・直接確定することはありません。ChromeOS/Linuxでは、新しいcompositionの開始時にまだ新しい仮入力textが入っていないため、hidden helper textareaに過去の確定textが残っている場合だけclearします。後続変換が過去の確定textを継承することを防ぎ、terminal textとPTY payloadは変更しません。Windows/LinuxではWebViewがxtermのhelper textareaを描画しない場合にだけ、表示専用の`IME` fallbackを使います。macOSはWebKit nativeのmarked text描画を使い、このfallbackを追加しないため、確定後にIME overlayが残りません。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: diagnostics と明示的に送信した broadcast command を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。`commands` は短寿命の共有 command を許可し、`commandTtlSeconds` は実行可能な時間を制限します。詳細は [Sync Folder](sync.ja.md) を参照してください。
-- `logging`: terminal output logging 設定。hamburger menu に `Log Start (^S)` / `Log Stop (^S)` と `Log Show (^P)` を表示します。`Ctrl+Shift+L` はlog操作にfocusした状態でmenuを開き、`Ctrl+Shift+S` は記録を直接切り替え、`Ctrl+Shift+P` はcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。制御シーケンスを除去した readable terminal output を local file に記録します。自動生成されるlog名には titlebar の title と timestamp が入り、例は `terminal-work-<timestamp>.log` です。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
+- `logging`: terminal output logging 設定。hamburger menu に `Log Start (^s)` / `Log Stop (^s)` と `Log Show (^l)` を表示します。`Ctrl+Shift+s` は記録を直接切り替え、`Ctrl+Shift+l` はcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。`Ctrl+Shift+p` は将来のcommand palette用に未割り当てです。制御シーケンスを除去した readable terminal output を local file に記録します。自動生成されるlog名には titlebar の title と timestamp が入り、例は `terminal-work-<timestamp>.log` です。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。`directory` が空の場合は `~/.config/fpasoterm/User/logs` が使われ、必要に応じて同期フォルダを指定できます。path には `~`、`%USERPROFILE%`、`$HOME` などを使えます。OS 間で共有する設定では `~` が最も扱いやすい指定です。
 
 `window.rememberBounds` が有効な場合、最後の window size は `~/.config/fpasoterm/User/window-state.json` に保存され、次回起動時に復元されます。
 
 window 表示と size は、デフォルト設定、`config.toml` に明示した値、size については保存済み `window-state.json`、最後に `--title`、`--titlebar-color`、`--size` などの一時 CLI 指定、の順に解決されます。size 設定変更を保存済み状態より優先したい場合は、`fpasoterm --reset-window-state` を実行してください。
 
-Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executable directoryを追加します。macOSでは、以前のreleaseでも使用していた標準的な`~/.local/bin/fpasoterm`を現在起動中のapp bundle向けに毎回生成し、`~/.local/bin`を`PATH`先頭に置いて全引数を変更せず転送します。互換性のため`~/.config/fpasoterm/bin/fpasoterm`も更新します。これにより従来のcommand pathを維持したまま、fpasoterm内で`fpasoterm --help`、`--list`、`--close`など直接binaryのcommandを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。終了まで待つ場合は`--foreground`を使います。Node launcher専用option、`--hoge`や`-?`などの未知option、値不足のoptionを配布binaryへ指定した場合は、無関係なGUIを開かず一行のerrorだけを表示します。全option一覧が必要な場合だけ`--help`を実行してください。`--version` と app内の `Help (^H)` panelにはpackage versionとbuild commitを表示するため、同じversionのcontributor buildやPR buildも識別できます。
+Windowsでは、起動したterminal processの`Path`先頭にfpasoterm executable directoryを追加します。macOSでは、以前のreleaseでも使用していた標準的な`~/.local/bin/fpasoterm`を現在起動中のapp bundle向けに毎回生成し、`~/.local/bin`を`PATH`先頭に置いて全引数を変更せず転送します。互換性のため`~/.config/fpasoterm/bin/fpasoterm`も更新します。これにより従来のcommand pathを維持したまま、fpasoterm内で`fpasoterm --help`、`--list`、`--close`など直接binaryのcommandを実行できます。macOSで新しいGUIを起動する場合は既定でprocessを切り離して現在のpromptを解放します。終了まで待つ場合は`--foreground`を使います。Node launcher専用option、`--hoge`や`-?`などの未知option、値不足のoptionを配布binaryへ指定した場合は、無関係なGUIを開かず一行のerrorだけを表示します。全option一覧が必要な場合だけ`--help`を実行してください。`--version` と app内の `Help (^h)` panelにはpackage versionとbuild commitを表示するため、同じversionのcontributor buildやPR buildも識別できます。
 
 macOSは最後のwindowを閉じてもapplicationをactiveのまま維持するのが通常動作です。CLIの`--close` / `-q`とapp内のClose Allでは一致する各fpasoterm processを明示終了するため、`fpasoterm -q all`後はmacOSのメニューバーにもfpasotermを残しません。
 
@@ -435,18 +434,22 @@ graphicsの検証目的でも、fpasoterm内で`kitten icat`、`chafa --format k
 
 ## Broadcast Input
 
-hamburger menu の `Broadcast (^B)`、または `Ctrl+Shift+B` を押します。title と PID ごとに一つ以上の local window を選択し、command を入力して `Shift+Enter` または `Send` を実行します。複数行 command の改行は通常の `Enter` で入力します。fpasotermは末尾の改行を除去して改行コードを正規化し、選択したlocal fpasoterm windowだけへtextを配信します。command送信時は常に本文の後にtarget terminalの実際のEnter key eventを送り、target TUIが有効なkeyboard protocolに従ってencodeできます。通常のshellでは従来と同じCR byteになります。pickerが挿入する`Ctrl+C`などcontrol byteだけの入力は、追加のEnterを送らずに配信します。
+hamburger menu の `Broadcast (^b)`、または `Ctrl+Shift+b` を押します。title と PID ごとに一つ以上の local window を選択し、command を入力して `Shift+Enter` または `Send` を実行します。複数行 command の改行は通常の `Enter` で入力します。fpasotermは末尾の改行を除去して改行コードを正規化し、選択したlocal fpasoterm windowだけへtextを配信します。command送信時は常に本文の後にtarget terminalの実際のEnter key eventを送り、target TUIが有効なkeyboard protocolに従ってencodeできます。通常のshellでは従来と同じCR byteになります。pickerが挿入する`Ctrl+C`などcontrol byteだけの入力は、追加のEnterを送らずに配信します。
 
 全 local window を選択し、sync が有効な場合、dialog に `Include synced channel` が表示されます。これを選ぶと、同じ sync path と channel を使う、すでに起動している全ての fpasoterm instance にも同じ短寿命 command を送ります。remote window の identity は共有していないため、local の一部だけを選択している場合は sync delivery を無効にします。command file は `sync.commandTtlSeconds`（既定 60 秒）で期限切れとなり、instance は自分の起動前に作成された command を実行しません。
 
 この機能は remote server、OAuth token、後から起動した instance での command 自動実行を使用しません。この機能を使う場合、shared sync folder は command channel になります。参加する全 machine で信頼できる folder と channel だけを使用してください。
 
 Broadcast dialogを開いている間は、`Tab` と `Shift+Tab` がterminalへ移動せず、dialog内のcontrolを循環します。focusしたcontrolはscrollして表示され、黄色の枠と`Keyboard focus:`行で現在位置を確認できます。terminalが意図せずfocusを取り戻した場合も`Shift+Enter`は送信として処理します。送信時は常に本文の後にtarget terminalの実際のEnter key eventを送り、dialog shortcutとは別にenhanced keyboard protocolを維持します。IME変換中のkeyはdialog操作として扱わずbrowserへ渡します。dialogの **Control byte** pickerでは、textareaのcursor位置へ表示可能な
-表記を挿入します。明示的な`Enter / CR`は`\x0D`、`Tab`は`\x09`、`Ctrl+C`は`\x03`、`Ctrl+D`は`\x04`、`Ctrl+X`は`\x18`、`Ctrl+Z`は
+表記を挿入します。明示的な`Enter / CR`は`\x0D`、`Tab`は`\x09`、GNU Screenで一般的なprefixの`Ctrl+A`は`\x01`、tmux/byobu/herdrで一般的なprefixの`Ctrl+B`は`\x02`、`Ctrl+C`は`\x03`、`Ctrl+D`は`\x04`、`Ctrl+X`は`\x18`、`Ctrl+Z`は
 `\x1A`です。fpasotermはpickerが挿入したこれらの表記だけを、送信時にterminal byteへ変換します。末尾に明示した`\x0D`へは追加のsemantic Enterを送信しません。単独の`Esc`は
 **Alt prefix / Esc**と同じ`\x1B`になるため、選択肢から除外しています。`Ctrl`と`Alt`はbyteではなくmodifierです。
 慣例上の`Alt+x`を送る場合は **Alt prefix / Esc** を挿入してから`x`を入力します。Escapeはclose、Tabはfocus移動に
 予約されているため、pickerを使うことでkey eventへの依存を避けます。
+
+pickerには **Arrow Up**、**Arrow Down**、**Arrow Left**、**Arrow Right** もあります。これらは末尾に`\key[Arrow...]`として表示され、送信時に各target windowのactiveなxterm keyboard modeでencodeされます。multiplexerのprefix sequenceでは、先に`Ctrl+A`または`Ctrl+B`を挿入し、最後にarrow keyを挿入してください。
+
+例: `clear\x0D\x01jclear` は `clear` を送信して明示的に実行した後、`Ctrl+A`、`j`、`clear` を送ります。意図したlocal windowだけを選択してください。選択されたすべてのwindowが同じsequenceを受け取ります。
 
 Broadcastで危険性の高いpatternに一致するcommandを送る前には、追加確認を表示します。現在の対象は`rm`、
 `find -delete`、`git reset --hard`、force付き`git clean`、filesystem format、`dd of=`、`truncate`、

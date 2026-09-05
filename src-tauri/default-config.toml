@@ -65,23 +65,22 @@ repeatedTextWindowMs = 140
 
 # Mod means Ctrl on Windows/Linux and Cmd on macOS. Set prefix = "Ctrl+Alt"
 # when Ctrl+Shift is reserved by a Windows application or keyboard layout.
-# An individual value may be a key such as "N" or a full shortcut such as
+# An individual value may be a key such as "n" or a full shortcut such as
 # "Ctrl+Alt+KeyN". KeyN-style values bind by physical keyboard position.
 [keybindings]
 prefix = "Mod+Shift"
-logMenu = "L"
-logToggle = "S"
-logShow = "P"
-copy = "C"
-paste = "V"
-menu = "M"
-help = "H"
-newWindow = "N"
+logToggle = "s"
+logShow = "l"
+copy = "c"
+paste = "v"
+menu = "m"
+help = "h"
+newWindow = "n"
 openCwd = "o"
-broadcast = "B"
-kill = "K"
-tile = "T"
-closeAll = "X"
+broadcast = "b"
+kill = "k"
+tile = "t"
+closeAll = "x"
 
 [plugins]
 enabled = []

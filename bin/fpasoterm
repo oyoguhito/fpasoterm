@@ -16,6 +16,7 @@ const {
   discoverPluginFiles,
   loadConfig,
   mergeConfig,
+  migrateLegacyLogKeybindings,
   missingConfigKeys,
   pluginMetadata,
   readPluginMetadata,
@@ -1745,9 +1746,11 @@ function updateConfig(options) {
   applyEnv(options.env);
   const targetPath = configPath();
   const userConfig = readUserConfig(targetPath);
+  const migratedUserConfig = migrateLegacyLogKeybindings(userConfig);
   const defaults = writableConfigDefaults();
-  const missing = missingConfigKeys(defaults, userConfig);
-  if (missing.length === 0) {
+  const missing = missingConfigKeys(defaults, migratedUserConfig);
+  const migrated = JSON.stringify(userConfig) !== JSON.stringify(migratedUserConfig);
+  if (missing.length === 0 && !migrated) {
     console.log(`config already includes all defaults: ${targetPath}`);
     return;
   }
@@ -1757,9 +1760,12 @@ function updateConfig(options) {
     backupPath = `${targetPath}.backup-${Date.now()}`;
     fs.copyFileSync(targetPath, backupPath);
   }
-  writeUserConfig(mergeConfig(defaults, userConfig), targetPath);
+  writeUserConfig(mergeConfig(defaults, migratedUserConfig), targetPath);
   console.log(`updated ${targetPath}`);
   console.log(`added ${missing.length} default setting(s)`);
+  if (migrated) {
+    console.log('migrated Log Show from Ctrl+Shift+P to Ctrl+Shift+l');
+  }
   if (backupPath) {
     console.log(`backed up previous config ${backupPath}`);
   }
