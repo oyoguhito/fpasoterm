@@ -368,6 +368,25 @@ body {
   color: #f5d76e;
 }
 
+#terminal-broadcast-examples {
+  margin-top: 8px;
+  color: #c7d1dc;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#terminal-broadcast-examples summary {
+  cursor: pointer;
+  color: #f5d76e;
+}
+
+#terminal-broadcast-examples p {
+  margin: 6px 0 0;
+}
+
+#terminal-broadcast-examples code {
+  color: #e8edf2;
+}
+
 #terminal-broadcast-sync-label {
   display: block;
   margin: 10px 0;
@@ -683,6 +702,19 @@ body {
   display: none;
 }
 
+/* Keep Close All above the terminal in the current window. This avoids
+ * relying on compositor-controlled focus of a separate child window. */
+#close-all-confirm {
+  position: fixed;
+  top: var(--titlebar-height);
+  right: 0;
+  bottom: 0;
+  left: 0;
+  z-index: 10060;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
 #sshfs-manager-dialog[hidden] {
   display: none;
 }
@@ -766,8 +798,8 @@ body {
   text-decoration: none;
 }
 
-.sshfs-manager-card :is(input, select, button):focus,
-.sshfs-manager-card :is(input, select, button):focus-visible {
+.sshfs-manager-card :is(input, select, button, a[href]):focus,
+.sshfs-manager-card :is(input, select, button, a[href]):focus-visible {
   outline: 3px solid #f5d76e;
   outline-offset: 2px;
   border-color: #f5d76e;
@@ -880,6 +912,9 @@ body {
 
 #terminal-log-confirm-ok,
 #terminal-log-confirm-cancel,
+#close-all-confirm-ok,
+#close-all-confirm-cancel,
+#close-all-confirm-unmount,
 #terminal-broadcast-confirm-ok,
 #terminal-broadcast-confirm-cancel,
 #terminal-url-copy,
@@ -892,6 +927,12 @@ body {
   background: #222932;
   color: #e8edf2;
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+#close-all-confirm button:focus,
+#close-all-confirm button:focus-visible {
+  outline: 3px solid #f5d76e;
+  outline-offset: 2px;
 }
 
 #diagnostics-path {

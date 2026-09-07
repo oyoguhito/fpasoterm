@@ -8,7 +8,7 @@ fpasoterm is intended to be used with terminal multiplexers such as screen / tmu
 
 This is a deliberate boundary: fpasoterm avoids reimplementing capabilities that belong to the user's shell, multiplexer, or TUI editor. This includes pane and session management, shell commands, job control, multiplexer configuration, and editor features supplied by Vim, Emacs, Fresh, Helix, and similar tools. Use those tools for their native workflows; fpasoterm provides the terminal surface, OS integration, and local customization hooks. New convenience behavior should normally be delivered as a plugin instead of expanding the core application. Compatibility with those multiplexers and TUI editors is a maintenance priority.
 
-Kitty Graphics Protocol, SIXEL, and iTerm inline images are currently unsupported because image streams can freeze the Tauri/WebKitGTK renderer. `Ctrl+Shift+B` opens Broadcast Input, which selects local fpasoterm windows before sending one command. The same operation is available as `fpasoterm --broadcast "command"`; a trusted sync folder can optionally deliver the short-lived command to every already-running instance on another machine. See [Configuration](docs/config.en.md) and [Sync Folder](docs/sync.en.md).
+Kitty Graphics Protocol, SIXEL, and iTerm inline images are currently unsupported because image streams can freeze the Tauri/WebKitGTK renderer. `Ctrl+Shift+b` opens Broadcast Input, which selects local fpasoterm windows before sending one command. The same operation is available as `fpasoterm --broadcast "command"`; a trusted sync folder can optionally deliver the short-lived command to every already-running instance on another machine. See [Configuration](docs/config.en.md) and [Sync Folder](docs/sync.en.md).
 
 Japanese documentation: [README.ja.md](README.ja.md). Installation instructions are available in [English](INSTALL.md) and [Japanese](INSTALL.ja.md).
 
@@ -489,8 +489,8 @@ Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
 Use `fpasoterm --sync-status` to inspect folder health and channels, or
 `fpasoterm --sync-clean` to remove only expired sync command files.
-Terminal output logs can be written from the hamburger menu with `Log Start (^S)` /
-`Log Stop (^S)` or `Ctrl+Shift+S`, and inspected with `Log Show (^P)` or `Ctrl+Shift+P`.
+Terminal output logs can be written from the hamburger menu with `Log Start (^s)` /
+`Log Stop (^s)` or `Ctrl+Shift+s`, and inspected with `Log Show (^l)` or `Ctrl+Shift+l`.
 `Log Show` displays the active log or the last log closed by `Log Stop`. Point
 `logging.directory` at the same synced folder when you want those logs shared.
 The log panel includes a search field and `Search` button for selecting and
@@ -529,13 +529,13 @@ start fpasoterm from the icon even when it does not inherit the user's shell
 `PATH`.
 
 The GTK application id is disabled so multiple fpasoterm processes can run.
-When multiple fpasoterm windows are open, use `Tile (^T)` in the titlebar window
-menu, or press `Ctrl+Shift+T`,
+When multiple fpasoterm windows are open, use `Tile (^t)` in the titlebar window
+menu, or press `Ctrl+Shift+t`,
 to arrange them into a grid on the current monitor. Windows and X11 support
 native placement. Wayland compositors may reject application-controlled
 positions; the terminal remains usable and the diagnostic panel reports the
 placement error.
-Use `Close All (^X)` in the same menu, or press `Ctrl+Shift+X`, to close every
+Use `Close All (^x)` in the same menu, or press `Ctrl+Shift+x`, to close every
 running fpasoterm window.
 
 When packaging a macOS `.app` bundle, use the generated icon at:

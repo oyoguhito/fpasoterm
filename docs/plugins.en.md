@@ -254,7 +254,7 @@ and does not stop later enabled plugins from loading, but an invalid plugin can
 still affect the renderer while it runs.
 
 Registered commands use the existing menu's Tab and arrow-key navigation.
-`Ctrl+Shift+P` remains assigned to `Log Show`; a command palette can reuse the
+`Ctrl+Shift+p` is reserved for a future command palette, which can reuse the
 same command registry in a future release without changing plugin source.
 
 ## Samples And Ports

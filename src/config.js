@@ -89,19 +89,18 @@ const defaultConfig = Object.freeze({
   },
   keybindings: {
     prefix: 'Mod+Shift',
-    logMenu: 'L',
-    logToggle: 'S',
-    logShow: 'P',
-    copy: 'C',
-    paste: 'V',
-    menu: 'M',
-    help: 'H',
-    newWindow: 'N',
+    logToggle: 's',
+    logShow: 'l',
+    copy: 'c',
+    paste: 'v',
+    menu: 'm',
+    help: 'h',
+    newWindow: 'n',
     openCwd: 'o',
-    broadcast: 'B',
-    kill: 'K',
-    tile: 'T',
-    closeAll: 'X',
+    broadcast: 'b',
+    kill: 'k',
+    tile: 't',
+    closeAll: 'x',
   },
   plugins: {
     enabled: [],
@@ -180,6 +179,35 @@ function migrateLegacyTerminalLineHeight(config, platform = process.platform) {
     });
   }
   return config;
+}
+
+// Moves former single-letter shortcut defaults to lowercase display form.
+// Longer user-defined bindings remain unchanged.
+function migrateLegacyLogKeybindings(config) {
+  const keybindings = config?.keybindings;
+  if (!keybindings) {
+    return config;
+  }
+  const legacyBindings = {
+    logShow: ['P', 'l'], logToggle: ['S', 's'], copy: ['C', 'c'], paste: ['V', 'v'],
+    menu: ['M', 'm'], help: ['H', 'h'], newWindow: ['N', 'n'], broadcast: ['B', 'b'],
+    kill: ['K', 'k'], tile: ['T', 't'], closeAll: ['X', 'x'],
+  };
+  const needsMigration = keybindings.logMenu === 'L'
+    || Object.entries(legacyBindings).some(([name, [legacy]]) => keybindings[name] === legacy);
+  if (!needsMigration) {
+    return config;
+  }
+  const migrated = mergeConfig(config, { keybindings: {} });
+  for (const [name, [legacy, replacement]] of Object.entries(legacyBindings)) {
+    if (migrated.keybindings[name] === legacy) {
+      migrated.keybindings[name] = replacement;
+    }
+  }
+  if (migrated.keybindings.logMenu === 'L') {
+    delete migrated.keybindings.logMenu;
+  }
+  return migrated;
 }
 
 // Returns the settings persisted in user config files. Image protocol options
@@ -277,19 +305,18 @@ brightWhite = "#ffffff"
 # "Ctrl+Alt+KeyN". Use KeyN-style values for physical-key bindings.
 [keybindings]
 prefix = "Mod+Shift"
-logMenu = "L"
-logToggle = "S"
-logShow = "P"
-copy = "C"
-paste = "V"
-menu = "M"
-help = "H"
-newWindow = "N"
+logToggle = "s"
+logShow = "l"
+copy = "c"
+paste = "v"
+menu = "m"
+help = "h"
+newWindow = "n"
 openCwd = "o"
-broadcast = "B"
-kill = "K"
-tile = "T"
-closeAll = "X"
+broadcast = "b"
+kill = "k"
+tile = "t"
+closeAll = "x"
 
 # Plugins are relative to ~/.config/fpasoterm/User/.
 # Example: enabled = ["plugins/hello.ts", "plugins/theme.ts"]
@@ -799,7 +826,7 @@ function loadConfig() {
   const dir = path.dirname(file);
   writeDefaultConfigExample(file);
 
-  const userConfig = readUserConfig(file);
+  const userConfig = migrateLegacyLogKeybindings(readUserConfig(file));
   const selected = selectProfileConfig(userConfig);
   let config = removeUnsupportedConfigSections(mergeConfig(
     mergeConfig(platformDefaultConfig(), selected.baseConfig),
@@ -843,6 +870,7 @@ module.exports = {
   writeWindowState,
   loadConfig,
   migrateLegacyMacosFontFamily,
+  migrateLegacyLogKeybindings,
   migrateLegacyTerminalLineHeight,
   mergeConfig,
   missingConfigKeys,

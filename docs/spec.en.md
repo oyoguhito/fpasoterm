@@ -17,7 +17,7 @@ fpasoterm is a desktop terminal application focused on Japanese input in ChromeO
 
 fpasoterm does not intercept Japanese keyboard keys such as `かな` or `英数`. Input method switching and composition are delegated to the platform webview and the operating system.
 
-For terminal copy, selecting terminal text and pressing `Ctrl+Shift+C` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The hamburger window menu contains `Log Start (^S)` / `Log Stop (^S)`, `Log Show (^P)`, `Broadcast (^B)`, `Kill (^K)`, `Copy (^C)`, and `Paste (^V)`. On Unix, `Kill (^K)` or `Ctrl+Shift+K` sends `SIGKILL` to the foreground PTY process group. On Windows, it force-terminates descendants of the terminal shell, from the deepest child upward. Both paths preserve the interactive shell and its window, and report that no command is running at a shell prompt; use the close button to exit the shell. Kill is separate from normal `Ctrl+C` terminal input. `Ctrl+Shift+B` broadcasts normalized text plus Enter only to selected local PTYs and can explicitly include the configured trusted sync channel when all local windows are selected. Kitty APC graphics are experimental and disabled by default. `Ctrl+Shift+L` opens that menu with the log action focused, while `Ctrl+Shift+S` and `Ctrl+Shift+P` invoke logging and log display directly. Right-click copies when a terminal selection exists; otherwise it pastes. Terminal paste first reads the WebView clipboard API during the user gesture, then falls back to the backend clipboard when the WebView result is empty or unavailable, and sends the text to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard. `Ctrl+Shift+M` opens the window menu, and its `Help (^H)` item or `Ctrl+Shift+H` displays the complete application shortcut list.
+For terminal copy, selecting terminal text and pressing `Ctrl+Shift+c` writes that selection to the OS clipboard through the WebView clipboard event/API and the backend clipboard path. The hamburger window menu contains `Log Start (^s)` / `Log Stop (^s)`, `Log Show (^l)`, `Broadcast (^b)`, `Kill (^k)`, `Copy (^c)`, and `Paste (^v)`. On Unix, `Kill (^k)` or `Ctrl+Shift+k` sends `SIGKILL` to the foreground PTY process group. On Windows, it force-terminates descendants of the terminal shell, from the deepest child upward. Both paths preserve the interactive shell and its window, and report that no command is running at a shell prompt; use the close button to exit the shell. Kill is separate from normal `Ctrl+C` terminal input. `Ctrl+Shift+b` broadcasts normalized text plus Enter only to selected local PTYs and can explicitly include the configured trusted sync channel when all local windows are selected. Kitty APC graphics are experimental and disabled by default. `Ctrl+Shift+s` toggles logging and `Ctrl+Shift+l` shows captured logs. `Ctrl+Shift+p` is unassigned for a future command palette. Right-click copies when a terminal selection exists; otherwise it pastes. Terminal paste first reads the WebView clipboard API during the user gesture, then falls back to the backend clipboard when the WebView result is empty or unavailable, and sends the text to the PTY. Tools such as herdr, tmux, and screen can copy through OSC 52 when configured to emit clipboard sequences; fpasoterm writes those OSC 52 payloads to the OS clipboard. `Ctrl+Shift+m` opens the window menu, and its `Help (^h)` item or `Ctrl+Shift+h` displays the complete application shortcut list.
 
 The terminal log panel keeps keyboard focus inside the panel while it is open. `Tab` and `Shift+Tab` cycle through the log selector, search field, action buttons, close button, and log text area. The focused control is shown with a high-contrast outline. The `Search` button selects and scrolls to the next matching string in the displayed log and shows the current match count. `N` and `j` move to the next match, while `P` and `k` move to the previous match. Arrow keys remain reserved for normal text area scrolling.
 
@@ -40,7 +40,7 @@ For an unpacked checkout, `npm run install:desktop` installs a local `fpasoterm`
 The project icon is `extra/logo/fpasoterm.png`.
 
 When multiple instances are running, the titlebar window menu exposes
-`Tile (^T)`, and `Ctrl+Shift+T` invokes the same grid arrangement. Windows and
+`Tile (^t)`, and `Ctrl+Shift+t` invokes the same grid arrangement. Windows and
 X11 support native placement. Wayland compositors may reject application-
 controlled positions; the diagnostic log records the requested and actual
 positions in that case.
@@ -93,7 +93,7 @@ Diagnostics are written to:
 ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
-The diagnostics and log panel textareas use the same `Ctrl+Shift+C` copy path as the terminal selection.
+The diagnostics and log panel textareas use the same `Ctrl+Shift+c` copy path as the terminal selection.
 
 ## Non-goals
 

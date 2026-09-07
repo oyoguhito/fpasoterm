@@ -298,9 +298,8 @@ brightWhite = "#ffffff"
 prefix = "Mod+Shift"
 # A one-letter value inherits prefix. A full value overrides it for one action.
 # Physical-key example: newWindow = "Ctrl+Alt+KeyN"
-logMenu = "L"
-logToggle = "S"
-logShow = "P"
+logToggle = "s"
+logShow = "l"
 copy = "C"
 paste = "V"
 menu = "M"
@@ -320,7 +319,7 @@ on Windows/Linux and `Cmd` on macOS. Modifier spelling is case-insensitive.
 Action keys such as `Escape` cannot be part of `prefix`.
 
 Every action accepts one action key, which inherits `prefix`, or a complete
-shortcut such as `Ctrl+Shift+KeyN`. The following names are supported:
+shortcut such as `Ctrl+Shift+keyN`. The following names are supported:
 
 | Type | Names | Matching |
 | --- | --- | --- |
@@ -346,10 +345,10 @@ function keys may not be delivered. Do not assign one full shortcut to multiple
 fpasoterm actions.
 
 `Ctrl+X` is a valid complete shortcut, for example `closeAll = "Ctrl+X"`.
-`Ctrl+X` followed by another key such as `N` is an ordered key chord, not one
+`Ctrl+X` followed by another key such as `n` is an ordered key chord, not one
 shortcut; key chords are not supported by the current configuration format.
 
-On Windows, do not use `Ctrl+N` or `Ctrl+Shift+N` to test fpasoterm: WebView or
+On Windows, do not use `Ctrl+N` or `Ctrl+Shift+n` to test fpasoterm: WebView or
 the IME can consume them before the renderer receives them. Use an explicit
 non-reserved test binding instead:
 
@@ -418,13 +417,13 @@ rescaleOverlappingGlyphs = false
 fpasoterm observes IME composition events only to show marked text. xterm.js and the WebView retain native input delivery: fpasoterm does not suppress, replay, replace, or directly commit IME text. On ChromeOS/Linux, at the start of a new composition, it clears xterm's hidden helper textarea when it contains stale committed text and before the new marked text is inserted. This prevents later conversions from inheriting accumulated committed text and does not change terminal text or the PTY payload. Windows/Linux use a visual-only `IME` marked-text fallback when the WebView does not paint xterm's helper textarea. macOS uses its native WebKit marked-text rendering and does not add this fallback, avoiding a stale IME overlay after commit.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics and explicitly requested broadcast commands. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. `commands` permits short-lived shared commands and `commandTtlSeconds` limits their lifetime. See [Sync Folder](sync.en.md).
-- `logging`: terminal output logging. The hamburger menu contains `Log Start (^S)` / `Log Stop (^S)` and `Log Show (^P)`. `Ctrl+Shift+L` opens that menu at the log actions; `Ctrl+Shift+S` toggles logging directly, and `Ctrl+Shift+P` opens a selector for captured logs. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
+- `logging`: terminal output logging. The hamburger menu contains `Log Start (^s)` / `Log Stop (^s)` and `Log Show (^l)`. `Ctrl+Shift+s` toggles logging directly, and `Ctrl+Shift+l` opens a selector for captured logs. `Ctrl+Shift+p` is unassigned so it can be used by a future command palette. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 
 Window appearance and size are resolved in this order: default settings, explicit values in `config.toml`, saved `window-state.json` for size, then one-shot CLI overrides such as `--title`, `--titlebar-color`, and `--size`. If you want config size changes to take effect over the saved state, run `fpasoterm --reset-window-state`.
 
-On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. On macOS, fpasoterm regenerates the conventional `~/.local/bin/fpasoterm` command for the currently running app bundle and places `~/.local/bin` first in `PATH`; it forwards every argument unchanged. The previous `~/.config/fpasoterm/bin/fpasoterm` shim is also refreshed for compatibility. This allows `fpasoterm --help`, `--list`, `--close`, and other direct-binary commands to run inside the opened terminal and preserves the command path used by earlier releases. A nested macOS GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional. Options documented as Node-launcher-only, unknown options such as `--hoge` or `-?`, and options with missing values are rejected with one concise error instead of opening an unrelated GUI window. Use `--help` when the complete option list is needed. `--version` and the in-app `Help (^H)` panel display the package version plus the build commit, so same-version contributor and PR builds can be distinguished.
+On Windows, the terminal process receives the fpasoterm executable directory at the front of `Path`. On macOS, fpasoterm regenerates the conventional `~/.local/bin/fpasoterm` command for the currently running app bundle and places `~/.local/bin` first in `PATH`; it forwards every argument unchanged. The previous `~/.config/fpasoterm/bin/fpasoterm` shim is also refreshed for compatibility. This allows `fpasoterm --help`, `--list`, `--close`, and other direct-binary commands to run inside the opened terminal and preserves the command path used by earlier releases. A nested macOS GUI launch detaches by default so the current prompt is released; use `--foreground` when waiting for the new window is intentional. Options documented as Node-launcher-only, unknown options such as `--hoge` or `-?`, and options with missing values are rejected with one concise error instead of opening an unrelated GUI window. Use `--help` when the complete option list is needed. `--version` and the in-app `Help (^h)` panel display the package version plus the build commit, so same-version contributor and PR builds can be distinguished.
 
 macOS normally keeps an application active after its last window is closed. CLI close requests (`--close` / `-q`) and the in-app Close All action explicitly exit each matching fpasoterm process, so `fpasoterm -q all` also removes fpasoterm from the macOS menu bar.
 
@@ -438,14 +437,15 @@ Do not run `kitten icat`, `chafa --format kitty`, or `chafa --format sixels` in 
 
 ## Broadcast Input
 
-Open the hamburger menu and choose `Broadcast (^B)`, or press `Ctrl+Shift+B`. Select one or more local windows by title and PID, enter one or more commands, then press `Shift+Enter` or choose `Send`. Use `Enter` for a line break in a multi-line command. fpasoterm removes trailing line breaks, normalizes line endings, and delivers the text only to the selected local fpasoterm windows. Every command uses the target terminal's actual Enter key event after its text, so a target TUI can encode the active keyboard protocol correctly. In a conventional shell it produces the usual CR byte. A control-byte-only input, such as the `Ctrl+C` notation inserted by the picker, is delivered without an added Enter key.
+Open the hamburger menu and choose `Broadcast (^b)`, or press `Ctrl+Shift+b`. Select one or more local windows by title and PID, enter one or more commands, then press `Shift+Enter` or choose `Send`. Use `Enter` for a line break in a multi-line command. fpasoterm removes trailing line breaks, normalizes line endings, and delivers the text only to the selected local fpasoterm windows. Every command uses the target terminal's actual Enter key event after its text, so a target TUI can encode the active keyboard protocol correctly. In a conventional shell it produces the usual CR byte. A control-byte-only input, such as the `Ctrl+C` notation inserted by the picker, is delivered without an added Enter key.
 
 When every local window is selected and sync is enabled, the dialog exposes `Include synced channel`. This publishes the same short-lived command to every already-running fpasoterm instance using the same sync path and channel. Sync delivery is disabled for a local subset because remote window identities are not shared. Command files expire after `sync.commandTtlSeconds` (60 seconds by default) and an instance ignores commands created before it started.
 
 This feature deliberately has no remote server, OAuth token, or automatic command execution for later launches. A shared sync folder becomes a command channel when this option is used. Use it only with a folder and channel trusted by every participating machine.
 
 Broadcast keeps keyboard focus inside its dialog while it is open: `Tab` and `Shift+Tab` cycle through its controls instead of reaching the terminal. The focused control scrolls into view, has a yellow outline, and is named by the `Keyboard focus:` status line. `Shift+Enter` sends even if focus was unexpectedly reclaimed by the terminal. Every send uses the target terminal's actual Enter key event after the text; this is distinct from the dialog shortcut and preserves enhanced keyboard protocols. IME composition keys remain with the browser instead of being treated as dialog navigation. Its **Control byte** picker inserts visible
-notation at the textarea cursor: `\x0D` for an explicit `Enter / CR`, `\x09` for `Tab`, `\x03` for `Ctrl+C`,
+notation at the textarea cursor: `\x0D` for an explicit `Enter / CR`, `\x09` for `Tab`, `\x01` for `Ctrl+A`
+(the usual GNU Screen prefix), `\x02` for `Ctrl+B` (the usual tmux/byobu/herdr prefix), `\x03` for `Ctrl+C`,
 `\x04` for `Ctrl+D`, `\x18` for `Ctrl+X`, and `\x1A` for `Ctrl+Z`.
 fpasoterm converts only these picker-inserted notations to terminal bytes when
 you send them. A trailing explicit `\x0D` does not receive a second semantic
@@ -454,6 +454,16 @@ Enter event. The standalone `Esc` option is intentionally omitted because
 not bytes. For the conventional `Alt+x` terminal sequence, insert **Alt prefix
 / Esc**, then type `x`. The picker avoids relying on Escape and Tab key events,
 which the dialog reserves for close and focus movement.
+
+The picker also provides **Arrow Up**, **Arrow Down**, **Arrow Left**, and
+**Arrow Right**. They appear as a trailing `\key[Arrow...]` marker and are
+encoded by each target window's active xterm keyboard mode when sent. For a
+multiplexer prefix sequence, insert `Ctrl+A` or `Ctrl+B` first, then insert an
+arrow key as the final marker.
+
+For example, `clear\x0D\x01jclear` sends `clear`, explicitly executes it,
+then sends `Ctrl+A`, `j`, and `clear`. Select only the intended local windows:
+every selected window receives the complete sequence.
 
 Before Broadcast sends a command matching a high-risk pattern, it asks for a
 second confirmation. Current patterns include `rm`, `find -delete`, `git reset

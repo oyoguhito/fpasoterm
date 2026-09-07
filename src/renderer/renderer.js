@@ -34,6 +34,7 @@ const closeAllConfirmElement = document.getElementById('close-all-confirm');
 const closeAllConfirmMessageElement = document.getElementById('close-all-confirm-message');
 const closeAllConfirmOkButton = document.getElementById('close-all-confirm-ok');
 const closeAllConfirmCancelButton = document.getElementById('close-all-confirm-cancel');
+const closeAllConfirmUnmountButton = document.getElementById('close-all-confirm-unmount');
 const windowMenu = document.getElementById('window-menu');
 const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
@@ -148,19 +149,18 @@ const fallbackConfig = {
   },
   keybindings: {
     prefix: 'Mod+Shift',
-    logMenu: 'L',
-    logToggle: 'S',
-    logShow: 'P',
-    copy: 'C',
-    paste: 'V',
-    menu: 'M',
-    help: 'H',
-    newWindow: 'N',
-    openCwd: 'O',
-    broadcast: 'B',
-    kill: 'K',
-    tile: 'T',
-    closeAll: 'X',
+    logToggle: 's',
+    logShow: 'l',
+    copy: 'c',
+    paste: 'v',
+    menu: 'm',
+    help: 'h',
+    newWindow: 'n',
+    openCwd: 'o',
+    broadcast: 'b',
+    kill: 'k',
+    tile: 't',
+    closeAll: 'x',
   },
   plugins: {
     enabled: [],
@@ -352,7 +352,7 @@ function applyKeybindingLabels() {
       : '';
   }
   if (windowMenuToggleButton) {
-    windowMenuToggleButton.setAttribute('aria-keyshortcuts', `${keybindingLabel('menu')} ${keybindingLabel('logMenu')}`);
+    windowMenuToggleButton.setAttribute('aria-keyshortcuts', keybindingLabel('menu'));
   }
 }
 
@@ -424,7 +424,7 @@ function installTauriApiAdapter() {
     newWindowAtCwd: (cwd, host) => invoke('window_new_at_cwd', { cwd, host: host || null }),
     arrangeWindows: (screen) => invoke('window_arrange', { screen }),
     closeAllWindows: () => invoke('window_close_all'),
-    confirmCloseAllWindows: () => invoke('window_confirm_close_all'),
+    closeAllConfirmed: (unmountSshfs) => invoke('window_close_all_confirmed', { unmountSshfs }),
     startWindowDrag: () => invoke('window_start_drag'),
     startWindowResizeDrag: (direction) => window.__TAURI__.window.getCurrentWindow().startResizeDragging(direction),
     saveWindowBounds: () => invoke('window_save_bounds'),
@@ -2239,6 +2239,20 @@ function enableFloatingPanelDrag(panel, handle) {
 enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
 enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
 
+// WebView checkbox keyboard activation differs on Windows. Keep Space and Enter
+// consistent for Broadcast target controls and preserve their normal change event.
+function enableCheckboxKeyboardToggle(checkbox) {
+  checkbox?.addEventListener('keydown', (event) => {
+    if (event.isComposing || event.repeat || ![' ', 'Enter'].includes(event.key)) {
+      return;
+    }
+    event.preventDefault();
+    checkbox.click();
+  });
+}
+
+enableCheckboxKeyboardToggle(terminalBroadcastSync);
+
 // Returns focusable controls in the visible Broadcast dialog, including its
 // dynamically rendered local-window target checkboxes.
 function terminalBroadcastFocusItems() {
@@ -2498,36 +2512,61 @@ function confirmTerminalLogAction(message, returnFocus) {
   });
 }
 
-// Shows a separate confirmation dialog before broadcasting a close-all request.
-function confirmCloseAllWindows() {
+// Keeps Close All confirmation inside the invoking window on every platform.
+// This gives Windows, macOS, and Linux the same focus and keyboard behavior.
+function focusCloseAllConfirmation() {
+  if (closeAllConfirmElement.hidden) return;
+  closeAllConfirmCancelButton.focus({ preventScroll: true });
+}
+
+// WebViews can restore xterm focus while an overlay is first painted. Retry
+// briefly so the initial keyboard target is consistently the Cancel button.
+function scheduleCloseAllConfirmationFocus() {
+  requestAnimationFrame(focusCloseAllConfirmation);
+  for (const delay of [0, 50, 120, 240]) {
+    setTimeout(focusCloseAllConfirmation, delay);
+  }
+}
+
+async function confirmCloseAllWindows() {
   if (!closeAllConfirmElement || !closeAllConfirmMessageElement || !closeAllConfirmOkButton) {
     showDiagnostic('close all confirmation UI is unavailable');
-    return Promise.resolve(false);
+    return { confirmed: false, unmountSshfs: false };
   }
-  closeAllConfirmMessageElement.textContent =
-    'Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window.';
+  let status = null;
+  if (typeof window.fpasoterm.getSshfsStatus === 'function') {
+    status = await window.fpasoterm.getSshfsStatus().catch(() => null);
+  }
+  const mountCount = Array.isArray(status?.mounts) ? status.mounts.length : 0;
+  closeAllConfirmMessageElement.textContent = mountCount
+    ? `Close all running fpasoterm windows?\n\n${mountCount} SSHFS mount(s) will remain active unless you choose Unmount & Close.`
+    : 'Close all running fpasoterm windows?\n\nThis will terminate every fpasoterm window.';
+  closeAllConfirmUnmountButton.hidden = mountCount === 0;
   closeAllConfirmElement.hidden = false;
-  closeAllConfirmOkButton.focus({ preventScroll: true });
+  scheduleCloseAllConfirmationFocus();
   return new Promise((resolve) => {
     closeAllConfirmResolver = resolve;
   });
 }
 
 // Resolves and hides the close-all confirmation dialog.
-function resolveCloseAllWindows(confirmed) {
+function resolveCloseAllWindows(confirmed, unmountSshfs = false) {
   if (!closeAllConfirmElement || closeAllConfirmElement.hidden) {
     return;
   }
   closeAllConfirmElement.hidden = true;
+  closeAllConfirmUnmountButton.hidden = true;
   const resolver = closeAllConfirmResolver;
   closeAllConfirmResolver = null;
   closeAllWindowsButton.focus({ preventScroll: true });
-  resolver?.(confirmed);
+  resolver?.({ confirmed, unmountSshfs });
 }
 
 // Asks for confirmation before closing all application instances.
-function requestCloseAllWindows() {
-  window.fpasoterm.confirmCloseAllWindows?.().catch((error) => {
+async function requestCloseAllWindows() {
+  const result = await confirmCloseAllWindows();
+  if (!result.confirmed) return;
+  window.fpasoterm.closeAllConfirmed(result.unmountSshfs).catch((error) => {
     showDiagnostic(`close all confirmation failed: ${error}`);
   });
 }
@@ -2548,7 +2587,7 @@ function showTerminalOutputLogFromMenu() {
   showTerminalOutputLog().catch((error) => {
     terminalLogShowButton.textContent = 'Error';
     setTimeout(() => {
-      terminalLogShowButton.textContent = 'Log Show (^P)';
+      terminalLogShowButton.textContent = 'Log Show (^l)';
     }, 1400);
     showDiagnostic(`terminal log show failed: ${error}`);
   }).finally(() => setWindowMenuOpen(false));
@@ -2565,6 +2604,7 @@ function renderTerminalBroadcastTargets(targets) {
     checkbox.checked = true;
     checkbox.dataset.instanceId = target.id;
     checkbox.addEventListener('change', refreshTerminalBroadcastSyncOption);
+    enableCheckboxKeyboardToggle(checkbox);
     label.append(checkbox, document.createTextNode(`${target.title} (pid ${target.pid})`));
     terminalBroadcastTargetList.append(label);
   }
@@ -2637,12 +2677,29 @@ function decodeTerminalBroadcastControls(text) {
     '\\x0d': '\r',
     '\\x1b': '\x1b',
     '\\x09': '\t',
+    '\\x01': '\x01',
+    '\\x02': '\x02',
     '\\x03': '\x03',
     '\\x04': '\x04',
     '\\x18': '\x18',
     '\\x1a': '\x1a',
   };
-  return String(text || '').replace(/\\x(?:0d|1b|09|03|04|18|1a)/gi, (match) => controls[match.toLowerCase()] || match);
+  return String(text || '').replace(/\\x(?:0d|1b|09|01|02|03|04|18|1a)/gi, (match) => controls[match.toLowerCase()] || match);
+}
+
+// Extracts one trailing semantic key marker. Keeping the marker visible in the
+// dialog lets a control prefix such as Ctrl+B be inspected before it is sent.
+function extractTerminalBroadcastKeyEvent(text) {
+  const value = String(text || '');
+  const match = value.match(/\\key\[(ArrowUp|ArrowDown|ArrowLeft|ArrowRight)\]$/i);
+  if (!match) {
+    return { text: value, keyEvent: null };
+  }
+  const key = match[1];
+  return {
+    text: value.slice(0, -match[0].length),
+    keyEvent: { key, code: key, shiftKey: false },
+  };
 }
 
 // Uses xterm's active keyboard encoder instead of guessing a byte sequence.
@@ -2665,11 +2722,19 @@ function dispatchTerminalBroadcastKey(keyEvent) {
     showDiagnostic('terminal broadcast key event is unavailable');
     return;
   }
+  const key = String(keyEvent.key || '');
+  const keyCodes = {
+    Enter: 13,
+    ArrowUp: 38,
+    ArrowDown: 40,
+    ArrowLeft: 37,
+    ArrowRight: 39,
+  };
   const event = {
     type: 'keydown',
-    key: keyEvent.key === 'Enter' ? 'Enter' : String(keyEvent.key || ''),
-    code: keyEvent.code === 'Enter' ? 'Enter' : String(keyEvent.code || ''),
-    keyCode: keyEvent.key === 'Enter' ? 13 : 0,
+    key,
+    code: String(keyEvent.code || key),
+    keyCode: keyCodes[key] || 0,
     shiftKey: keyEvent.shiftKey === true,
     altKey: false,
     ctrlKey: false,
@@ -2689,10 +2754,16 @@ function insertTerminalBroadcastControl() {
   const controls = {
     enter: { text: '\\x0D', label: 'Enter / CR (0x0D)' },
     tab: { text: '\\x09', label: 'Tab (0x09)' },
+    'ctrl-a': { text: '\\x01', label: 'Ctrl+A (0x01)' },
+    'ctrl-b': { text: '\\x02', label: 'Ctrl+B (0x02)' },
     'ctrl-c': { text: '\\x03', label: 'Ctrl+C (0x03)' },
     'ctrl-d': { text: '\\x04', label: 'Ctrl+D (0x04)' },
     'ctrl-x': { text: '\\x18', label: 'Ctrl+X (0x18)' },
     'ctrl-z': { text: '\\x1A', label: 'Ctrl+Z (0x1A)' },
+    'arrow-up': { text: '\\key[ArrowUp]', label: 'Arrow Up' },
+    'arrow-down': { text: '\\key[ArrowDown]', label: 'Arrow Down' },
+    'arrow-left': { text: '\\key[ArrowLeft]', label: 'Arrow Left' },
+    'arrow-right': { text: '\\key[ArrowRight]', label: 'Arrow Right' },
     'alt-prefix': { text: '\\x1B', label: 'Alt prefix / Esc (0x1B)' },
   };
   const selected = controls[control];
@@ -2764,12 +2835,12 @@ function resolveDangerousBroadcastConfirmation(confirmed) {
 // Writes the dialog text to local windows and optionally the configured sync channel.
 async function sendTerminalBroadcast() {
   const rawText = String(terminalBroadcastText?.value || '');
-  const normalizedText = decodeTerminalBroadcastControls(normalizePasteText(rawText).replace(/\r+$/, ''));
-  const text = normalizedText;
-  const keyEvent = shouldAppendTerminalBroadcastEnter(text)
+  const decodedText = decodeTerminalBroadcastControls(normalizePasteText(rawText).replace(/\r+$/, ''));
+  const { text, keyEvent: selectedKeyEvent } = extractTerminalBroadcastKeyEvent(decodedText);
+  const keyEvent = selectedKeyEvent || (shouldAppendTerminalBroadcastEnter(text)
     ? terminalBroadcastSubmitKeyEvent()
-    : null;
-  if (!text) {
+    : null);
+  if (!text && !keyEvent) {
     showDiagnostic('terminal broadcast skipped: input is empty');
     terminalBroadcastText?.focus({ preventScroll: true });
     return;
@@ -2948,7 +3019,6 @@ async function showKeyboardShortcutsHelp() {
     `fpasoterm ${version}`,
     `Config: ${activeConfigPath || 'unknown'}`,
     '',
-    `${keybindingLabel('logMenu')}  Open the window menu at Log actions`,
     `${keybindingLabel('logToggle')}  Start or stop terminal output logging`,
     `${keybindingLabel('logShow')}  Show terminal output logs`,
     `${keybindingLabel('copy')}  Copy selected terminal or log text`,
@@ -3265,11 +3335,35 @@ closeAllConfirmCancelButton.addEventListener('click', () => {
   resolveCloseAllWindows(false);
 });
 
+closeAllConfirmUnmountButton.addEventListener('click', () => {
+  resolveCloseAllWindows(true, true);
+});
+
 closeAllConfirmElement.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
     resolveCloseAllWindows(false);
+    return;
   }
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    const buttons = [
+      closeAllConfirmCancelButton,
+      ...(!closeAllConfirmUnmountButton.hidden ? [closeAllConfirmUnmountButton] : []),
+      closeAllConfirmOkButton,
+    ];
+    const index = buttons.indexOf(document.activeElement);
+    const next = (index + (event.shiftKey ? buttons.length - 1 : 1) + buttons.length) % buttons.length;
+    buttons[next].focus({ preventScroll: true });
+  }
+});
+
+closeAllConfirmElement.addEventListener('focusout', () => {
+  requestAnimationFrame(() => {
+    if (!closeAllConfirmElement.hidden && !closeAllConfirmElement.contains(document.activeElement)) {
+      focusCloseAllConfirmation();
+    }
+  });
 });
 
 terminalCopyButton.addEventListener('click', () => {
@@ -3434,16 +3528,6 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (matchesKeybinding(event, 'logMenu')) {
-    event.preventDefault();
-    const open = windowMenuItems?.hidden !== false;
-    setWindowMenuOpen(open, terminalLogToggleButton);
-    if (open) {
-      setWindowMenuSubmenuOpen('log', true, terminalLogToggleButton);
-    }
-    return;
-  }
-
   if (matchesKeybinding(event, 'menu')) {
     event.preventDefault();
     setWindowMenuOpen(windowMenuItems?.hidden !== false);
@@ -3565,9 +3649,12 @@ async function requestWindowClose() {
 function confirmSshfsWindowClose(mounts) {
   closeAllConfirmMessageElement.textContent =
     `Keep ${mounts.length} SSHFS mount(s) active after closing this terminal window?\n\nUse Window > SSHFS Mounts to unmount them later.`;
+  closeAllConfirmUnmountButton.hidden = true;
   closeAllConfirmElement.hidden = false;
-  closeAllConfirmOkButton.focus({ preventScroll: true });
-  return new Promise((resolve) => { closeAllConfirmResolver = resolve; });
+  requestAnimationFrame(() => closeAllConfirmOkButton.focus({ preventScroll: true }));
+  return new Promise((resolve) => {
+    closeAllConfirmResolver = (result) => resolve(result?.confirmed === true);
+  });
 }
 
 // Closes the frameless window from the custom titlebar.
@@ -3668,6 +3755,26 @@ function applySshfsDialogMount(name) {
 function selectedSshfsMountName() {
   const mountName = sshfsManagerSavedMounts.value;
   return sshfsDialogMounts.some((mount) => mount.mountName === mountName) ? mountName : '';
+}
+
+// Keeps keyboard navigation inside the SSHFS modal instead of falling through
+// to titlebar controls or xterm.js on WebViews that do not enforce aria-modal.
+function sshfsManagerFocusItems() {
+  if (!sshfsManagerDialog || sshfsManagerDialog.hidden) {
+    return [];
+  }
+  return [...sshfsManagerDialog.querySelectorAll('input, select, button, a[href]')]
+    .filter((element) => !element.hidden && !element.disabled && element.getClientRects().length > 0);
+}
+
+function focusSshfsManagerItem(delta) {
+  const items = sshfsManagerFocusItems();
+  if (items.length === 0) {
+    return;
+  }
+  const index = items.indexOf(document.activeElement);
+  const next = index < 0 ? (delta < 0 ? items.length - 1 : 0) : (index + delta + items.length) % items.length;
+  items[next].focus({ preventScroll: true });
 }
 
 async function refreshSshfsDialog(showResult = true) {
@@ -3777,7 +3884,24 @@ sshfsManagerForgetButton.addEventListener('click', async () => {
 });
 sshfsManagerCloseButton.addEventListener('click', closeSshfsManagerModal);
 sshfsManagerDialog.addEventListener('keydown', (event) => {
-  if (event.key === 'Escape') { event.preventDefault(); closeSshfsManagerModal(); }
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    closeSshfsManagerModal();
+    return;
+  }
+  if (event.key === 'Tab') {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    focusSshfsManagerItem(event.shiftKey ? -1 : 1);
+  }
+});
+sshfsManagerDialog.addEventListener('focusout', () => {
+  requestAnimationFrame(() => {
+    if (!sshfsManagerDialog.hidden && !sshfsManagerDialog.contains(document.activeElement)) {
+      focusSshfsManagerItem(1);
+    }
+  });
 });
 
 // Opens the shared SSHFS manager without creating another native WebView window.
