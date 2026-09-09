@@ -105,7 +105,9 @@ jobs:
           - label: linux-arm64
             os: ubuntu-24.04-arm
           - label: macos-x64
-            os: macos-15-intel
+            # Use the stable Intel image. The macos-15-intel image failed
+            # while creating the DMG even though the app bundle was valid.
+            os: macos-13
           - label: macos-arm64
             os: macos-latest
           - label: windows-x64
@@ -164,6 +166,7 @@ jobs:
         run: npm run build:bundles
         env:
           FPASOTERM_ARTIFACT_LABEL: ${{ matrix.label }}
+          RUST_LOG: tauri_bundler=debug
 
       - name: Verify macOS bundles
         if: runner.os == 'macOS'
