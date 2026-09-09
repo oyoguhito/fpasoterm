@@ -777,7 +777,7 @@ assert.match(localPortCompletionResult.stdout, /productivity\/clipboard-translat
 
 const releaseWorkflow = read('.github/workflows/release.yml');
 assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
-assert.match(releaseWorkflow, /macos-13/);
+assert.match(releaseWorkflow, /macos-15-intel/);
 assert.match(releaseWorkflow, /macos-latest/);
 assert.match(releaseWorkflow, /windows-latest/);
 assert.match(releaseWorkflow, /FPASOTERM_ARTIFACT_LABEL/);

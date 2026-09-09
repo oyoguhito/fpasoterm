@@ -105,9 +105,7 @@ jobs:
           - label: linux-arm64
             os: ubuntu-24.04-arm
           - label: macos-x64
-            # Use the stable Intel image. The macos-15-intel image failed
-            # while creating the DMG even though the app bundle was valid.
-            os: macos-13
+            os: macos-15-intel
           - label: macos-arm64
             os: macos-latest
           - label: windows-x64
