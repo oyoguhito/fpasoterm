@@ -42,9 +42,11 @@
             </div>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (c)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (v)</button>
-            <div id="plugin-menu-section" class="window-menu-submenu" data-menu-submenu="plugins" hidden>
+            <div id="plugin-menu-section" class="window-menu-submenu" data-menu-submenu="plugins">
               <button id="plugin-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="plugin-command-items" aria-expanded="false">Plugins</button>
-              <div id="plugin-command-items" class="window-menu-submenu-items" role="menu" hidden></div>
+              <div id="plugin-command-items" class="window-menu-submenu-items" role="menu" hidden>
+                <button id="plugin-catalog" type="button" role="menuitem">Plugin Catalog</button>
+              </div>
             </div>
             <div class="window-menu-submenu" data-menu-submenu="window">
               <button id="window-actions-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="window-actions-menu-items" aria-expanded="false">Window</button>
@@ -84,6 +86,8 @@
           <input id="terminal-log-search" type="search" hidden aria-label="Search terminal log text" placeholder="Search">
           <button id="terminal-log-search-next" type="button" hidden aria-label="Search next match. Use N for next and P for previous.">Search</button>
           <span id="terminal-log-search-status" hidden aria-live="polite"></span>
+          <input id="plugin-catalog-search" type="search" hidden aria-label="Search plugin catalog" placeholder="Search plugins">
+          <span id="plugin-catalog-search-status" hidden aria-live="polite"></span>
           <button id="terminal-log-show-selected" type="button" hidden>Show Selected</button>
           <button id="terminal-log-delete-selected" type="button" hidden>Delete Selected</button>
           <button id="terminal-log-delete-all" type="button" hidden>Delete All</button>

@@ -11,6 +11,8 @@ const terminalLogSelectElement = document.getElementById('terminal-log-select');
 const terminalLogSearchElement = document.getElementById('terminal-log-search');
 const terminalLogSearchNextButton = document.getElementById('terminal-log-search-next');
 const terminalLogSearchStatusElement = document.getElementById('terminal-log-search-status');
+const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
+const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
@@ -58,6 +60,7 @@ const windowActionsMenuToggleButton = document.getElementById('window-actions-me
 const windowActionsMenuItems = document.getElementById('window-actions-menu-items');
 const pluginMenuSection = document.getElementById('plugin-menu-section');
 const pluginMenuToggleButton = document.getElementById('plugin-menu-toggle');
+const pluginCatalogButton = document.getElementById('plugin-catalog');
 const terminalKillButton = document.getElementById('terminal-kill');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
@@ -198,6 +201,7 @@ let pluginReadyTimer = null;
 let pluginReadyGeneration = 0;
 const pluginReadyCallbacks = [];
 const pluginCommands = new Map();
+let pluginCatalogEntries = [];
 let term;
 let fitAddon;
 let imageAddon;
@@ -768,6 +772,7 @@ function appendDiagnosticLine(message) {
 // Restores the shared panel's regular text body after another diagnostics view.
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
+  setPluginCatalogSearchVisible(false);
   setTerminalEncodingControlsVisible(false);
   if (checkForUpdatesButton) {
     checkForUpdatesButton.hidden = true;
@@ -777,6 +782,36 @@ function showDiagnosticsTextArea() {
   }
   if (terminalCapabilityPreviewElement) {
     terminalCapabilityPreviewElement.hidden = true;
+  }
+}
+
+// Keeps public port filtering separate from terminal-log search controls.
+function setPluginCatalogSearchVisible(visible) {
+  if (pluginCatalogSearchElement) pluginCatalogSearchElement.hidden = !visible;
+  if (pluginCatalogSearchStatusElement) pluginCatalogSearchStatusElement.hidden = !visible;
+}
+
+// Renders catalog entries already fetched from the official INDEX without another request.
+function renderPluginCatalog(query = '') {
+  const needle = String(query).trim().toLowerCase();
+  const entries = pluginCatalogEntries.filter((entry) => [
+    entry.id,
+    entry.name,
+    entry.author,
+    entry.description,
+  ].some((value) => String(value || '').toLowerCase().includes(needle)));
+  diagnosticsElement.value = entries.length === 0
+    ? 'No public plugins match this search.\n'
+    : entries.map((entry) => [
+      `${entry.id} (${entry.name} ${entry.version})`,
+      `${entry.description}`,
+      `author: ${entry.author}`,
+      `requires: fpasoterm >= ${entry.minFpasotermVersion}`,
+      `install: fpasoterm --plugin-install ${entry.id} --enable`,
+    ].join('\n')).join('\n\n');
+  diagnosticsElement.scrollTop = 0;
+  if (pluginCatalogSearchStatusElement) {
+    pluginCatalogSearchStatusElement.textContent = `${entries.length}/${pluginCatalogEntries.length}`;
   }
 }
 
@@ -1133,6 +1168,16 @@ function isNonTerminalEditableControl(element) {
   );
 }
 
+// Global shortcuts must not consume ordinary text typed into dialogs or panels.
+function isTextEntryControl(element) {
+  const terminalTextarea = terminalElement.querySelector('.xterm-helper-textarea');
+  return (
+    Boolean(element) &&
+    element !== terminalTextarea &&
+    element.matches?.('input, textarea, select, [contenteditable="true"]')
+  );
+}
+
 // Installs explicit paste handling for desktop webviews where xterm defaults can be skipped.
 function installTerminalPasteHandlers() {
   let terminalPasteFallbackTimer = null;
@@ -1234,6 +1279,19 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const isCopyShortcut = matchesKeybinding(event, 'copy');
+    if (isCopyShortcut && selectedClipboardText()) {
+      event.preventDefault();
+      copyTerminalSelection().catch((error) => {
+        showDiagnostic(`terminal copy failed: ${error}`);
+      });
+      return;
+    }
+
+    if (isTextEntryControl(event.target)) {
+      return;
+    }
+
     const isNewWindowShortcut = matchesKeybinding(event, 'newWindow');
     if (isNewWindowShortcut) {
       event.preventDefault();
@@ -1284,15 +1342,6 @@ function installTerminalPasteHandlers() {
       event.preventDefault();
       event.stopPropagation();
       requestCloseAllWindows();
-      return;
-    }
-
-    const isCopyShortcut = matchesKeybinding(event, 'copy');
-    if (isCopyShortcut && selectedClipboardText()) {
-      event.preventDefault();
-      copyTerminalSelection().catch((error) => {
-        showDiagnostic(`terminal copy failed: ${error}`);
-      });
       return;
     }
 
@@ -1920,7 +1969,11 @@ async function loadPlugins() {
     imageAddon,
     config: appConfig,
     log: (message) => showDiagnostic(`plugin: ${message}`),
+    readClipboard: () => window.fpasoterm.readClipboard(),
+    writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
+    // Plugins may only open an HTTP(S) URL after an explicit user action.
+    openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
     onReady: registerPluginReadyCallback,
     registerCommand: registerPluginCommand,
   });
@@ -1949,18 +2002,13 @@ async function loadPlugins() {
   updatePluginMenuVisibility();
 }
 
-// Shows Plugins only when at least one enabled plugin registered a command.
-// Loading a plugin alone does not create a menu action because it has no handler.
+// Keeps the built-in catalog available even before users install a plugin.
+// Loading a plugin alone still does not create a command because it has no handler.
 function updatePluginMenuVisibility() {
   if (!pluginMenuSection || !pluginCommandItems) {
     return;
   }
-  const hasCommands = pluginCommands.size > 0;
-  pluginMenuSection.hidden = !hasCommands;
-  if (!hasCommands) {
-    pluginCommandItems.hidden = true;
-    pluginMenuToggleButton?.setAttribute('aria-expanded', 'false');
-  }
+  pluginMenuSection.hidden = false;
 }
 
 // Registers work that needs a successfully started PTY instead of only xterm.
@@ -2341,6 +2389,7 @@ function diagnosticsPanelFocusItems() {
     terminalLogSelectElement,
     terminalLogSearchElement,
     terminalLogSearchNextButton,
+    pluginCatalogSearchElement,
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
@@ -3277,6 +3326,39 @@ pluginMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('plugins', pluginCommandItems.hidden);
 });
 
+// Displays public port metadata without installing or enabling unreviewed code.
+pluginCatalogButton.addEventListener('click', () => {
+  window.fpasoterm.getPluginCatalog().then((catalog) => {
+    diagnosticsPanelMode = 'plugin-catalog';
+    setTerminalLogPickerVisible(false);
+    showDiagnosticsTextArea();
+    pluginCatalogEntries = Array.isArray(catalog) ? catalog : [];
+    if (pluginCatalogSearchElement) pluginCatalogSearchElement.value = '';
+    setPluginCatalogSearchVisible(true);
+    diagnosticsTitleElement.textContent = 'Plugin Catalog';
+    diagnosticsPanel.hidden = false;
+    renderPluginCatalog();
+    setWindowMenuOpen(false);
+    pluginCatalogSearchElement?.focus({ preventScroll: true });
+  }).catch((error) => {
+    showDiagnostic(`plugin catalog failed: ${error}`);
+    setWindowMenuOpen(false);
+  });
+});
+
+pluginCatalogSearchElement.addEventListener('input', () => {
+  renderPluginCatalog(pluginCatalogSearchElement.value);
+});
+
+pluginCatalogSearchElement.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    event.preventDefault();
+    event.stopPropagation();
+    pluginCatalogSearchElement.value = '';
+    renderPluginCatalog();
+  }
+});
+
 windowActionsMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('window', windowActionsMenuItems.hidden);
 });
@@ -3524,6 +3606,10 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
+  if (isTextEntryControl(event.target)) {
+    return;
+  }
+
   if (handleWindowMenuKeyboard(event)) {
     return;
   }
@@ -3584,15 +3670,18 @@ diagnosticsPanel.addEventListener('keydown', (event) => {
     return;
   }
 
-  const isSearchInput = event.target === terminalLogSearchElement;
-  const isLogSelector = event.target === terminalLogSelectElement;
-  if (!isSearchInput && !isLogSelector && event.key.toLowerCase() === 'n') {
+  // Keep catalog and log search text fields free for ordinary query input.
+  if (isTextEntryControl(event.target)) {
+    return;
+  }
+
+  if (event.key.toLowerCase() === 'n') {
     event.preventDefault();
     searchTerminalLogText(1);
     return;
   }
 
-  if (!isSearchInput && !isLogSelector && event.key.toLowerCase() === 'p') {
+  if (event.key.toLowerCase() === 'p') {
     event.preventDefault();
     searchTerminalLogText(-1);
     return;

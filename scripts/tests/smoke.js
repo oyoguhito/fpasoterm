@@ -411,6 +411,7 @@ assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
 const bashCompletionResult = runCli('--completion', 'bash');
 assert.equal(bashCompletionResult.status, 0, bashCompletionResult.stderr);
 assert.match(bashCompletionResult.stdout, /complete -F _fpasoterm fpasoterm/);
+assert.match(bashCompletionResult.stdout, /bin\/fpasoterm/);
 const powershellCompletionResult = runCli('--completion', 'powershell');
 assert.equal(powershellCompletionResult.status, 0, powershellCompletionResult.stderr);
 assert.match(powershellCompletionResult.stdout, /Register-ArgumentCompleter/);
@@ -728,6 +729,51 @@ assert.match(windowsCommandWrapper, /--plugin-path/);
 assert.match(windowsCommandWrapper, /--version/);
 assert.match(windowsCommandWrapper, /--broadcast --broadcast-target --broadcast-sync/);
 assert.match(windowsCommandWrapper, /start "" "%FPASOTERM_EXE%" %FPASOTERM_ARGS%/);
+
+const bashCompletion = read('completions/fpasoterm.bash');
+const zshCompletion = read('completions/_fpasoterm');
+const fishCompletion = read('completions/fpasoterm.fish');
+const powershellCompletion = read('completions/fpasoterm.ps1');
+for (const completion of [bashCompletion, zshCompletion, fishCompletion, powershellCompletion]) {
+  assert.match(completion, /--plugin-install/);
+  assert.match(completion, /--plugin-search/);
+}
+assert.match(bashCompletion, /_fpasoterm_public_plugin_ports/);
+assert.match(bashCompletion, /_fpasoterm_local_plugin_ports/);
+assert.match(bashCompletion, /complete -F _fpasoterm fpasoterm bin\/fpasoterm/);
+assert.match(zshCompletion, /_fpasoterm_public_plugin_ports/);
+assert.match(zshCompletion, /_fpasoterm_local_plugin_ports/);
+assert.match(zshCompletion, /compdef _fpasoterm fpasoterm bin\/fpasoterm/);
+assert.match(fishCompletion, /__fpasoterm_public_plugin_ports/);
+assert.match(fishCompletion, /__fpasoterm_local_plugin_ports/);
+assert.match(powershellCompletion, /\$previous -eq '--plugin-install'/);
+assert.match(powershellCompletion, /--plugin-ports-dir/);
+assert.match(read('src/renderer/index.html'), /id="plugin-catalog"/);
+assert.match(read('src/renderer/index.html'), /id="plugin-catalog-search"/);
+assert.doesNotMatch(read('src/renderer/index.html'), /id="plugin-menu-section"[^>]*hidden/);
+assert.match(read('src/renderer/renderer.js'), /Plugin Catalog/);
+assert.match(read('src/renderer/renderer.js'), /minFpasotermVersion/);
+assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
+assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
+assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
+assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
+assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
+assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
+assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*pluginCatalogSearchElement,\s*terminalLogShowSelectedButton/);
+
+const localPortsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-ports-'));
+const localPortManifest = path.join(localPortsFixture, 'ports', 'productivity', 'clipboard-translate', 'port.toml');
+fs.mkdirSync(path.dirname(localPortManifest), { recursive: true });
+fs.writeFileSync(localPortManifest, 'name = "clipboard-translate"\n');
+const localPortCompletionResult = spawnSync('bash', ['-lc', [
+  'source completions/fpasoterm.bash',
+  `COMP_WORDS=(bin/fpasoterm --plugin-ports-dir ${JSON.stringify(localPortsFixture)} --plugin-install "")`,
+  'COMP_CWORD=4',
+  '_fpasoterm',
+  'printf "%s\\n" "${COMPREPLY[@]}"',
+].join('; ')], { cwd: root, encoding: 'utf8' });
+assert.equal(localPortCompletionResult.status, 0, localPortCompletionResult.stderr);
+assert.match(localPortCompletionResult.stdout, /productivity\/clipboard-translate/);
 
 const releaseWorkflow = read('.github/workflows/release.yml');
 assert.match(releaseWorkflow, /ubuntu-24\.04-arm/);
@@ -1878,6 +1924,9 @@ assert.match(pluginTypes, /version: string/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
 assert.match(pluginTypes, /getOfficialPluginIndex:/);
+assert.match(pluginTypes, /readClipboard:/);
+assert.match(pluginTypes, /writeClipboard:/);
+assert.match(pluginTypes, /openExternalUrl:/);
 
 const renderer = read('src/renderer/renderer.js');
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
@@ -1908,9 +1957,13 @@ assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
 assert.match(renderer, /getPluginCatalog: \(\) => invoke\('plugin_catalog'\)/);
 assert.match(renderer, /getOfficialPluginIndex: \(\) => window\.fpasoterm\.getPluginCatalog\(\)/);
+assert.match(renderer, /readClipboard: \(\) => window\.fpasoterm\.readClipboard\(\)/);
+assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClipboard\(text\)/);
+assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
-assert.match(renderer, /pluginMenuSection\.hidden = !hasCommands/);
+assert.match(renderer, /pluginMenuSection\.hidden = false/);
+assert.match(renderer, /pluginCatalogButton\.addEventListener\('click'/);
 assert.match(renderer, /plugin loaded \$\{plugin\.name\} commands=\$\{registeredCommandCount\}/);
 assert.match(renderer, /installTauriApiAdapter/);
 assert.match(renderer, /__TAURI__/);

@@ -1,5 +1,35 @@
 # Fish completion for fpasoterm. Install with: fpasoterm --completion fish | source
 
+function __fpasoterm_public_plugin_ports
+    command fpasoterm --plugin-search 2>/dev/null | string match -r -g '^    install: fpasoterm --plugin-install ([^ ]+) --enable$'
+end
+
+function __fpasoterm_local_plugin_ports
+    set -l tokens (commandline -opc)
+    set -l ports_dir
+    for index in (seq (count $tokens))
+        if test "$tokens[$index]" = '--plugin-ports-dir'
+            set -l value_index (math $index + 1)
+            set ports_dir $tokens[$value_index]
+            break
+        end
+    end
+    if test -n "$ports_dir" -a -d "$ports_dir/ports"
+        find "$ports_dir/ports" -type f -name port.toml -print 2>/dev/null | while read -l manifest
+            string replace -- "$ports_dir/ports/" '' -- $manifest | string replace -r '/port\\.toml$' ''
+        end
+    end
+end
+
+function __fpasoterm_plugin_install_ports
+    set -l ports (__fpasoterm_local_plugin_ports)
+    if test (count $ports) -gt 0
+        printf '%s\n' $ports
+    else
+        __fpasoterm_public_plugin_ports
+    end
+end
+
 complete -c fpasoterm -s h -l help -d 'Show help'
 complete -c fpasoterm -s v -l version -d 'Show version and build commit'
 complete -c fpasoterm -l update-check -d 'Compare installed version with npm latest'
@@ -27,7 +57,7 @@ complete -c fpasoterm -l plugin-path -d 'Print plugin directory'
 complete -c fpasoterm -l plugin-info -r -d 'Show plugin information'
 complete -c fpasoterm -l plugin-uninstall -r -d 'Remove local plugin files'
 complete -c fpasoterm -l plugin-search -d 'Search official public plugin ports'
-complete -c fpasoterm -l plugin-install -r -a 'terminal/hello terminal/welcome-banner terminal/status-banner terminal/theme appearance/amber appearance/teal appearance/high-contrast productivity/git-status productivity/session-marker' -d 'Download an official public port'
+complete -c fpasoterm -l plugin-install -r -a '(__fpasoterm_plugin_install_ports)' -d 'Install a public port or one from --plugin-ports-dir'
 complete -c fpasoterm -l plugin-ports-dir -r -F -d 'Install --plugin-install from this local checkout'
 complete -c fpasoterm -l plugin-install-file -r -F -d 'Copy a trusted local .js/.ts plugin'
 complete -c fpasoterm -l force -d 'Replace an existing plugin during install'
