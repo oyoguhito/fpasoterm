@@ -2174,11 +2174,13 @@ function openPluginCanvasOverlay(options = {}) {
       return;
     }
     closeConfirmation.hidden = false;
+    dialog.classList.add('is-confirming');
     closeConfirmationCancelButton.focus();
   };
   closeButton.addEventListener('click', close);
   closeConfirmationCancelButton.addEventListener('click', () => {
     closeConfirmation.hidden = true;
+    dialog.classList.remove('is-confirming');
     canvas.focus();
   });
   closeConfirmationOkButton.addEventListener('click', closeImmediately);
@@ -2186,15 +2188,16 @@ function openPluginCanvasOverlay(options = {}) {
     if (event.target === overlay) close();
   });
   dialog.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
+    if (event.code === 'Escape' || event.key === 'Escape') {
       event.preventDefault();
       if (!closeConfirmation.hidden) {
         closeConfirmation.hidden = true;
+        dialog.classList.remove('is-confirming');
         canvas.focus();
       } else {
         close();
       }
-    } else if (event.key === 'Tab') {
+    } else if (event.code === 'Tab' || event.key === 'Tab') {
       event.preventDefault();
       const focusable = closeConfirmation.hidden
         ? [closeButton, canvas]
@@ -2214,14 +2217,14 @@ function openPluginCanvasOverlay(options = {}) {
   const style = document.createElement('style');
   style.textContent = [
     '.fpasoterm-plugin-canvas-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .58); }',
-    '.fpasoterm-plugin-canvas-dialog { width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
+    '.fpasoterm-plugin-canvas-dialog { position: relative; width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
     '.fpasoterm-plugin-canvas-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }',
     '.fpasoterm-plugin-canvas-dialog h2 { margin: 0; font-size: 16px; }',
     '.fpasoterm-plugin-canvas-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
     '.fpasoterm-plugin-canvas-dialog canvas { display: block; max-width: 100%; max-height: calc(100vh - 116px); background: #000; image-rendering: pixelated; outline: none; }',
-    '.fpasoterm-plugin-canvas-close-confirmation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #b98c3c; border-radius: 4px; background: #30281a; }',
+    '.fpasoterm-plugin-canvas-close-confirmation { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border: 1px solid #b98c3c; border-radius: 4px; background: rgba(24, 19, 10, .96); }',
     '.fpasoterm-plugin-canvas-close-confirmation p { flex: 1; margin: 0; }',
-    '.fpasoterm-plugin-canvas-dialog button:focus-visible, .fpasoterm-plugin-canvas-dialog canvas:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
+    '.fpasoterm-plugin-canvas-dialog button:focus, .fpasoterm-plugin-canvas-dialog canvas:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
   ].join('');
   header.append(heading, closeButton);
   closeConfirmation.append(closeConfirmationMessage, closeConfirmationCancelButton, closeConfirmationOkButton);
