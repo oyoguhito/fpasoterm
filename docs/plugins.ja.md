@@ -115,9 +115,13 @@ clone、review、開発中のlocal portは、`npm run ports install` を使わ�
 git clone https://github.com/oyoguhito/fpasoterm-plugins.git
 fpasoterm --plugin-install appearance/teal \
   --plugin-ports-dir ./fpasoterm-plugins --enable
+
+# checkout rootでもそのports/ directoryでも指定でき、portはcomma-separatedで複数指定できます。
+fpasoterm --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-install integration/doom-wad-inspector,integration/doom-wasm-local --enable
 ```
 
-`--plugin-ports-dir` には `ports/` を含むcheckoutを明示します。指定しない`--plugin-install`は公式GitHub repositoryから対象portを取得します。指定した場合はlocal installerとして`port.toml`、metadata、必要なfpasoterm versionを検証し、該当plugin sourceだけをcopyします。local経路はnetworkへ接続しません。
+`--plugin-ports-dir`には`ports/`を含むcheckoutまたはその`ports/` directory自体を明示します。`--plugin-install`はcomma-separatedの一つ以上のport IDを受け付けます。指定しない`--plugin-install`は公式GitHub repositoryから対象portを取得します。指定した場合はlocal installerとして`port.toml`、metadata、必要なfpasoterm versionを検証し、該当plugin sourceだけをcopyします。local経路はnetworkへ接続しません。
 
 ports checkout外にある信頼済みの単独pluginをcopyする場合は、source fileを明示します。
 
@@ -156,6 +160,13 @@ install 後の plugin では declaration file をローカルへコピーし、r
   経由したplain UTF-8 textの読み書き。
 - `openExternalUrl(url)`: 明示した HTTP(S) URL を外部 browser で開く。user が操作した
   場合だけ呼び出し、外部 service へ text を送る場合は plugin 側で明示すること。
+- `selectLocalAsset({ accept, maxBytes })`: userの直接操作からnative file pickerを
+  開き、選択したassetの名前、media type、size、memory上の`ArrayBuffer`だけを返す。
+  filesystem path、directory handle、永続read権限は返さない。上限は64 MiBで、cancelは
+  `null`を返す。
+- `openCanvasOverlay({ title, width, height })`: keyboard操作可能なcanvas modalを開く。
+  canvasと`close()`、`focus()`を返す。Escape、Close button、backdrop
+  clickで閉じ、terminalへfocusを戻す。
 - `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
   `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
   行いません。
@@ -171,6 +182,13 @@ commandを登録しない場合もplugin自体は有効で起動時処理を実�
 `Plugin Catalog`を開いた時点で公式`INDEX`を取得します。検索欄は取得済みentryをport ID、name、author、descriptionで絞り込み、追加のnetwork requestやplugin installは行いません。
 
 plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
+
+これらのAPIをgeneral filesystem browserやdownloaderに使ってはいけません。assetは毎回
+userに選択させ、利用前にformatとsizeを検証し、active plugin session中だけmemoryに保持します。
+
+[`examples/plugins/local-asset-canvas.ts`](../examples/plugins/local-asset-canvas.ts)は
+小さなimage preview例です。先にcanvasを開き、そのcanvas clickから一つのimageを選択します。
+この順序によりfile chooserに必要なbrowserのuser activationを維持できます。
 
 登録した command は既存 menu の Tab / 矢印キー操作で選択できます。`Ctrl+Shift+p` は将来のcommand palette用に予約します。command paletteを追加する場合も、同じ command registry を plugin source の変更なしに利用できます。
 

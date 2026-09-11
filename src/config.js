@@ -99,6 +99,9 @@ const defaultConfig = Object.freeze({
     openCwd: 'o',
     broadcast: 'b',
     kill: 'k',
+    // Ctrl+Shift+U starts Unicode/IME input in GTK-based Linux WebViews.
+    // Digit0 remains available on Chromebook keyboards and avoids that input.
+    terminalReset: 'Ctrl+Shift+Digit0',
     tile: 't',
     closeAll: 'x',
   },
@@ -194,6 +197,8 @@ function migrateLegacyLogKeybindings(config) {
     kill: ['K', 'k'], tile: ['T', 't'], closeAll: ['X', 'x'],
   };
   const needsMigration = keybindings.logMenu === 'L'
+    || keybindings.terminalReset === 'u'
+    || keybindings.terminalReset === 'Ctrl+Alt+u'
     || Object.entries(legacyBindings).some(([name, [legacy]]) => keybindings[name] === legacy);
   if (!needsMigration) {
     return config;
@@ -206,6 +211,11 @@ function migrateLegacyLogKeybindings(config) {
   }
   if (migrated.keybindings.logMenu === 'L') {
     delete migrated.keybindings.logMenu;
+  }
+  // Prior defaults conflict with GTK Unicode/IME input or were less convenient
+  // on Chromebook keyboards. Preserve all other user-selected values.
+  if (migrated.keybindings.terminalReset === 'u' || migrated.keybindings.terminalReset === 'Ctrl+Alt+u') {
+    migrated.keybindings.terminalReset = 'Ctrl+Shift+Digit0';
   }
   return migrated;
 }

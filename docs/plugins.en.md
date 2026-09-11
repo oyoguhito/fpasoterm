@@ -175,9 +175,15 @@ the fpasoterm CLI directly. No `npm run ports install` step is needed:
 git clone https://github.com/oyoguhito/fpasoterm-plugins.git
 fpasoterm --plugin-install appearance/teal \
   --plugin-ports-dir ./fpasoterm-plugins --enable
+
+# A checkout root or its ports/ directory is accepted; ports may be comma-separated.
+fpasoterm --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-install integration/doom-wad-inspector,integration/doom-wasm-local --enable
 ```
 
-`--plugin-ports-dir` explicitly selects the checkout containing `ports/`.
+`--plugin-ports-dir` explicitly selects either the checkout containing `ports/`
+or that `ports/` directory itself. `--plugin-install` accepts one or more
+comma-separated port IDs.
 Without it, `--plugin-install` obtains the selected port from the official
 GitHub repository. With it, the installer reads `port.toml`, checks metadata
 and the minimum fpasoterm version, then copies only that local plugin source.
@@ -238,6 +244,15 @@ provides:
 - `openExternalUrl(url)`: open an explicit HTTP(S) URL in the external browser.
   Call it only from a user-initiated action; fpasoterm validates the scheme and
   plugins must clearly explain when text is sent to an external service.
+- `selectLocalAsset({ accept, maxBytes })`: show the native file picker from a
+  direct user action and return the selected asset's name, media type, size,
+  and in-memory `ArrayBuffer`. It never returns a filesystem path, directory
+  handle, or persistent read permission. The maximum request is 64 MiB;
+  cancellation returns `null`.
+- `openCanvasOverlay({ title, width, height })`: open a focus-trapped, keyboard
+  accessible canvas modal. It returns the canvas plus
+  `close()` and `focus()`. Escape, the Close button, and clicking the backdrop
+  close the modal and return focus to the terminal.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
   used by `fpasoterm --plugin-search`. It does not download, install, enable,
   or execute plugin source.
@@ -263,6 +278,15 @@ it does not make an additional request or install a plugin.
 Keep plugins small and defensive. A plugin load error is reported in diagnostics
 and does not stop later enabled plugins from loading, but an invalid plugin can
 still affect the renderer while it runs.
+
+Do not use these APIs to build a general filesystem browser or downloader.
+Ask the user to choose every asset, validate its format and size before use,
+and keep it in memory only for the active plugin session.
+
+[`examples/plugins/local-asset-canvas.ts`](../examples/plugins/local-asset-canvas.ts)
+is a small image-preview example: it opens the canvas first, then lets the user
+click the canvas to select one image. This order preserves the browser's
+user-activation requirement for the file chooser.
 
 Registered commands use the existing menu's Tab and arrow-key navigation.
 `Ctrl+Shift+p` is reserved for a future command palette, which can reuse the

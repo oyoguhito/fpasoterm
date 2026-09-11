@@ -440,8 +440,10 @@ installing Node.js, use `fpasoterm --plugin-install appearance/teal`. Add
 `--enable` only after review to enable it. See [Plugins](docs/plugins.en.md)
 for the fixed repository, validation, and overwrite rules.
 
-For a reviewed local `fpasoterm-plugins` checkout, use
+For a reviewed local `fpasoterm-plugins` checkout (or its `ports/` directory), use
 `fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`.
+Use a comma-separated list to install related ports together, for example
+`fpasoterm --plugin-ports-dir ./fpasoterm-plugins/ports --plugin-install integration/doom-wad-inspector,integration/doom-wasm-local --enable`.
 For one trusted standalone source file, use
 `fpasoterm --plugin-install-file ./my-plugin.ts --enable`. The ports project is
 for catalog/INDEX search and plugin development or validation; fpasoterm performs
