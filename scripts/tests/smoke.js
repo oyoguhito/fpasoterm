@@ -1984,6 +1984,7 @@ assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation/);
 assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title\}\?`/);
 assert.match(renderer, /dialog\.classList\.add\('is-confirming'\)/);
 assert.match(renderer, /is-confirming > header > button \{ display: none; \}/);
+assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation\[hidden\] \{ display: none !important; \}/);
 assert.match(renderer, /event\.code === 'Tab' \|\| event\.key === 'Tab'/);
 assert.match(renderer, /dialog\.addEventListener\('keydown', \(event\) => \{[\s\S]*?\}, true\)/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
