@@ -4,7 +4,7 @@
 
 const api = window.fpasotermPluginApi;
 
-function drawMessage(canvas: HTMLCanvasElement, message: string) {
+function drawMessage(canvas, message) {
   const context = canvas.getContext('2d');
   if (!context) return;
   context.fillStyle = '#101820';

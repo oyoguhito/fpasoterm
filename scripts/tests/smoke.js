@@ -1943,6 +1943,7 @@ assert.match(pluginTypes, /writeClipboard:/);
 assert.match(pluginTypes, /openExternalUrl:/);
 assert.match(pluginTypes, /selectLocalAsset:/);
 assert.match(pluginTypes, /openCanvasOverlay:/);
+assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
