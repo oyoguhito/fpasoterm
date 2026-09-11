@@ -2013,6 +2013,7 @@ function pluginScriptSource(plugin) {
 }
 
 const pluginAssetMaxBytes = 64 * 1024 * 1024;
+let pluginNativePickerCount = 0;
 
 function pluginUserActivationError(apiName) {
   return new Error(`${apiName} must be called directly from a user-initiated plugin action`);
@@ -2048,11 +2049,21 @@ function selectPluginLocalAsset(options = {}) {
   const accept = pluginAssetAcceptValue(resolvedOptions.accept);
   return new Promise((resolve, reject) => {
     const input = document.createElement('input');
+    const focusBeforePicker = document.activeElement;
+    let cleaned = false;
     input.type = 'file';
     input.accept = accept;
     input.tabIndex = -1;
     input.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;';
-    const cleanup = () => input.remove();
+    const cleanup = () => {
+      if (cleaned) return;
+      cleaned = true;
+      pluginNativePickerCount = Math.max(0, pluginNativePickerCount - 1);
+      input.remove();
+      if (focusBeforePicker instanceof HTMLElement && focusBeforePicker.isConnected) {
+        queueMicrotask(() => focusBeforePicker.focus({ preventScroll: true }));
+      }
+    };
     const cancel = () => {
       cleanup();
       resolve(null);
@@ -2081,7 +2092,13 @@ function selectPluginLocalAsset(options = {}) {
       }
     }, { once: true });
     document.body.append(input);
-    input.click();
+    pluginNativePickerCount += 1;
+    try {
+      input.click();
+    } catch (error) {
+      cleanup();
+      reject(new Error(`could not open file chooser: ${error?.message || error}`));
+    }
   });
 }
 
@@ -2135,7 +2152,10 @@ function openPluginCanvasOverlay(options = {}) {
   });
   dialog.addEventListener('focusout', () => {
     queueMicrotask(() => {
-      if (!closed && !dialog.contains(document.activeElement)) canvas.focus();
+      // The native chooser is outside this dialog in the WebView's document.
+      // Do not reclaim focus while it owns keyboard navigation; restore the
+      // canvas only after the chooser's change/cancel cleanup completes.
+      if (!closed && pluginNativePickerCount === 0 && !dialog.contains(document.activeElement)) canvas.focus();
     });
   });
   const style = document.createElement('style');
