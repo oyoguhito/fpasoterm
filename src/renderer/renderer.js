@@ -2222,13 +2222,14 @@ function openPluginCanvasOverlay(options = {}) {
     '.fpasoterm-plugin-canvas-dialog h2 { margin: 0; font-size: 16px; }',
     '.fpasoterm-plugin-canvas-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
     '.fpasoterm-plugin-canvas-dialog canvas { display: block; max-width: 100%; max-height: calc(100vh - 116px); background: #000; image-rendering: pixelated; outline: none; }',
-    '.fpasoterm-plugin-canvas-close-confirmation { position: absolute; inset: 0; z-index: 1; display: flex; align-items: center; justify-content: center; gap: 8px; padding: 10px; border: 1px solid #b98c3c; border-radius: 4px; background: rgba(24, 19, 10, .96); }',
+    '.fpasoterm-plugin-canvas-dialog.is-confirming > header > button { display: none; }',
+    '.fpasoterm-plugin-canvas-close-confirmation { display: flex; align-items: center; gap: 8px; margin-left: auto; padding: 7px 9px; border: 1px solid #b98c3c; border-radius: 4px; background: #30281a; }',
     '.fpasoterm-plugin-canvas-close-confirmation p { flex: 1; margin: 0; }',
     '.fpasoterm-plugin-canvas-dialog button:focus, .fpasoterm-plugin-canvas-dialog canvas:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
   ].join('');
-  header.append(heading, closeButton);
   closeConfirmation.append(closeConfirmationMessage, closeConfirmationCancelButton, closeConfirmationOkButton);
-  dialog.append(header, canvas, closeConfirmation);
+  header.append(heading, closeButton, closeConfirmation);
+  dialog.append(header, canvas);
   overlay.append(style, dialog);
   document.body.append(overlay);
   canvas.focus();
