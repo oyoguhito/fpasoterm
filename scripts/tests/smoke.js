@@ -1979,6 +1979,9 @@ assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClip
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
 assert.match(renderer, /selectLocalAsset: \(options\) => selectPluginLocalAsset\(options\)/);
 assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverlay\(options\)/);
+assert.match(renderer, /const confirmClose = resolvedOptions\.confirmClose === true/);
+assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation/);
+assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title\}\?`/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
 assert.match(renderer, /pluginNativePickerCount/);

@@ -2127,12 +2127,17 @@ function openPluginCanvasOverlay(options = {}) {
   };
   const width = clampSize(resolvedOptions.width, 640);
   const height = clampSize(resolvedOptions.height, 400);
+  const confirmClose = resolvedOptions.confirmClose === true;
   const overlay = document.createElement('div');
   const dialog = document.createElement('section');
   const header = document.createElement('header');
   const heading = document.createElement('h2');
   const closeButton = document.createElement('button');
   const canvas = document.createElement('canvas');
+  const closeConfirmation = document.createElement('section');
+  const closeConfirmationMessage = document.createElement('p');
+  const closeConfirmationCancelButton = document.createElement('button');
+  const closeConfirmationOkButton = document.createElement('button');
   let closed = false;
   overlay.className = 'fpasoterm-plugin-canvas-overlay';
   dialog.className = 'fpasoterm-plugin-canvas-dialog';
@@ -2146,23 +2151,56 @@ function openPluginCanvasOverlay(options = {}) {
   canvas.height = height;
   canvas.tabIndex = 0;
   canvas.setAttribute('aria-label', title);
-  const close = () => {
+  closeConfirmation.className = 'fpasoterm-plugin-canvas-close-confirmation';
+  closeConfirmation.hidden = true;
+  closeConfirmation.setAttribute('role', 'alertdialog');
+  closeConfirmation.setAttribute('aria-modal', 'true');
+  closeConfirmation.setAttribute('aria-label', `Close ${title}`);
+  closeConfirmationMessage.textContent = `Close ${title}?`;
+  closeConfirmationCancelButton.type = 'button';
+  closeConfirmationCancelButton.textContent = 'Cancel';
+  closeConfirmationOkButton.type = 'button';
+  closeConfirmationOkButton.textContent = 'Close';
+  const closeImmediately = () => {
     if (closed) return;
     closed = true;
     overlay.remove();
     term.focus();
   };
+  const close = () => {
+    if (closed) return;
+    if (!confirmClose) {
+      closeImmediately();
+      return;
+    }
+    closeConfirmation.hidden = false;
+    closeConfirmationCancelButton.focus();
+  };
   closeButton.addEventListener('click', close);
+  closeConfirmationCancelButton.addEventListener('click', () => {
+    closeConfirmation.hidden = true;
+    canvas.focus();
+  });
+  closeConfirmationOkButton.addEventListener('click', closeImmediately);
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) close();
   });
   dialog.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
-      close();
+      if (!closeConfirmation.hidden) {
+        closeConfirmation.hidden = true;
+        canvas.focus();
+      } else {
+        close();
+      }
     } else if (event.key === 'Tab') {
       event.preventDefault();
-      (document.activeElement === closeButton ? canvas : closeButton).focus();
+      const focusable = closeConfirmation.hidden
+        ? [closeButton, canvas]
+        : [closeConfirmationCancelButton, closeConfirmationOkButton];
+      const index = focusable.indexOf(document.activeElement);
+      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
     }
   });
   dialog.addEventListener('focusout', () => {
@@ -2181,10 +2219,13 @@ function openPluginCanvasOverlay(options = {}) {
     '.fpasoterm-plugin-canvas-dialog h2 { margin: 0; font-size: 16px; }',
     '.fpasoterm-plugin-canvas-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
     '.fpasoterm-plugin-canvas-dialog canvas { display: block; max-width: 100%; max-height: calc(100vh - 116px); background: #000; image-rendering: pixelated; outline: none; }',
+    '.fpasoterm-plugin-canvas-close-confirmation { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 12px; padding: 10px; border: 1px solid #b98c3c; border-radius: 4px; background: #30281a; }',
+    '.fpasoterm-plugin-canvas-close-confirmation p { flex: 1; margin: 0; }',
     '.fpasoterm-plugin-canvas-dialog button:focus-visible, .fpasoterm-plugin-canvas-dialog canvas:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
   ].join('');
   header.append(heading, closeButton);
-  dialog.append(header, canvas);
+  closeConfirmation.append(closeConfirmationMessage, closeConfirmationCancelButton, closeConfirmationOkButton);
+  dialog.append(header, canvas, closeConfirmation);
   overlay.append(style, dialog);
   document.body.append(overlay);
   canvas.focus();
