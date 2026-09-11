@@ -175,9 +175,15 @@ the fpasoterm CLI directly. No `npm run ports install` step is needed:
 git clone https://github.com/oyoguhito/fpasoterm-plugins.git
 fpasoterm --plugin-install appearance/teal \
   --plugin-ports-dir ./fpasoterm-plugins --enable
+
+# A checkout root or its ports/ directory is accepted; ports may be comma-separated.
+fpasoterm --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-install integration/doom-wad-inspector,integration/doom-wasm-local --enable
 ```
 
-`--plugin-ports-dir` explicitly selects the checkout containing `ports/`.
+`--plugin-ports-dir` explicitly selects either the checkout containing `ports/`
+or that `ports/` directory itself. `--plugin-install` accepts one or more
+comma-separated port IDs.
 Without it, `--plugin-install` obtains the selected port from the official
 GitHub repository. With it, the installer reads `port.toml`, checks metadata
 and the minimum fpasoterm version, then copies only that local plugin source.

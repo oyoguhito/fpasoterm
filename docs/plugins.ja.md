@@ -115,9 +115,13 @@ clone、review、開発中のlocal portは、`npm run ports install` を使わ�
 git clone https://github.com/oyoguhito/fpasoterm-plugins.git
 fpasoterm --plugin-install appearance/teal \
   --plugin-ports-dir ./fpasoterm-plugins --enable
+
+# checkout rootでもそのports/ directoryでも指定でき、portはcomma-separatedで複数指定できます。
+fpasoterm --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-install integration/doom-wad-inspector,integration/doom-wasm-local --enable
 ```
 
-`--plugin-ports-dir` には `ports/` を含むcheckoutを明示します。指定しない`--plugin-install`は公式GitHub repositoryから対象portを取得します。指定した場合はlocal installerとして`port.toml`、metadata、必要なfpasoterm versionを検証し、該当plugin sourceだけをcopyします。local経路はnetworkへ接続しません。
+`--plugin-ports-dir`には`ports/`を含むcheckoutまたはその`ports/` directory自体を明示します。`--plugin-install`はcomma-separatedの一つ以上のport IDを受け付けます。指定しない`--plugin-install`は公式GitHub repositoryから対象portを取得します。指定した場合はlocal installerとして`port.toml`、metadata、必要なfpasoterm versionを検証し、該当plugin sourceだけをcopyします。local経路はnetworkへ接続しません。
 
 ports checkout外にある信頼済みの単独pluginをcopyする場合は、source fileを明示します。
 

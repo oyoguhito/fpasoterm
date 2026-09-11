@@ -76,12 +76,12 @@ Options:
       --plugin-info <file>      Show a .js/.ts plugin's state, version, source, and load status.
       --plugin-uninstall <file> Remove comma-separated local User/plugins files, then exit.
       --plugin-search [query]   Search official public plugin ports, then exit.
-      --plugin-install <port>   Install one port from GitHub, or --plugin-ports-dir when supplied.
-      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout with --plugin-install.
+      --plugin-install <ports>  Install comma-separated ports from GitHub, or --plugin-ports-dir when supplied.
+      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout or its ports/ directory with --plugin-install.
       --plugin-install-file <path>
                                 Copy one trusted local .js/.ts plugin into User/plugins.
       --force                   Replace an existing file during a plugin install.
-      --enable                  Enable a plugin installed by one --plugin-install command.
+      --enable                  Enable plugins installed by --plugin-install.
       --update-config           Add missing default settings and back up config.toml, then exit.
       --prune-config            Remove unsupported settings and back up config.toml, then exit.
       --setup-sync              Ask questions and configure a local sync folder, then exit.
@@ -906,20 +906,30 @@ function installPluginSource(options, source, installPath, origin, version) {
 
 // Installs one reviewed public port without starting Cargo or the native desktop runtime.
 async function installPublicPlugin(options) {
-  const id = validatePublicPluginPortId(options.pluginInstall);
-  const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
-  const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'public');
-  const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, 1024 * 1024);
-  installPluginSource(options, source, installPath, `public port ${id}`, version);
+  for (const id of pluginInstallPortIds(options.pluginInstall)) {
+    const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
+    const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'public');
+    const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, 1024 * 1024);
+    installPluginSource(options, source, installPath, `public port ${id}`, version);
+  }
 }
 
-// Resolves a local ports checkout from an explicit path, environment, or sibling repository.
+// Parses a user-provided list before its values become local paths or public URLs.
+function pluginInstallPortIds(value) {
+  const ids = String(value || '').split(',').map((id) => id.trim()).filter(Boolean);
+  if (ids.length === 0) throw new Error('--plugin-install requires at least one category/name');
+  if (new Set(ids).size !== ids.length) throw new Error('--plugin-install cannot contain duplicate ports');
+  return ids.map(validatePublicPluginPortId);
+}
+
+// Resolves either a local checkout or its ports/ directory from an explicit path.
 function localPluginPortsDirectory(options) {
   const directory = path.resolve(options.pluginPortsDir || '');
-  if (!options.pluginPortsDir || !fs.existsSync(path.join(directory, 'ports'))) {
-    throw new Error('local fpasoterm-plugins checkout not found; pass --plugin-ports-dir <path>');
+  const portsDirectory = path.basename(directory) === 'ports' ? directory : path.join(directory, 'ports');
+  if (!options.pluginPortsDir || !fs.existsSync(portsDirectory)) {
+    throw new Error('local fpasoterm-plugins checkout or its ports directory not found; pass --plugin-ports-dir <path>');
   }
-  return directory;
+  return portsDirectory;
 }
 
 // Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
@@ -932,15 +942,16 @@ function readLocalPluginText(filePath, maximumBytes, label) {
   return fs.readFileSync(filePath, 'utf8');
 }
 
-// Installs a port from a checked-out fpasoterm-plugins tree for local development and review.
+// Installs ports from a checked-out fpasoterm-plugins tree or its ports/ directory.
 function installLocalPluginPort(options) {
-  const id = validatePublicPluginPortId(options.pluginInstall);
   const portsDirectory = localPluginPortsDirectory(options);
-  const portDirectory = path.join(portsDirectory, 'ports', ...id.split('/'));
-  const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
-  const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'local');
-  const source = readLocalPluginText(path.join(portDirectory, sourceName), 1024 * 1024, 'local plugin source');
-  installPluginSource(options, source, installPath, `local port ${id}`, version);
+  for (const id of pluginInstallPortIds(options.pluginInstall)) {
+    const portDirectory = path.join(portsDirectory, ...id.split('/'));
+    const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
+    const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'local');
+    const source = readLocalPluginText(path.join(portDirectory, sourceName), 1024 * 1024, 'local plugin source');
+    installPluginSource(options, source, installPath, `local port ${id}`, version);
+  }
 }
 
 // Copies one explicit, trusted local renderer plugin without needing a ports checkout.
