@@ -2181,7 +2181,7 @@ function openPluginCanvasOverlay(options = {}) {
     '.fpasoterm-plugin-canvas-dialog h2 { margin: 0; font-size: 16px; }',
     '.fpasoterm-plugin-canvas-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
     '.fpasoterm-plugin-canvas-dialog canvas { display: block; max-width: 100%; max-height: calc(100vh - 116px); background: #000; image-rendering: pixelated; outline: none; }',
-    '.fpasoterm-plugin-canvas-dialog button:focus-visible, .fpasoterm-plugin-canvas-dialog canvas:focus-visible { outline: 2px solid #83c5ff; outline-offset: 2px; }',
+    '.fpasoterm-plugin-canvas-dialog button:focus-visible, .fpasoterm-plugin-canvas-dialog canvas:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
   ].join('');
   header.append(heading, closeButton);
   dialog.append(header, canvas);

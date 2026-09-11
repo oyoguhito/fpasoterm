@@ -1985,6 +1985,7 @@ assert.match(renderer, /pluginNativePickerCount === 0/);
 assert.match(renderer, /cancelAfterNativePickerReturns/);
 assert.match(renderer, /must be called directly from a user-initiated plugin action/);
 assert.match(renderer, /fpasoterm-plugin-canvas-overlay/);
+assert.match(renderer, /outline: 4px solid #ffdb4d/);
 assert.match(renderer, /input\.addEventListener\('cancel', cancel/);
 assert.match(renderer, /dialog\.addEventListener\('focusout'/);
 assert.match(renderer, /function normalizeTerminalStateAfterAlternateScreenExit\(data\)/);
