@@ -50,6 +50,7 @@ assert.equal(platformDefaultConfig('linux', 'x64').security.oscNotificationMinIn
 assert.equal(platformDefaultConfig('linux', 'x64').keybindings.openCwd, 'o');
 assert.equal(platformDefaultConfig('linux', 'x64').keybindings.logToggle, 's');
 assert.equal(platformDefaultConfig('linux', 'x64').keybindings.logShow, 'l');
+assert.equal(platformDefaultConfig('linux', 'x64').keybindings.terminalReset, 'Ctrl+Shift+Digit0');
 assert.equal(Object.hasOwn(platformDefaultConfig('linux', 'x64').keybindings, 'logMenu'), false);
 assert.deepEqual(
   migrateLegacyLogKeybindings({ keybindings: { logMenu: 'L', logShow: 'P' } }).keybindings,
@@ -62,6 +63,14 @@ assert.deepEqual(
 assert.deepEqual(
   migrateLegacyLogKeybindings({ keybindings: { logToggle: 'S' } }).keybindings,
   { logToggle: 's' },
+);
+assert.deepEqual(
+  migrateLegacyLogKeybindings({ keybindings: { terminalReset: 'u' } }).keybindings,
+  { terminalReset: 'Ctrl+Shift+Digit0' },
+);
+assert.deepEqual(
+  migrateLegacyLogKeybindings({ keybindings: { terminalReset: 'Ctrl+Alt+u' } }).keybindings,
+  { terminalReset: 'Ctrl+Shift+Digit0' },
 );
 assert.deepEqual(
   migrateLegacyLogKeybindings({ keybindings: { copy: 'C', paste: 'V', menu: 'M', help: 'H', newWindow: 'N', broadcast: 'B', kill: 'K', tile: 'T', closeAll: 'X' } }).keybindings,
@@ -190,6 +199,7 @@ for (const file of [
   'examples/plugins/theme.ts',
   'examples/plugins/status-banner.ts',
   'examples/plugins/welcome-banner.ts',
+  'examples/plugins/local-asset-canvas.ts',
   'examples/config/default-appearance.toml',
   'examples/config/minimal.toml',
   'examples/config/profiles.toml',
@@ -1928,6 +1938,8 @@ assert.match(pluginTypes, /getOfficialPluginIndex:/);
 assert.match(pluginTypes, /readClipboard:/);
 assert.match(pluginTypes, /writeClipboard:/);
 assert.match(pluginTypes, /openExternalUrl:/);
+assert.match(pluginTypes, /selectLocalAsset:/);
+assert.match(pluginTypes, /openCanvasOverlay:/);
 
 const renderer = read('src/renderer/renderer.js');
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
@@ -1961,6 +1973,16 @@ assert.match(renderer, /getOfficialPluginIndex: \(\) => window\.fpasoterm\.getPl
 assert.match(renderer, /readClipboard: \(\) => window\.fpasoterm\.readClipboard\(\)/);
 assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClipboard\(text\)/);
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
+assert.match(renderer, /selectLocalAsset: \(options\) => selectPluginLocalAsset\(options\)/);
+assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverlay\(options\)/);
+assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
+assert.match(renderer, /must be called directly from a user-initiated plugin action/);
+assert.match(renderer, /fpasoterm-plugin-canvas-overlay/);
+assert.match(renderer, /input\.addEventListener\('cancel', cancel/);
+assert.match(renderer, /dialog\.addEventListener\('focusout'/);
+assert.match(renderer, /function normalizeTerminalStateAfterAlternateScreenExit\(data\)/);
+assert.match(renderer, /47\|1047\|1049/);
+assert.match(renderer, /\\x1b\(B\\x1b\[0m\\x1b\[\?25h/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
 assert.match(renderer, /pluginMenuSection\.hidden = false/);
@@ -2094,6 +2116,11 @@ assert.match(renderer, /key\.toLowerCase\(\) === 'k'/);
 assert.doesNotMatch(renderer, /matchesKeybinding\(event, 'logMenu'\)/);
 assert.match(renderer, /matchesKeybinding\(event, 'logToggle'\)/);
 assert.match(renderer, /matchesKeybinding\(event, 'logShow'\)/);
+assert.match(renderer, /matchesKeybinding\(event, 'terminalReset'\)/);
+assert.match(renderer, /function resetTerminalDisplayState\(\)/);
+assert.match(renderer, /terminal display state reset and screen cleared; requested shell prompt redraw/);
+assert.match(renderer, /sendTerminalInput\('\\x0c', 'terminal display reset prompt redraw'\)/);
+assert.match(renderer, /\\x1b\[\?1049l\\x1b\[\?1047l\\x1b\[\?47l\\x1b\(B\\x1b\[0m\\x1b\[2J\\x1b\[H\\x1b\[\?25h/);
 assert.doesNotMatch(renderer, /document\.execCommand\('copy'\)/);
 assert.match(renderer, /event\.clipboardData\?\.setData\('text\/plain', text\)/);
 assert.match(renderer, /event\.clipboardData\?\.setData\('text', text\)/);

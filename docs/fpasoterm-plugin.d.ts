@@ -30,6 +30,30 @@ type FpasotermPluginApi = {
   writeClipboard: (text: string) => Promise<void>;
   /** Opens an HTTP(S) URL in the external browser after a plugin's explicit user action. */
   openExternalUrl: (url: string) => Promise<void>;
+  /**
+   * Opens the native file chooser from a direct user action and returns only
+   * the selected file's metadata and bytes. It never exposes a path, directory
+   * handle, or persistent filesystem permission. `maxBytes` is capped at 64 MiB.
+   */
+  selectLocalAsset: (options?: {
+    accept?: string[];
+    maxBytes?: number;
+  }) => Promise<{
+    name: string;
+    mediaType: string;
+    size: number;
+    bytes: ArrayBuffer;
+  } | null>;
+  /** Opens a focus-trapped canvas modal. */
+  openCanvasOverlay: (options?: {
+    title?: string;
+    width?: number;
+    height?: number;
+  }) => {
+    canvas: HTMLCanvasElement;
+    close: () => void;
+    focus: () => void;
+  };
   getOfficialPluginIndex: () => Promise<Array<{
     id: string;
     name: string;

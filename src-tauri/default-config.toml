@@ -79,6 +79,7 @@ newWindow = "n"
 openCwd = "o"
 broadcast = "b"
 kill = "k"
+terminalReset = "Ctrl+Shift+Digit0"
 tile = "t"
 closeAll = "x"
 

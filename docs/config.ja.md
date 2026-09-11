@@ -300,6 +300,7 @@ newWindow = "N"
 openCwd = "o"
 broadcast = "B"
 kill = "K"
+terminalReset = "Ctrl+Shift+Digit0"
 tile = "T"
 closeAll = "X"
 
@@ -336,6 +337,13 @@ shortcut は fpasoterm に届かないことがあります。同じ full shortc
 `Ctrl+X` 単体は、例えば `closeAll = "Ctrl+X"` として指定できる有効な full shortcut です。
 `Ctrl+X` を押してから `N` を押す形式は、一つのshortcutではなく順序付きkey chordです。現行の
 config formatではkey chordには対応していません。
+
+`terminalReset` の既定値は物理的な`0`キーを使う`Ctrl+Shift+Digit0`であり、Chromebook keyboardでも
+利用できます。GTK系Linux WebViewで`Ctrl+Shift+U`はUnicode/IME input用に予約されるため、意図的に
+使いません。full-screen terminal program の終了後に表示が文字化けした場合、local xterm の primary
+screen、DEC文字集合、text attribute、cursor を復帰した後、表示中のprimary screenをclearし、shell
+prompt再描画のために`Ctrl+L`を一度PTYへ送ります。shell localeの変更、terminal outputの文字コード
+変換、scrollbackの消去は行いません。
 
 Windows では `Ctrl+N` や `Ctrl+Shift+n` を fpasoterm の確認に使わないでください。WebView または
 IME が renderer より先に捕捉する場合があります。代わりに、OS予約と競合しにくい明示的なbindingを
@@ -410,7 +418,7 @@ applicationをそのまま表示する値です。既存設定と比較する場
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 ```
-- `keybindings`: application shortcut の設定。`prefix = "Mod+Shift"` はWindows/Linuxでは`Ctrl+Shift`、macOSでは`Cmd+Shift`を表します。Windowsでkeyboard layoutまたは他applicationが`Ctrl+Shift`を捕捉する場合は、`prefix = "Ctrl+Alt"`へ変更してください。この変更は共通modifierを置換するため、従来の`Ctrl+Shift` application shortcutは実行されなくなります。prefix tokenは大文字小文字を区別しませんが、`Ctrl`/`Control`、`Alt`/`Option`、`Shift`、`Meta`/`Cmd`/`Command`、`Mod`だけが使用できます。`Ctrl+Esc`は`Esc`がmodifierではなくaction keyのため無効です。無効なprefixは`Mod+Shift`へfallbackし、menuのtooltipで確認できます。一文字のaction valueは`prefix`を継承し、full shortcut はそのactionだけを上書きします。action keyには`Escape`、`F1`、`ArrowUp`、`KeyN`/`Digit1`などを使用できます。例: `newWindow = "Ctrl+Alt+KeyN"`、`kill = "Ctrl+Alt+Escape"`。`KeyN`のような値はphysical keyboard keyで照合するため、keyboard layoutによる`event.key`の違いを避けられます。window menuの先頭には有効なprefixを表示し、各actionはキーだけを表示します。menuを開くと最初のitemへfocusし、`Tab`/`Shift+Tab`と矢印キーで移動、`Escape`で閉じてterminalへfocusを戻します。再起動またはruntime config fileの適用でmenu labelとbindingを更新します。
+- `keybindings`: application shortcut の設定。`prefix = "Mod+Shift"` はWindows/Linuxでは`Ctrl+Shift`、macOSでは`Cmd+Shift`を表します。Windowsでkeyboard layoutまたは他applicationが`Ctrl+Shift`を捕捉する場合は、`prefix = "Ctrl+Alt"`へ変更してください。この変更は共通modifierを置換するため、従来の`Ctrl+Shift` application shortcutは実行されなくなります。prefix tokenは大文字小文字を区別しませんが、`Ctrl`/`Control`、`Alt`/`Option`、`Shift`、`Meta`/`Cmd`/`Command`、`Mod`だけが使用できます。`Ctrl+Esc`は`Esc`がmodifierではなくaction keyのため無効です。無効なprefixは`Mod+Shift`へfallbackし、menuのtooltipで確認できます。一文字のaction valueは`prefix`を継承し、full shortcut はそのactionだけを上書きします。action keyには`Escape`、`F1`、`ArrowUp`、`KeyN`/`Digit1`などを使用できます。例: `newWindow = "Ctrl+Alt+KeyN"`、`kill = "Ctrl+Alt+Escape"`。`terminalReset = "Ctrl+Shift+Digit0"` は local xterm表示をclearしてから、shell prompt再描画用の`Ctrl+L`を一度PTYへ送ります。`KeyN`のような値はphysical keyboard keyで照合するため、keyboard layoutによる`event.key`の違いを避けられます。window menuの先頭には有効なprefixを表示し、各actionはキーだけを表示します。menuを開くと最初のitemへfocusし、`Tab`/`Shift+Tab`と矢印キーで移動、`Escape`で閉じてterminalへfocusを戻します。再起動またはruntime config fileの適用でmenu labelとbindingを更新します。
 fpasoterm は IME composition event を仮入力表示のためだけに監視します。xterm.js と WebView のnativeな入力配送をそのまま使い、fpasoterm が IME text を抑止・再送・置換・直接確定することはありません。ChromeOS/Linuxでは、新しいcompositionの開始時にまだ新しい仮入力textが入っていないため、hidden helper textareaに過去の確定textが残っている場合だけclearします。後続変換が過去の確定textを継承することを防ぎ、terminal textとPTY payloadは変更しません。Windows/LinuxではWebViewがxtermのhelper textareaを描画しない場合にだけ、表示専用の`IME` fallbackを使います。macOSはWebKit nativeのmarked text描画を使い、このfallbackを追加しないため、確定後にIME overlayが残りません。
 - `plugins.enabled`: `~/.config/fpasoterm/User/` からの相対 plugin path。
 - `sync`: diagnostics と明示的に送信した broadcast command を同期フォルダで共有する設定。`provider = "folder"` は Google Drive for desktop などで同期済みのローカルフォルダを使います。`commands` は短寿命の共有 command を許可し、`commandTtlSeconds` は実行可能な時間を制限します。詳細は [Sync Folder](sync.ja.md) を参照してください。

@@ -308,6 +308,7 @@ newWindow = "N"
 openCwd = "o"
 broadcast = "B"
 kill = "K"
+terminalReset = "Ctrl+Shift+Digit0"
 tile = "T"
 closeAll = "X"
 
@@ -347,6 +348,15 @@ fpasoterm actions.
 `Ctrl+X` is a valid complete shortcut, for example `closeAll = "Ctrl+X"`.
 `Ctrl+X` followed by another key such as `n` is an ordered key chord, not one
 shortcut; key chords are not supported by the current configuration format.
+
+`terminalReset` defaults to `Ctrl+Shift+Digit0`, which uses the physical `0`
+key and is available on Chromebook keyboards. `Ctrl+Shift+U` is deliberately
+not used because GTK-based Linux WebViews reserve it for Unicode/IME input. It
+restores the local xterm primary screen, DEC character set, text attributes,
+and cursor after a full-screen terminal program leaves the display garbled,
+then clears the visible primary screen and sends one `Ctrl+L` to ask the shell
+to redraw its prompt. It does not change the shell locale, transcode terminal
+output, or clear scrollback.
 
 On Windows, do not use `Ctrl+N` or `Ctrl+Shift+n` to test fpasoterm: WebView or
 the IME can consume them before the renderer receives them. Use an explicit
@@ -413,7 +423,7 @@ in its `[terminal]` section and restart, or launch the partial
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 ```
-- `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Opening it moves focus to its first item; `Tab`/`Shift+Tab` and arrow keys navigate it, while `Escape` closes it and returns focus to the terminal. Restart or apply a runtime config file to refresh the menu labels and bindings.
+- `keybindings`: application shortcut settings. `prefix = "Mod+Shift"` means `Ctrl+Shift` on Windows/Linux and `Cmd+Shift` on macOS. On Windows, set `prefix = "Ctrl+Alt"` when `Ctrl+Shift` is captured by a keyboard layout or another application. This replaces the shared modifier, so the former `Ctrl+Shift` application shortcuts no longer run. Prefix tokens are case-insensitive but may only be `Ctrl`/`Control`, `Alt`/`Option`, `Shift`, `Meta`/`Cmd`/`Command`, or `Mod`; `Ctrl+Esc` is invalid because `Esc` is an action key, not a modifier. An invalid prefix falls back to `Mod+Shift` and the menu provides a tooltip explaining that fallback. A one-letter action value inherits `prefix`; a complete shortcut overrides only that action. Valid action keys include `Escape`, `F1`, `ArrowUp`, and `KeyN`/`Digit1`; for example, use `newWindow = "Ctrl+Alt+KeyN"` or `kill = "Ctrl+Alt+Escape"`. `terminalReset = "Ctrl+Shift+Digit0"` clears local xterm display state and sends `Ctrl+L` once to redraw the shell prompt. `KeyN`-style values match the physical keyboard key, which avoids keyboard-layout-specific `event.key` differences. The window menu shows the active prefix at its top and each action only shows its key. Opening it moves focus to its first item; `Tab`/`Shift+Tab` and arrow keys navigate it, while `Escape` closes it and returns focus to the terminal. Restart or apply a runtime config file to refresh the menu labels and bindings.
 fpasoterm observes IME composition events only to show marked text. xterm.js and the WebView retain native input delivery: fpasoterm does not suppress, replay, replace, or directly commit IME text. On ChromeOS/Linux, at the start of a new composition, it clears xterm's hidden helper textarea when it contains stale committed text and before the new marked text is inserted. This prevents later conversions from inheriting accumulated committed text and does not change terminal text or the PTY payload. Windows/Linux use a visual-only `IME` marked-text fallback when the WebView does not paint xterm's helper textarea. macOS uses its native WebKit marked-text rendering and does not add this fallback, avoiding a stale IME overlay after commit.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics and explicitly requested broadcast commands. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. `commands` permits short-lived shared commands and `commandTtlSeconds` limits their lifetime. See [Sync Folder](sync.en.md).

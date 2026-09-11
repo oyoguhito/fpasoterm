@@ -62,6 +62,7 @@ const pluginMenuSection = document.getElementById('plugin-menu-section');
 const pluginMenuToggleButton = document.getElementById('plugin-menu-toggle');
 const pluginCatalogButton = document.getElementById('plugin-catalog');
 const terminalKillButton = document.getElementById('terminal-kill');
+const terminalResetButton = document.getElementById('terminal-reset');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
 const pluginCommandItems = document.getElementById('plugin-command-items');
@@ -162,6 +163,7 @@ const fallbackConfig = {
     openCwd: 'o',
     broadcast: 'b',
     kill: 'k',
+    terminalReset: 'Ctrl+Shift+Digit0',
     tile: 't',
     closeAll: 'x',
   },
@@ -208,6 +210,7 @@ let imageAddon;
 let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
+let terminalModeSequenceTail = '';
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
 let terminalDeferredResizeTimer = null;
@@ -306,7 +309,9 @@ function matchesKeybinding(event, name) {
 
 // Produces the visible shortcut form used by menus and the Help panel.
 function keybindingLabel(name) {
-  return keybindingSpec(name).replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl');
+  return keybindingSpec(name)
+    .replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl')
+    .replace(/\bDigit([0-9])\b/g, '$1');
 }
 
 // Returns the compact action-key label used in the constrained titlebar menu.
@@ -330,6 +335,7 @@ function applyKeybindingLabels() {
     [terminalLogShowButton, 'logShow', 'Log Show'],
     [terminalBroadcastButton, 'broadcast', 'Broadcast'],
     [terminalKillButton, 'kill', 'Kill'],
+    [terminalResetButton, 'terminalReset', 'Display Reset'],
     [terminalCopyButton, 'copy', 'Copy'],
     [terminalPasteButton, 'paste', 'Paste'],
     [newWindowButton, 'newWindow', 'New'],
@@ -844,8 +850,47 @@ function normalizeJapaneseTerminalText(data) {
   return String(data || '').normalize('NFC');
 }
 
+// ncurses switches to DEC special graphics while drawing /usr/games/worm and
+// returns with an alternate-screen reset (DECSET 47/1047/1049). Its normal exit
+// sequence does not explicitly restore G0/SGR afterwards. xterm restores this
+// state with the saved screen, but some WebKit/xterm.js combinations retain the
+// graphics charset or attributes. Restore only renderer display state after the
+// application's output has been parsed; no bytes are sent back to the PTY.
+function normalizeTerminalStateAfterAlternateScreenExit(data) {
+  const combined = terminalModeSequenceTail + data;
+  terminalModeSequenceTail = combined.slice(-16);
+  if (!/\x1b\[\?(?:47|1047|1049)l/.test(combined)) {
+    return data;
+  }
+  showDebugDiagnostic('renderer normalized terminal state after alternate-screen exit');
+  return `${data}\x1b(B\x1b[0m\x1b[?25h`;
+}
+
+// Restores local xterm display state after a full-screen program leaves the
+// primary screen in DEC graphics or a non-default SGR state. The display reset
+// is local, then Ctrl+L asks the interactive shell to redraw its prompt.
+function resetTerminalDisplayState() {
+  if (!term) {
+    return;
+  }
+  terminalModeSequenceTail = '';
+  clearImePreedit();
+  const textarea = terminalElement.querySelector('.xterm-helper-textarea');
+  // Blur first to cancel a pending browser composition (for example GTK's
+  // Ctrl+Shift+U Unicode input) before returning keyboard focus to xterm.
+  textarea?.blur();
+  if (textarea) {
+    textarea.value = '';
+  }
+  term.write('\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b(B\x1b[0m\x1b[2J\x1b[H\x1b[?25h', () => {
+    focusTerminalInput();
+    sendTerminalInput('\x0c', 'terminal display reset prompt redraw');
+  });
+  showDiagnostic('terminal display state reset and screen cleared; requested shell prompt redraw');
+}
+
 function queueTerminalOutput(data) {
-  const normalizedData = normalizeJapaneseTerminalText(data);
+  const normalizedData = normalizeTerminalStateAfterAlternateScreenExit(normalizeJapaneseTerminalText(data));
   showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
   processRuntimeOsc(normalizedData);
   mirrorTerminalData(normalizedData);
@@ -1334,6 +1379,13 @@ function installTerminalPasteHandlers() {
       }).catch((error) => {
         showDiagnostic(`terminal kill failed: ${error}`);
       });
+      return;
+    }
+
+    if (matchesKeybinding(event, 'terminalReset')) {
+      event.preventDefault();
+      event.stopPropagation();
+      resetTerminalDisplayState();
       return;
     }
 
@@ -1960,6 +2012,150 @@ function pluginScriptSource(plugin) {
   }
 }
 
+const pluginAssetMaxBytes = 64 * 1024 * 1024;
+
+function pluginUserActivationError(apiName) {
+  return new Error(`${apiName} must be called directly from a user-initiated plugin action`);
+}
+
+function requirePluginUserActivation(apiName) {
+  if (navigator.userActivation?.isActive === false) {
+    throw pluginUserActivationError(apiName);
+  }
+}
+
+function pluginAssetAcceptValue(accept) {
+  if (!Array.isArray(accept)) return '';
+  return accept
+    .filter((value) => typeof value === 'string' && /^\.?[A-Za-z0-9][A-Za-z0-9.+/*-]{0,63}$/.test(value))
+    .slice(0, 24)
+    .join(',');
+}
+
+// Opens the platform file chooser only while the user is acting on a plugin
+// command. It intentionally returns bytes and metadata, never a filesystem
+// path, directory handle, or reusable read capability.
+function selectPluginLocalAsset(options = {}) {
+  try {
+    requirePluginUserActivation('selectLocalAsset');
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  const resolvedOptions = options && typeof options === 'object' ? options : {};
+  const requestedMaxBytes = Number(resolvedOptions.maxBytes);
+  const maxBytes = Number.isSafeInteger(requestedMaxBytes) && requestedMaxBytes > 0
+    ? Math.min(requestedMaxBytes, pluginAssetMaxBytes) : pluginAssetMaxBytes;
+  const accept = pluginAssetAcceptValue(resolvedOptions.accept);
+  return new Promise((resolve, reject) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = accept;
+    input.tabIndex = -1;
+    input.style.cssText = 'position:fixed;left:-10000px;top:-10000px;width:1px;height:1px;opacity:0;';
+    const cleanup = () => input.remove();
+    const cancel = () => {
+      cleanup();
+      resolve(null);
+    };
+    input.addEventListener('cancel', cancel, { once: true });
+    input.addEventListener('change', async () => {
+      const file = input.files?.[0];
+      cleanup();
+      if (!file) {
+        resolve(null);
+        return;
+      }
+      if (file.size > maxBytes) {
+        reject(new Error(`selected asset is ${file.size} bytes; maximum is ${maxBytes} bytes`));
+        return;
+      }
+      try {
+        resolve({
+          name: file.name,
+          mediaType: file.type || 'application/octet-stream',
+          size: file.size,
+          bytes: await file.arrayBuffer(),
+        });
+      } catch (error) {
+        reject(new Error(`could not read selected asset: ${error?.message || error}`));
+      }
+    }, { once: true });
+    document.body.append(input);
+    input.click();
+  });
+}
+
+function openPluginCanvasOverlay(options = {}) {
+  const resolvedOptions = options && typeof options === 'object' ? options : {};
+  const title = typeof resolvedOptions.title === 'string' && resolvedOptions.title.trim()
+    ? resolvedOptions.title.trim().slice(0, 120) : 'Plugin canvas';
+  const clampSize = (value, fallback) => {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? Math.min(2048, Math.max(160, number)) : fallback;
+  };
+  const width = clampSize(resolvedOptions.width, 640);
+  const height = clampSize(resolvedOptions.height, 400);
+  const overlay = document.createElement('div');
+  const dialog = document.createElement('section');
+  const header = document.createElement('header');
+  const heading = document.createElement('h2');
+  const closeButton = document.createElement('button');
+  const canvas = document.createElement('canvas');
+  let closed = false;
+  overlay.className = 'fpasoterm-plugin-canvas-overlay';
+  dialog.className = 'fpasoterm-plugin-canvas-dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  heading.textContent = title;
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  canvas.width = width;
+  canvas.height = height;
+  canvas.tabIndex = 0;
+  canvas.setAttribute('aria-label', title);
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.remove();
+    term.focus();
+  };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    } else if (event.key === 'Tab') {
+      event.preventDefault();
+      (document.activeElement === closeButton ? canvas : closeButton).focus();
+    }
+  });
+  dialog.addEventListener('focusout', () => {
+    queueMicrotask(() => {
+      if (!closed && !dialog.contains(document.activeElement)) canvas.focus();
+    });
+  });
+  const style = document.createElement('style');
+  style.textContent = [
+    '.fpasoterm-plugin-canvas-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .58); }',
+    '.fpasoterm-plugin-canvas-dialog { width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
+    '.fpasoterm-plugin-canvas-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }',
+    '.fpasoterm-plugin-canvas-dialog h2 { margin: 0; font-size: 16px; }',
+    '.fpasoterm-plugin-canvas-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
+    '.fpasoterm-plugin-canvas-dialog canvas { display: block; max-width: 100%; max-height: calc(100vh - 116px); background: #000; image-rendering: pixelated; outline: none; }',
+    '.fpasoterm-plugin-canvas-dialog button:focus-visible, .fpasoterm-plugin-canvas-dialog canvas:focus-visible { outline: 2px solid #83c5ff; outline-offset: 2px; }',
+  ].join('');
+  header.append(heading, closeButton);
+  dialog.append(header, canvas);
+  overlay.append(style, dialog);
+  document.body.append(overlay);
+  canvas.focus();
+  return Object.freeze({ canvas, close, focus: () => canvas.focus() });
+}
+
 // Publishes the plugin API and loads enabled user plugins in order.
 async function loadPlugins() {
   window.fpasotermPluginApi = Object.freeze({
@@ -1971,6 +2167,8 @@ async function loadPlugins() {
     log: (message) => showDiagnostic(`plugin: ${message}`),
     readClipboard: () => window.fpasoterm.readClipboard(),
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
+    selectLocalAsset: (options) => selectPluginLocalAsset(options),
+    openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
@@ -3078,6 +3276,7 @@ async function showKeyboardShortcutsHelp() {
     `${keybindingLabel('openCwd')}  Open a new terminal window in the OSC 7 current directory`,
     `${keybindingLabel('broadcast')}  Broadcast input to local windows or the synced channel`,
     `${keybindingLabel('kill')}  Kill the running terminal command and keep its shell open`,
+    `${keybindingLabel('terminalReset')}  Clear screen and reset local terminal display state after garbled text`,
     `${keybindingLabel('tile')}  Tile all fpasoterm windows`,
     `${keybindingLabel('closeAll')}  Close all fpasoterm windows after confirmation`,
     'Check for Updates  Compare this build with the npm latest release',
@@ -3467,6 +3666,12 @@ terminalKillButton.addEventListener('click', () => {
   }).catch((error) => {
     showDiagnostic(`terminal kill failed: ${error}`);
   }).finally(() => setWindowMenuOpen(false));
+});
+
+// Restores xterm's local screen/charset state without changing the shell state.
+terminalResetButton.addEventListener('click', () => {
+  resetTerminalDisplayState();
+  setWindowMenuOpen(false);
 });
 
 terminalBroadcastButton.addEventListener('click', () => {

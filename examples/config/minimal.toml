@@ -23,6 +23,8 @@ shell = ""
 
 [keybindings]
 prefix = "Mod+Shift"
+# Ctrl+Shift+U is reserved for Unicode/IME input on GTK Linux desktop builds.
+terminalReset = "Ctrl+Shift+Digit0"
 newWindow = "N"
 tile = "T"
 
