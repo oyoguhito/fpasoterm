@@ -2051,6 +2051,14 @@ function selectPluginLocalAsset(options = {}) {
     const input = document.createElement('input');
     const focusBeforePicker = document.activeElement;
     let cleaned = false;
+    let pickerWasShown = false;
+    const cancelAfterNativePickerReturns = () => {
+      // Some WebKit native choosers do not dispatch `cancel`. When focus comes
+      // back and no file was selected, complete the request as a cancellation.
+      setTimeout(() => {
+        if (pickerWasShown && input.isConnected && !input.files?.length) cancel();
+      }, 0);
+    };
     input.type = 'file';
     input.accept = accept;
     input.tabIndex = -1;
@@ -2058,6 +2066,7 @@ function selectPluginLocalAsset(options = {}) {
     const cleanup = () => {
       if (cleaned) return;
       cleaned = true;
+      window.removeEventListener('focus', cancelAfterNativePickerReturns);
       pluginNativePickerCount = Math.max(0, pluginNativePickerCount - 1);
       input.remove();
       if (focusBeforePicker instanceof HTMLElement && focusBeforePicker.isConnected) {
@@ -2095,6 +2104,12 @@ function selectPluginLocalAsset(options = {}) {
     pluginNativePickerCount += 1;
     try {
       input.click();
+      setTimeout(() => {
+        if (input.isConnected) {
+          pickerWasShown = true;
+          window.addEventListener('focus', cancelAfterNativePickerReturns, { once: true });
+        }
+      }, 0);
     } catch (error) {
       cleanup();
       reject(new Error(`could not open file chooser: ${error?.message || error}`));

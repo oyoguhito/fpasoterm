@@ -1982,6 +1982,7 @@ assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverla
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
 assert.match(renderer, /pluginNativePickerCount/);
 assert.match(renderer, /pluginNativePickerCount === 0/);
+assert.match(renderer, /cancelAfterNativePickerReturns/);
 assert.match(renderer, /must be called directly from a user-initiated plugin action/);
 assert.match(renderer, /fpasoterm-plugin-canvas-overlay/);
 assert.match(renderer, /input\.addEventListener\('cancel', cancel/);
