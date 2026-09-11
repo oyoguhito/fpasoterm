@@ -2187,6 +2187,8 @@ function openPluginCanvasOverlay(options = {}) {
   overlay.addEventListener('click', (event) => {
     if (event.target === overlay) close();
   });
+  // Capture Tab inside the modal before WebView or plugin handlers can move
+  // focus outside the canvas dialog.
   dialog.addEventListener('keydown', (event) => {
     if (event.code === 'Escape' || event.key === 'Escape') {
       event.preventDefault();
@@ -2205,7 +2207,7 @@ function openPluginCanvasOverlay(options = {}) {
       const index = focusable.indexOf(document.activeElement);
       focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
     }
-  });
+  }, true);
   dialog.addEventListener('focusout', () => {
     queueMicrotask(() => {
       // The native chooser is outside this dialog in the WebView's document.

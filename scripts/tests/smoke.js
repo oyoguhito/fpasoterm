@@ -1985,6 +1985,7 @@ assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title
 assert.match(renderer, /dialog\.classList\.add\('is-confirming'\)/);
 assert.match(renderer, /is-confirming > header > button \{ display: none; \}/);
 assert.match(renderer, /event\.code === 'Tab' \|\| event\.key === 'Tab'/);
+assert.match(renderer, /dialog\.addEventListener\('keydown', \(event\) => \{[\s\S]*?\}, true\)/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
 assert.match(renderer, /pluginNativePickerCount/);
