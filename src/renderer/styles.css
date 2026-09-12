@@ -464,6 +464,37 @@ body {
   display: none;
 }
 
+/* Kept above plugin overlays so a failed panel invocation is diagnosable even
+ * when the embedded page paints only a black surface. */
+#plugin-command-status {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 8px);
+  right: 8px;
+  left: 8px;
+  z-index: 13000;
+  max-height: min(30vh, 220px);
+  overflow: auto;
+  padding: 8px 10px;
+  border: 2px solid #67c587;
+  border-radius: 6px;
+  background: rgba(13, 28, 20, 0.98);
+  color: #e8fff0;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  white-space: pre-wrap;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#plugin-command-status[data-state="error"] {
+  border-color: #ff8f8f;
+  background: rgba(49, 16, 19, 0.98);
+  color: #fff0f0;
+}
+
+#plugin-command-status[hidden] {
+  display: none;
+}
+
 .fpasoterm-plugin-web-dialog {
   width: min(100%, calc(100vw - 32px));
   max-height: calc(100vh - 32px);

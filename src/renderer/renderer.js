@@ -103,9 +103,11 @@ const sshfsManagerPasswordToggleButton = document.getElementById('sshfs-manager-
 const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-local-path');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
+const pluginCommandStatusElement = document.getElementById('plugin-command-status');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 const diagnosticLines = [];
 let terminalMirrorText = '';
+let pluginCommandStatusLines = [];
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {
@@ -838,6 +840,18 @@ function showDebugDiagnostic(message) {
   if (debugKeys) {
     showDiagnostic(message);
   }
+}
+
+// Keeps a renderer-visible trace above plugin overlays. Unlike Diagnostics,
+// this is not hidden by a modal and is also retained after an exception.
+function showPluginCommandStatus(message, state = 'progress') {
+  if (!pluginCommandStatusElement) return;
+  const timestamp = new Date().toLocaleTimeString();
+  pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
+  if (pluginCommandStatusLines.length > 10) pluginCommandStatusLines.shift();
+  pluginCommandStatusElement.dataset.state = state;
+  pluginCommandStatusElement.textContent = `Plugin activity\n${pluginCommandStatusLines.join('\n')}`;
+  pluginCommandStatusElement.hidden = false;
 }
 
 // Converts control characters into visible markers for diagnostics output.
@@ -2255,6 +2269,7 @@ const supportedPluginPanelOrigins = new Set([
 ]);
 
 function openPluginWebPanel(options = {}, declaredOrigins = []) {
+  showPluginCommandStatus('web panel: checking user action and origin policy');
   requirePluginUserActivation('openWebPanel');
   const resolvedOptions = options && typeof options === 'object' ? options : {};
   const title = typeof resolvedOptions.title === 'string' && resolvedOptions.title.trim()
@@ -2270,6 +2285,7 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
     || !grantedOrigins.has(url.origin) || !supportedPluginPanelOrigins.has(url.origin)) {
     throw new Error(`web panel origin is not permitted: ${url.origin}`);
   }
+  showPluginCommandStatus(`web panel: policy accepted for ${url.origin}`);
   const clampSize = (value, fallback) => {
     const number = Number(value);
     return Number.isSafeInteger(number) ? Math.min(2048, Math.max(320, number)) : fallback;
@@ -2317,9 +2333,11 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   frame.setAttribute('allowfullscreen', '');
   frame.addEventListener('load', () => {
     status.textContent = `Loaded ${url.origin}. Use the player controls inside this panel.`;
+    showPluginCommandStatus(`web panel: iframe load event received from ${url.origin}`);
   });
   frame.addEventListener('error', () => {
     status.textContent = `Could not load ${url.origin}. Check the Diagnostics command for details.`;
+    showPluginCommandStatus(`web panel: iframe error event from ${url.origin}`, 'error');
   });
   loadButton.addEventListener('click', () => {
     if (remoteContentLoaded) return;
@@ -2328,6 +2346,7 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
     loadButton.hidden = true;
     frame.hidden = false;
     status.textContent = `Loading ${url.origin}…`;
+    showPluginCommandStatus(`web panel: iframe navigation started for ${url.origin}`);
     frame.src = url.toString();
     frame.focus();
   });
@@ -2365,6 +2384,7 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   dialog.append(header, status, frame);
   overlay.replaceChildren(dialog);
   overlay.hidden = false;
+  showPluginCommandStatus('web panel: local host displayed; select Load content to start the iframe');
   closeButton.focus();
   return Object.freeze({ close, focus: () => frame.focus() });
 }
@@ -2514,11 +2534,16 @@ async function runPluginCommand(commandId) {
     return;
   }
   setWindowMenuOpen(false);
+  pluginCommandStatusLines = [];
+  showPluginCommandStatus(`command started: ${commandId}`);
   pluginCommandInvocationDepth += 1;
   try {
     await command.handler();
+    showPluginCommandStatus(`command completed: ${commandId}`);
   } catch (error) {
-    showDiagnostic(`plugin command ${commandId} failed: ${error?.stack || error}`);
+    const detail = error?.stack || error;
+    showPluginCommandStatus(`command failed: ${commandId}\n${detail}`, 'error');
+    showDiagnostic(`plugin command ${commandId} failed: ${detail}`);
   } finally {
     pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
   }
