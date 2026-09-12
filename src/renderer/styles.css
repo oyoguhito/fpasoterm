@@ -423,11 +423,12 @@ body {
 
 #terminal-mirror {
   position: fixed;
-  top: calc(var(--titlebar-height) + 8px);
+  /* Keep debug output away from the titlebar and normal terminal content. */
+  bottom: 8px;
   right: 8px;
   left: 8px;
   z-index: 9;
-  max-height: min(34vh, 260px);
+  max-height: min(22vh, 160px);
   margin: 0;
   overflow: auto;
   padding: 8px;
