@@ -2273,16 +2273,20 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   const dialog = document.createElement('section');
   const header = document.createElement('header');
   const heading = document.createElement('h2');
+  const loadButton = document.createElement('button');
   const closeButton = document.createElement('button');
   const status = document.createElement('p');
   const frame = document.createElement('iframe');
   let closed = false;
+  let remoteContentLoaded = false;
   overlay.className = 'fpasoterm-plugin-web-overlay';
   dialog.className = 'fpasoterm-plugin-web-dialog';
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-label', title);
   heading.textContent = title;
+  loadButton.type = 'button';
+  loadButton.textContent = 'Load content';
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
   status.className = 'fpasoterm-plugin-web-status';
@@ -2290,10 +2294,13 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   // indistinguishable black surface.  The embedded page is cross-origin, so
   // its response body is not inspectable, but its load lifecycle still gives
   // users an unambiguous indication that the panel itself is alive.
-  status.textContent = `Loading ${url.origin}…`;
+  // Do not load the remote document until this local dialog has painted.  In
+  // particular, a WebKit/media failure must not make an otherwise useful
+  // close/status surface look like a blank application window.
+  status.textContent = `Ready to load ${url.origin}.`;
   frame.width = String(width);
   frame.height = String(height);
-  frame.src = url.toString();
+  frame.hidden = true;
   frame.tabIndex = 0;
   frame.title = title;
   frame.referrerPolicy = 'strict-origin-when-cross-origin';
@@ -2304,6 +2311,16 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   });
   frame.addEventListener('error', () => {
     status.textContent = `Could not load ${url.origin}. Check the Diagnostics command for details.`;
+  });
+  loadButton.addEventListener('click', () => {
+    if (remoteContentLoaded) return;
+    remoteContentLoaded = true;
+    loadButton.disabled = true;
+    loadButton.hidden = true;
+    frame.hidden = false;
+    status.textContent = `Loading ${url.origin}…`;
+    frame.src = url.toString();
+    frame.focus();
   });
   const close = () => {
     if (closed) return;
@@ -2321,7 +2338,7 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
       close();
     } else if (event.code === 'Tab' || event.key === 'Tab') {
       event.preventDefault();
-      const focusable = [closeButton, frame];
+      const focusable = frame.hidden ? [loadButton, closeButton] : [closeButton, frame];
       const index = focusable.indexOf(document.activeElement);
       focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
     }
@@ -2337,12 +2354,17 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
     '.fpasoterm-plugin-web-dialog { width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
     '.fpasoterm-plugin-web-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }',
     '.fpasoterm-plugin-web-dialog h2 { margin: 0; font-size: 16px; }',
+    '.fpasoterm-plugin-web-dialog header > div { display: flex; align-items: center; gap: 8px; }',
     '.fpasoterm-plugin-web-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
+    '.fpasoterm-plugin-web-dialog button:disabled { cursor: wait; opacity: .68; }',
     '.fpasoterm-plugin-web-status { margin: 0 0 10px; min-height: 1.2em; color: #c8d9e8; }',
     '.fpasoterm-plugin-web-dialog iframe { display: block; width: min(100%, 2048px); max-height: calc(100vh - 116px); border: 0; background: #000; }',
+    '.fpasoterm-plugin-web-dialog iframe[hidden] { display: none !important; }',
     '.fpasoterm-plugin-web-dialog button:focus, .fpasoterm-plugin-web-dialog iframe:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
   ].join('');
-  header.append(heading, closeButton);
+  const actions = document.createElement('div');
+  actions.append(loadButton, closeButton);
+  header.append(heading, actions);
   dialog.append(header, status, frame);
   overlay.append(style, dialog);
   document.body.append(overlay);
