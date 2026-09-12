@@ -1153,7 +1153,10 @@ assert.match(rustMain, /Get-Content -LiteralPath \$args\[0\] -Raw -Encoding UTF8
 assert.doesNotMatch(rustMain, /Set-Clipboard -Value \(\[Console\]::In\.ReadToEnd\(\)\)/);
 assert.doesNotMatch(rustMain, removedSnakeHttpUiPattern);
 assert.doesNotMatch(rustMain, removedKebabHttpUiPattern);
-assert.doesNotMatch(rustMain, /TcpListener::bind/);
+// The YouTube embed wrapper is deliberately loopback-only.  It must never
+// become a general HTTP UI or an externally reachable listener.
+assert.match(rustMain, /TcpListener::bind\("127\.0\.0\.1:0"\)/);
+assert.doesNotMatch(rustMain, /TcpListener::bind\("0\.0\.0\.0/);
 assert.doesNotMatch(rustMain, /handle\.join\(\)/);
 assert.match(rustMain, /terminal_log_start/);
 assert.match(rustMain, /terminal_log_stop/);
@@ -1992,6 +1995,8 @@ assert.match(renderer, /openWebPanel: \(options\) => openPluginWebPanel\(options
 assert.match(renderer, /const supportedPluginPanelOrigins = new Set/);
 assert.match(renderer, /web panel origin is not permitted/);
 assert.match(read('src-tauri/tauri.conf.json'), /frame-src https:\/\/www\.youtube\.com https:\/\/www\.youtube-nocookie\.com/);
+assert.match(read('src-tauri/tauri.conf.json'), /http:\/\/127\.0\.0\.1:\*/);
+assert.match(renderer, /pluginWebPanelFrameUrl/);
 assert.match(renderer, /const confirmClose = resolvedOptions\.confirmClose === true/);
 assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation/);
 assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title\}\?`/);
