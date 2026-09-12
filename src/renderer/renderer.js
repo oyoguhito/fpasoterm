@@ -2442,6 +2442,9 @@ async function loadPlugins() {
     await new Promise((resolve) => {
       const commandCountBeforeLoad = pluginCommands.size;
       const script = document.createElement('script');
+      showPluginCommandStatus(
+        `plugin metadata: ${plugin.name} allowed origins=${(plugin.allowedOrigins || []).join(',') || '(none)'}`,
+      );
       window.fpasotermPluginApi = pluginApi(plugin);
       const source = pluginScriptSource(plugin);
       script.src = source;

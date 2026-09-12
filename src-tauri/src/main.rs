@@ -103,10 +103,12 @@ struct WindowConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 // Resolved plugin script URL exposed to the renderer.
 struct PluginUrl {
     name: String,
     url: String,
+    #[serde(default)]
     allowed_origins: Vec<String>,
 }
 
@@ -9163,6 +9165,20 @@ installPath = "appearance/other.ts"
                 "https://www.youtube-nocookie.com".to_string(),
                 "https://www.youtube.com".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn plugin_url_serializes_allowed_origins_for_the_renderer() {
+        let value = serde_json::to_value(PluginUrl {
+            name: "plugins/example.ts".to_string(),
+            url: "file:///tmp/example.js".to_string(),
+            allowed_origins: vec!["https://www.youtube-nocookie.com".to_string()],
+        })
+        .expect("serialize plugin URL");
+        assert_eq!(
+            value["allowedOrigins"],
+            serde_json::json!(["https://www.youtube-nocookie.com"])
         );
     }
 
