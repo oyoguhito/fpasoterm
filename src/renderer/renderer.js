@@ -2269,7 +2269,10 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   };
   const width = clampSize(resolvedOptions.width, 960);
   const height = clampSize(resolvedOptions.height, 600);
-  const overlay = document.createElement('div');
+  const overlay = document.getElementById('plugin-web-panel-host');
+  if (!overlay) {
+    throw new Error('web panel host is unavailable');
+  }
   const dialog = document.createElement('section');
   const header = document.createElement('header');
   const heading = document.createElement('h2');
@@ -2279,7 +2282,6 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   const frame = document.createElement('iframe');
   let closed = false;
   let remoteContentLoaded = false;
-  overlay.className = 'fpasoterm-plugin-web-overlay';
   dialog.className = 'fpasoterm-plugin-web-dialog';
   dialog.setAttribute('role', 'dialog');
   dialog.setAttribute('aria-modal', 'true');
@@ -2325,13 +2327,15 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   const close = () => {
     if (closed) return;
     closed = true;
-    overlay.remove();
+    overlay.onclick = null;
+    overlay.replaceChildren();
+    overlay.hidden = true;
     term.focus();
   };
   closeButton.addEventListener('click', close);
-  overlay.addEventListener('click', (event) => {
+  overlay.onclick = (event) => {
     if (event.target === overlay) close();
-  });
+  };
   dialog.addEventListener('keydown', (event) => {
     if (event.code === 'Escape' || event.key === 'Escape') {
       event.preventDefault();
@@ -2348,26 +2352,12 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
       if (!closed && !dialog.contains(document.activeElement)) closeButton.focus();
     });
   });
-  const style = document.createElement('style');
-  style.textContent = [
-    '.fpasoterm-plugin-web-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .58); }',
-    '.fpasoterm-plugin-web-dialog { width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
-    '.fpasoterm-plugin-web-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }',
-    '.fpasoterm-plugin-web-dialog h2 { margin: 0; font-size: 16px; }',
-    '.fpasoterm-plugin-web-dialog header > div { display: flex; align-items: center; gap: 8px; }',
-    '.fpasoterm-plugin-web-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
-    '.fpasoterm-plugin-web-dialog button:disabled { cursor: wait; opacity: .68; }',
-    '.fpasoterm-plugin-web-status { margin: 0 0 10px; min-height: 1.2em; color: #c8d9e8; }',
-    '.fpasoterm-plugin-web-dialog iframe { display: block; width: min(100%, 2048px); max-height: calc(100vh - 116px); border: 0; background: #000; }',
-    '.fpasoterm-plugin-web-dialog iframe[hidden] { display: none !important; }',
-    '.fpasoterm-plugin-web-dialog button:focus, .fpasoterm-plugin-web-dialog iframe:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
-  ].join('');
   const actions = document.createElement('div');
   actions.append(loadButton, closeButton);
   header.append(heading, actions);
   dialog.append(header, status, frame);
-  overlay.append(style, dialog);
-  document.body.append(overlay);
+  overlay.replaceChildren(dialog);
+  overlay.hidden = false;
   closeButton.focus();
   return Object.freeze({ close, focus: () => frame.focus() });
 }
