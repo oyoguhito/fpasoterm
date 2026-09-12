@@ -104,6 +104,8 @@ const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-loca
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 const pluginCommandStatusElement = document.getElementById('plugin-command-status');
+const pluginCommandStatusTextElement = document.getElementById('plugin-command-status-text');
+const pluginCommandStatusCopyButton = document.getElementById('plugin-command-status-copy');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 let pluginActivity = false;
 const diagnosticLines = [];
@@ -846,15 +848,33 @@ function showDebugDiagnostic(message) {
 // Keeps a renderer-visible trace above plugin overlays. Unlike Diagnostics,
 // this is not hidden by a modal and is also retained after an exception.
 function showPluginCommandStatus(message, state = 'progress') {
+  const diagnostic = `plugin activity: ${message}`;
+  console.error(diagnostic);
+  window.fpasoterm?.logDiagnostic?.(diagnostic).catch(() => {});
   if (!pluginActivity && state !== 'error') return;
-  if (!pluginCommandStatusElement) return;
+  if (!pluginCommandStatusElement || !pluginCommandStatusTextElement) return;
   const timestamp = new Date().toLocaleTimeString();
   pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
   if (pluginCommandStatusLines.length > 10) pluginCommandStatusLines.shift();
   pluginCommandStatusElement.dataset.state = state;
-  pluginCommandStatusElement.textContent = `Plugin activity\n${pluginCommandStatusLines.join('\n')}`;
+  pluginCommandStatusTextElement.textContent = pluginCommandStatusLines.join('\n');
   pluginCommandStatusElement.hidden = false;
 }
+
+pluginCommandStatusCopyButton?.addEventListener('click', async () => {
+  const text = pluginCommandStatusLines.join('\n');
+  if (!text) return;
+  try {
+    await window.fpasoterm.writeClipboard(text);
+    pluginCommandStatusCopyButton.textContent = 'Copied';
+  } catch (error) {
+    pluginCommandStatusCopyButton.textContent = 'Copy failed';
+    console.error(`plugin activity copy failed: ${error}`);
+  }
+  setTimeout(() => {
+    pluginCommandStatusCopyButton.textContent = 'Copy';
+  }, 1400);
+});
 
 // Converts control characters into visible markers for diagnostics output.
 function printableDiagnosticData(data) {
@@ -1633,6 +1653,9 @@ async function loadRuntimeConfig() {
     activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
     pluginActivity = pluginActivity || runtimeConfig.diagnostics?.pluginActivity === true;
+    if (pluginActivity) {
+      showPluginCommandStatus('plugin activity enabled');
+    }
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
