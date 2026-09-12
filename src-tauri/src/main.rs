@@ -107,6 +107,7 @@ struct WindowConfig {
 struct PluginUrl {
     name: String,
     url: String,
+    allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -3295,6 +3296,7 @@ fn resolve_direct_plugin_urls(config: &Config, config_dir: &Path) -> Vec<PluginU
             urls.push(PluginUrl {
                 name: name.replace('\\', "/"),
                 url,
+                allowed_origins: plugin_allowed_origins(&source),
             });
         }
     }
@@ -4064,6 +4066,33 @@ fn discover_plugin_files(config_path: &str) -> Vec<String> {
 struct PluginMetadata {
     version: String,
     description: String,
+}
+
+// Reads the same declarative HTTPS origin header as the Node launcher. The
+// renderer additionally intersects these declarations with its small core
+// allowlist before a web panel is opened.
+fn plugin_allowed_origins(source: &str) -> Vec<String> {
+    let mut origins = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let Some(values) = trimmed.strip_prefix("// @fpasoterm-plugin allowed-origins:") else {
+            continue;
+        };
+        for value in values.split(',').map(str::trim) {
+            let Some(host) = value.strip_prefix("https://") else {
+                continue;
+            };
+            if host.is_empty()
+                || host.contains(['/', '?', '#', '@'])
+                || origins.iter().any(|origin| origin == value)
+            {
+                continue;
+            }
+            origins.push(value.to_string());
+        }
+    }
+    origins.sort();
+    origins
 }
 
 // Parses `// @fpasoterm-plugin version: ...` and description headers while
@@ -9121,6 +9150,19 @@ installPath = "appearance/other.ts"
                 version: "(not declared)".to_string(),
                 description: "Existing plugin comment".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn plugin_allowed_origins_reads_unique_https_origins() {
+        assert_eq!(
+            plugin_allowed_origins(
+                "// @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com, https://www.youtube.com\n// @fpasoterm-plugin allowed-origins: http://example.test, https://www.youtube.com/path\n"
+            ),
+            vec![
+                "https://www.youtube-nocookie.com".to_string(),
+                "https://www.youtube.com".to_string(),
+            ]
         );
     }
 

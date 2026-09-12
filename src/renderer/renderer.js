@@ -2760,6 +2760,10 @@ function enableFloatingPanelDrag(panel, handle) {
 
 enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
 enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
+enableFloatingPanelDrag(
+  pluginCommandStatusElement,
+  pluginCommandStatusElement?.querySelector('[data-panel-drag-handle]'),
+);
 
 // WebView checkbox keyboard activation differs on Windows. Keep Space and Enter
 // consistent for Broadcast target controls and preserve their normal change event.
