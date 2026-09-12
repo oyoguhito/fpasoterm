@@ -203,6 +203,10 @@ let pluginReadyTimer = null;
 let pluginReadyGeneration = 0;
 const pluginReadyCallbacks = [];
 const pluginCommands = new Map();
+// WebKitGTK does not consistently retain navigator.userActivation through a
+// nested menu callback. Keep this capability scoped to the registered command
+// handler itself; a plugin startup script or timer still has no such access.
+let pluginCommandInvocationDepth = 0;
 let pluginCatalogEntries = [];
 let term;
 let fitAddon;
@@ -2020,6 +2024,9 @@ function pluginUserActivationError(apiName) {
 }
 
 function requirePluginUserActivation(apiName) {
+  if (pluginCommandInvocationDepth > 0) {
+    return;
+  }
   if (navigator.userActivation?.isActive === false) {
     throw pluginUserActivationError(apiName);
   }
@@ -2507,10 +2514,13 @@ async function runPluginCommand(commandId) {
     return;
   }
   setWindowMenuOpen(false);
+  pluginCommandInvocationDepth += 1;
   try {
     await command.handler();
   } catch (error) {
     showDiagnostic(`plugin command ${commandId} failed: ${error?.stack || error}`);
+  } finally {
+    pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
   }
 }
 
