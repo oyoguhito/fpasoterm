@@ -355,6 +355,8 @@ assert.match(bin, /child\.unref\(\)/);
 assert.match(bin, /windowsHide: !options\.foreground/);
 assert.match(bin, /isBuiltBinaryCurrent/);
 assert.match(bin, /latestRuntimeSourceMtime/);
+assert.match(bin, /runtimeSourceRevision/);
+assert.match(bin, /sourceRevision/);
 assert.match(bin, /latestPathMtime/);
 assert.match(bin, /src\/renderer/);
 assert.match(bin, /cargo-clean-start/);

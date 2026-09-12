@@ -2418,12 +2418,25 @@ function readBuildStamp() {
   }
 }
 
-// Writes the binary/source mtimes after a successful normal cargo build.
+// Returns the checkout revision when this launcher runs from a Git worktree.
+// Source mtimes alone are not sufficient because switching branches can make
+// an older source tree appear older than a binary from another branch.
+function runtimeSourceRevision() {
+  try {
+    const result = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+    return result.status === 0 ? result.stdout.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+// Writes the binary/source identity after a successful normal cargo build.
 function writeBuildStamp(binary) {
   const stamp = {
     binary,
     binaryMtime: fs.statSync(binary).mtimeMs,
     sourceMtime: latestRuntimeSourceMtime(),
+    sourceRevision: runtimeSourceRevision(),
   };
   fs.writeFileSync(buildStampPath(), JSON.stringify(stamp, null, 2));
 }
@@ -2436,6 +2449,9 @@ function findStampedTauriBinary() {
     return undefined;
   }
   if (stamp.sourceMtime !== latestRuntimeSourceMtime()) {
+    return undefined;
+  }
+  if (stamp.sourceRevision !== runtimeSourceRevision()) {
     return undefined;
   }
   if (stamp.binaryMtime !== fs.statSync(binary).mtimeMs) {
@@ -2452,7 +2468,7 @@ function startupPreparationStatus(options) {
   if (findStampedTauriBinary()) {
     return 'using cached local runtime';
   }
-  if (findTauriBinary()) {
+  if (findTauriBinary() && !runtimeSourceRevision()) {
     return 'using local runtime';
   }
   return 'building local runtime with cargo (first launch can take several minutes)';
@@ -2460,7 +2476,7 @@ function startupPreparationStatus(options) {
 
 // Detects the only startup path that needs visible work before a window exists.
 function requiresLocalRuntimeBuild(options) {
-  return options.dev || (!findStampedTauriBinary() && !findTauriBinary());
+  return options.dev || (!findStampedTauriBinary() && (!findTauriBinary() || Boolean(runtimeSourceRevision())));
 }
 
 // Builds the debug binary used by normal source-checkout launches.
@@ -2476,7 +2492,10 @@ function buildTauriBinary(options) {
   }
 
   const currentBinary = findTauriBinary();
-  if (currentBinary) {
+  // A source archive has no revision to compare, so keep the existing
+  // timestamp fallback there. A Git checkout must rebuild rather than stamp a
+  // binary produced by a different branch.
+  if (currentBinary && !runtimeSourceRevision()) {
     writeBuildStamp(currentBinary);
     appendLauncherLog(`launcher build=skip current binary=${currentBinary}`);
     return Promise.resolve(currentBinary);
