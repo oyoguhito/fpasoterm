@@ -104,6 +104,8 @@ Options:
       --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.
       --plugin-enable <names>   Alias for --enable-plugin.
       --plugin-disable <names>  Alias for --disable-plugin.
+      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.
+      --plugin-args <json>      JSON value passed to --plugin-run's command handler.
                                 Local selectors may omit plugins/ and .js/.ts when unambiguous.
   -W, --width <px>              Override the configured window width for this launch.
   -H, --height <px>             Override the configured window height for this launch.
@@ -195,6 +197,9 @@ function parseArgs(argv) {
   let pluginInstallFile = '';
   let pluginInstallForce = false;
   let pluginInstallEnable = false;
+  let pluginRun = '';
+  let pluginArgs = 'null';
+  let pluginArgsProvided = false;
   let listInstances = false;
   let closeTarget = '';
   let setupSync = false;
@@ -337,6 +342,28 @@ function parseArgs(argv) {
 
     if (arg === '--enable') {
       pluginInstallEnable = true;
+      continue;
+    }
+
+    if (arg === '--plugin-run') {
+      pluginRun = requireValue(argv, index, arg);
+      if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(pluginRun)) {
+        throw new Error('--plugin-run must be a registered plugin command ID');
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--plugin-args') {
+      pluginArgs = requireValue(argv, index, arg);
+      pluginArgsProvided = true;
+      if (pluginArgs.length > 16_384) throw new Error('--plugin-args must be at most 16384 bytes');
+      try {
+        JSON.parse(pluginArgs);
+      } catch {
+        throw new Error('--plugin-args must be valid JSON');
+      }
+      index += 1;
       continue;
     }
 
@@ -568,6 +595,9 @@ function parseArgs(argv) {
   if (pluginPortsDir && !pluginInstall) {
     throw new Error('--plugin-ports-dir requires --plugin-install <category/name>');
   }
+  if (!pluginRun && pluginArgsProvided) {
+    throw new Error('--plugin-args requires --plugin-run <command>');
+  }
   if (pluginUninstall.length > 0 && (
     enablePlugins.length > 0 || disablePlugins.length > 0 || enableAllPlugins || disableAllPlugins || pluginInstallCount > 0
   )) {
@@ -600,6 +630,8 @@ function parseArgs(argv) {
     pluginInstallFile,
     pluginInstallForce,
     pluginInstallEnable,
+    pluginRun,
+    pluginArgs,
     listInstances,
     closeTarget,
     setupSync,
@@ -620,6 +652,7 @@ function parseArgs(argv) {
     env: {
       ...env,
       ...(startCommand ? { FPASOTERM_START_COMMAND: startCommand } : {}),
+      ...(pluginRun ? { FPASOTERM_PLUGIN_RUN: pluginRun, FPASOTERM_PLUGIN_ARGS: pluginArgs } : {}),
     },
     startCommand,
     enablePlugins,
@@ -646,6 +679,7 @@ function validateArgs(argv) {
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--plugin-uninstall', '--width', '-W',
     '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
     '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-install-file',
+    '--plugin-run', '--plugin-args',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -2651,6 +2685,9 @@ function runtimeEnv(options) {
       options.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1' ||
       process.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1',
   };
+  if (options.pluginRun) {
+    runtimeConfig.pluginCommand = { id: options.pluginRun, args: JSON.parse(options.pluginArgs) };
+  }
   return {
     ...process.env,
     ...options.env,

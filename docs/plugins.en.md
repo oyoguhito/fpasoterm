@@ -276,6 +276,20 @@ provides:
   includes a built-in `Plugin Catalog` action. Enabling a plugin alone does not
   add a button because fpasoterm has no action handler to invoke.
 
+The same registered command can be invoked during a new GUI launch from the
+local CLI. This dispatches only the command ID after enabled plugins load; it
+does not evaluate JavaScript supplied on the command line.
+
+```bash
+fpasoterm --plugin-run youtube-web-panel
+fpasoterm --plugin-run example.action --plugin-args '{"query":"doom"}'
+```
+
+`--plugin-args` accepts one JSON value up to 16 KiB and is provided as the
+handler's first argument. A missing value is `null` for CLI invocation; menu
+invocation continues to pass `undefined`. Commands that open dialogs, pickers,
+or panels still require and display the normal GUI.
+
 All current in-tree samples register one command, so enabling current copies of
 `hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four
 buttons. If an older local sample does not register a command, it remains

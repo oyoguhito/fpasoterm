@@ -186,6 +186,18 @@ install 後の plugin では declaration file をローカルへコピーし、r
   action buttonを追加する。submenuはplugin未導入でも常時表示され、組み込みの`Plugin Catalog`を
   使用できる。pluginを有効化しただけでは実行するhandlerがないため、plugin固有のbuttonは追加しない。
 
+登録済みcommandは、新しいGUI windowを起動するlocal CLIからも実行できます。enabled pluginのload後に
+command IDだけをdispatchするため、CLIから渡されたJavaScriptを評価することはありません。
+
+```bash
+fpasoterm --plugin-run youtube-web-panel
+fpasoterm --plugin-run example.action --plugin-args '{"query":"doom"}'
+```
+
+`--plugin-args`は最大16 KiBのJSON値を一つ受け付け、handlerの第1引数へ渡します。CLI呼出しで
+省略した場合は`null`、menuからの従来呼出しでは`undefined`です。dialog、picker、panelを開くcommandは
+通常どおりGUIを表示します。
+
 現在のrepository内sampleはすべて一つのcommandを登録します。最新版の`hello.ts`、`status-banner.ts`、
 `theme.ts`、`welcome-banner.ts`を有効化すると、4つのbuttonが表示されるのが正しい動作です。古いlocal sampleが
 commandを登録しない場合もplugin自体は有効で起動時処理を実行できますが、plugin固有のbuttonは意図してmenuには表示しません。`Plugin Catalog`は公式portのmetadataとinstall commandを表示するだけで、plugin sourceのdownload、install、enable、実行は行いません。sourceとversionは`--plugin-info <file>`で確認し、local plugin fileを差し替えた後はwindowを再起動してください。

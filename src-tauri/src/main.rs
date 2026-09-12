@@ -71,6 +71,18 @@ struct RuntimeConfig {
     #[serde(default)]
     active_profile: String,
     diagnostics: Option<DiagnosticsConfig>,
+    #[serde(default)]
+    plugin_command: Option<PluginCommandRequest>,
+}
+
+// One command requested by the local CLI. The renderer resolves the ID only
+// after trusted local plugins register their handlers; it never evaluates CLI
+// source text.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginCommandRequest {
+    id: String,
+    args: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -522,7 +534,10 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 
 // The direct binary has the same core options as the Node launcher.
 fn cli_help_text() -> String {
-    HELP_TEXT.to_string()
+    HELP_TEXT.replace(
+        "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
+        "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
+    )
 }
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
@@ -863,6 +878,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-install",
         "--plugin-ports-dir",
         "--plugin-install-file",
+        "--plugin-run",
+        "--plugin-args",
         "--shell",
         "-s",
         "--cwd",
@@ -1013,7 +1030,47 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
             "--plugin-uninstall cannot be combined with other plugin mutation options".to_string(),
         );
     }
+    let plugin_run = cli_option_value_from_args(args, "--plugin-run");
+    let plugin_args = cli_option_value_from_args(args, "--plugin-args");
+    if let Some(command) = plugin_run.as_deref() {
+        if !valid_plugin_command_id(command) {
+            return Err("--plugin-run must be a registered plugin command ID".to_string());
+        }
+    }
+    if plugin_args.is_some() && plugin_run.is_none() {
+        return Err("--plugin-args requires --plugin-run <command>".to_string());
+    }
+    if let Some(args) = plugin_args {
+        if args.len() > 16_384 || serde_json::from_str::<serde_json::Value>(&args).is_err() {
+            return Err("--plugin-args must be valid JSON of at most 16384 bytes".to_string());
+        }
+    }
     Ok(())
+}
+
+fn valid_plugin_command_id(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some(character) if character.is_ascii_alphabetic())
+        && value.len() <= 80
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
+        })
+}
+
+fn cli_option_value_from_args(args: &[String], flag: &str) -> Option<String> {
+    let equals_prefix = format!("{flag}=");
+    args.iter().enumerate().find_map(|(index, argument)| {
+        if argument == flag {
+            args.get(index + 1)
+                .map(|value| sanitize_cli_value(value))
+                .filter(|value| !value.is_empty())
+        } else {
+            argument
+                .strip_prefix(&equals_prefix)
+                .map(sanitize_cli_value)
+                .filter(|value| !value.is_empty())
+        }
+    })
 }
 
 // Checks values whose invalid form previously fell through to a normal launch.
@@ -3463,7 +3520,20 @@ fn default_runtime_config() -> RuntimeConfig {
             console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
                 || cli_has_flag(&["--console-diagnostics", "-C"]),
         }),
+        plugin_command: direct_plugin_command_request(),
     }
+}
+
+fn direct_plugin_command_request() -> Option<PluginCommandRequest> {
+    let id = env::var("FPASOTERM_PLUGIN_RUN")
+        .ok()
+        .or_else(|| cli_option_value("--plugin-run"))?;
+    let args_text = env::var("FPASOTERM_PLUGIN_ARGS")
+        .ok()
+        .or_else(|| cli_option_value("--plugin-args"))
+        .unwrap_or_else(|| "null".to_string());
+    let args = serde_json::from_str(&args_text).ok()?;
+    Some(PluginCommandRequest { id, args })
 }
 
 // Resolves the user's home directory on Unix-like systems and Windows.
@@ -8950,6 +9020,7 @@ mod tests {
             ("--plugin-disable", "welcome-banner.ts"),
             ("--plugin-install", "appearance/teal"),
             ("--plugin-install-file", "./my-plugin.ts"),
+            ("--plugin-run", "youtube-web-panel"),
             ("--shell", "/bin/zsh"),
             ("-s", "/bin/zsh"),
             ("--cwd", "."),
@@ -8986,6 +9057,15 @@ mod tests {
             Ok(())
         );
         assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-run".to_string(),
+                "youtube-web-panel".to_string(),
+                "--plugin-args".to_string(),
+                "{\"query\":\"doom\"}".to_string(),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
             validate_direct_cli_args(&["--size=800x600".to_string()]),
             Ok(())
         );
@@ -9005,6 +9085,27 @@ mod tests {
         assert_eq!(
             validate_direct_cli_args(&args),
             Err("--width must be a positive integer".to_string())
+        );
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_invalid_plugin_run_requests() {
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-run".to_string(), "invalid command".to_string()]),
+            Err("--plugin-run must be a registered plugin command ID".to_string())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-args".to_string(), "null".to_string()]),
+            Err("--plugin-args requires --plugin-run <command>".to_string())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-run".to_string(),
+                "youtube-web-panel".to_string(),
+                "--plugin-args".to_string(),
+                "not-json".to_string(),
+            ]),
+            Err("--plugin-args must be valid JSON of at most 16384 bytes".to_string())
         );
     }
 

@@ -79,7 +79,8 @@ type FpasotermPluginApi = {
   registerCommand: (
     id: string,
     title: string,
-    handler: () => void | Promise<void>,
+    /** Receives the JSON value passed by `fpasoterm --plugin-run <id> --plugin-args <json>`. */
+    handler: (args?: unknown) => void | Promise<void>,
   ) => void;
 };
 

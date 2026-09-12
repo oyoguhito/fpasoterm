@@ -84,6 +84,8 @@ _fpasoterm() {
     '--disable-plugin=[disable plugins]:plugin:_fpasoterm_plugin_names' \
     '--plugin-enable=[alias for enable-plugin]:plugin:_fpasoterm_plugin_names' \
     '--plugin-disable=[alias for disable-plugin]:plugin:_fpasoterm_plugin_names' \
+    '--plugin-run=[open fpasoterm and invoke a registered plugin command]:command id:' \
+    '--plugin-args=[JSON value passed to plugin-run]:json:' \
     '--plugin-enable-all[enable all discovered plugins]' \
     '--plugin-disable-all[disable all plugins]' \
     '--update-config[add missing config defaults]' \

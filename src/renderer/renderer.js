@@ -202,6 +202,7 @@ const fallbackConfig = {
 let appConfig = fallbackConfig;
 let activeConfigPath = '';
 let pluginUrls = [];
+let pendingPluginCommand = null;
 let pluginVersion = 'unknown';
 let pluginsReady = false;
 let pluginReadyTimer = null;
@@ -1660,6 +1661,7 @@ async function loadRuntimeConfig() {
       showPluginCommandStatus('plugin activity enabled');
     }
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
+    pendingPluginCommand = normalizePluginCommandRequest(runtimeConfig.pluginCommand);
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
     showDiagnostic(
@@ -1670,6 +1672,14 @@ async function loadRuntimeConfig() {
     appConfig = fallbackConfig;
     pluginUrls = [];
   }
+}
+
+// The launcher/backend validates this request first.  The renderer still
+// accepts only an ID that a trusted local plugin registered after loading.
+function normalizePluginCommandRequest(value) {
+  const id = String(value?.id || '').trim();
+  if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(id)) return null;
+  return { id, args: value.args === undefined ? null : value.args };
 }
 
 // Applies window-level visual settings that affect the renderer surface.
@@ -2577,7 +2587,7 @@ function registerPluginCommand(id, title, handler) {
 }
 
 // Invokes a registered command and reports plugin failures without closing the app.
-async function runPluginCommand(commandId) {
+async function runPluginCommand(commandId, args) {
   const command = pluginCommands.get(commandId);
   if (!command) {
     return;
@@ -2587,7 +2597,7 @@ async function runPluginCommand(commandId) {
   showPluginCommandStatus(`command started: ${commandId}`);
   pluginCommandInvocationDepth += 1;
   try {
-    await command.handler();
+    await command.handler(args);
     showPluginCommandStatus(`command completed: ${commandId}`);
   } catch (error) {
     // WebKitGTK's Error.stack can contain locations without the message.
@@ -2601,6 +2611,21 @@ async function runPluginCommand(commandId) {
   } finally {
     pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
   }
+}
+
+// Runs a one-shot local CLI request after every enabled plugin had the chance
+// to register its command.  This is command dispatch, never CLI JavaScript.
+async function runRequestedPluginCommand() {
+  const request = pendingPluginCommand;
+  pendingPluginCommand = null;
+  if (!request) return;
+  if (!pluginCommands.has(request.id)) {
+    showPluginCommandStatus(`CLI plugin command is not registered: ${request.id}`, 'error');
+    showDiagnostic(`CLI plugin command is not registered: ${request.id}`);
+    return;
+  }
+  showPluginCommandStatus(`CLI requested plugin command: ${request.id}`);
+  await runPluginCommand(request.id, request.args);
 }
 
 // Returns true when sync-folder features are enabled in the resolved config.
@@ -4862,6 +4887,7 @@ Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   });
 
   await loadPlugins();
+  await runRequestedPluginCommand();
   installTerminalPasteHandlers();
   await afterNextPaint();
   fitAddon.fit();
