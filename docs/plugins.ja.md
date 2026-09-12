@@ -43,6 +43,14 @@ plugin source の comment に version と description を宣言できます。ma
 
 `version` は plugin 固有のローカル release 識別子です。一貫性のため `1.0.0` のような semantic version を推奨します。実行中 fpasoterm 本体の version を返す `api.version` とは別です。headerの無い既存 plugin は従来どおり動作し、CLIでは `(not declared)` と表示します。
 
+`openWebPanel`を使うpluginは、許可を要求するHTTPS originもheaderへ宣言します。
+
+```ts
+// @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com
+```
+
+これは無制限の許可ではありません。fpasotermがreview済みのapplication allowlistとCSPに含むoriginだけを許可し、不正なoriginの宣言には権限を与えません。
+
 ## plugin の有効化
 
 fpasoterm は最初の通常起動時に `User/plugins` を作成します。手動管理するlocal pluginの場合は、そこへ信頼できるsourceを配置して設定で有効化します。
@@ -167,6 +175,9 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `openCanvasOverlay({ title, width, height })`: keyboard操作可能なcanvas modalを開く。
   canvasと`close()`、`focus()`を返す。Escape、Close button、backdrop
   clickで閉じ、terminalへfocusを戻す。
+- `openWebPanel({ title, url, width, height })`: `allowed-origins`で宣言し、fpasotermが
+  承認したoriginだけをiframeで表示するkeyboard操作可能なHTTPS panelを開く。userの直接操作から
+  呼び出し、Escape、Close button、backdrop clickで閉じる。汎用browser APIではない。
 - `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
   `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
   行いません。

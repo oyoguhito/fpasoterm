@@ -22,7 +22,7 @@
           "$HOME/.config/fpasoterm/User/cache/plugins/**/*"
         ]
       },
-      "csp": "default-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' asset: http://asset.localhost"
+      "csp": "default-src 'self' asset: http://asset.localhost; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' asset: http://asset.localhost; frame-src https://www.youtube.com https://www.youtube-nocookie.com"
     },
     "windows": [
       {

@@ -69,6 +69,16 @@ as `1.0.0` for consistency. It is distinct from `api.version`, which is the
 running fpasoterm application version. Omit the header for older plugins; the
 CLI reports their version as `(not declared)`.
 
+Plugins that use `openWebPanel` must also declare their HTTPS frame origins:
+
+```ts
+// @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com
+```
+
+The declaration is a capability request, not an unrestricted permission.
+fpasoterm grants it only when the origin is in its reviewed application
+allowlist and CSP. Invalid origins grant no access.
+
 ## Enable plugins
 
 fpasoterm creates `User/plugins` on its first normal launch. For a manually
@@ -253,6 +263,10 @@ provides:
   accessible canvas modal. It returns the canvas plus
   `close()` and `focus()`. Escape, the Close button, and clicking the backdrop
   close the modal and return focus to the terminal.
+- `openWebPanel({ title, url, width, height })`: open a focus-trapped HTTPS
+  iframe panel for an origin declared with `allowed-origins` and approved by
+  fpasoterm. The call must be a direct user action; the panel can be closed
+  with Escape, Close, or its backdrop. It is not a general-purpose browser.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
   used by `fpasoterm --plugin-search`. It does not download, install, enable,
   or execute plugin source.

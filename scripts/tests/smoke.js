@@ -16,6 +16,7 @@ const {
   missingConfigKeys,
   platformDefaultConfig,
   pluginMetadata,
+  pluginAllowedOrigins,
   profileNames,
   pruneUnsupportedConfig,
   resolvePluginSelector,
@@ -109,6 +110,11 @@ assert.deepEqual(
   pluginMetadata('// @fpasoterm-plugin version: 1.2.3\n// @fpasoterm-plugin description: Example plugin\n'),
   { version: '1.2.3', description: 'Example plugin' },
 );
+assert.deepEqual(
+  pluginAllowedOrigins('// @fpasoterm-plugin allowed-origins: https://www.youtube.com, https://www.youtube-nocookie.com\n'),
+  ['https://www.youtube-nocookie.com', 'https://www.youtube.com'],
+);
+assert.deepEqual(pluginAllowedOrigins('// @fpasoterm-plugin allowed-origins: http://example.com, https://example.com/path\n'), []);
 assert.deepEqual(
   pluginMetadata('// Existing plugin comment\nconst value = 1;\n'),
   { version: '(not declared)', description: 'Existing plugin comment' },
@@ -1943,6 +1949,7 @@ assert.match(pluginTypes, /writeClipboard:/);
 assert.match(pluginTypes, /openExternalUrl:/);
 assert.match(pluginTypes, /selectLocalAsset:/);
 assert.match(pluginTypes, /openCanvasOverlay:/);
+assert.match(pluginTypes, /openWebPanel:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
@@ -1979,6 +1986,10 @@ assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClip
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
 assert.match(renderer, /selectLocalAsset: \(options\) => selectPluginLocalAsset\(options\)/);
 assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverlay\(options\)/);
+assert.match(renderer, /openWebPanel: \(options\) => openPluginWebPanel\(options, plugin\?\.allowedOrigins\)/);
+assert.match(renderer, /const supportedPluginPanelOrigins = new Set/);
+assert.match(renderer, /web panel origin is not permitted/);
+assert.match(read('src-tauri/tauri.conf.json'), /frame-src https:\/\/www\.youtube\.com https:\/\/www\.youtube-nocookie\.com/);
 assert.match(renderer, /const confirmClose = resolvedOptions\.confirmClose === true/);
 assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation/);
 assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title\}\?`/);

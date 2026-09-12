@@ -2239,9 +2239,106 @@ function openPluginCanvasOverlay(options = {}) {
   return Object.freeze({ canvas, close, focus: () => canvas.focus() });
 }
 
+// Remote panel origins are a small application policy, not a plugin-controlled
+// list. A plugin must declare a subset in its metadata before it receives the
+// capability for that origin. Add new origins only with matching CSP review.
+const supportedPluginPanelOrigins = new Set([
+  'https://www.youtube.com',
+  'https://www.youtube-nocookie.com',
+]);
+
+function openPluginWebPanel(options = {}, declaredOrigins = []) {
+  requirePluginUserActivation('openWebPanel');
+  const resolvedOptions = options && typeof options === 'object' ? options : {};
+  const title = typeof resolvedOptions.title === 'string' && resolvedOptions.title.trim()
+    ? resolvedOptions.title.trim().slice(0, 120) : 'Plugin web panel';
+  let url;
+  try {
+    url = new URL(String(resolvedOptions.url || ''));
+  } catch {
+    throw new Error('openWebPanel requires a valid HTTPS URL');
+  }
+  const grantedOrigins = new Set(Array.isArray(declaredOrigins) ? declaredOrigins : []);
+  if (url.protocol !== 'https:' || url.username || url.password
+    || !grantedOrigins.has(url.origin) || !supportedPluginPanelOrigins.has(url.origin)) {
+    throw new Error(`web panel origin is not permitted: ${url.origin}`);
+  }
+  const clampSize = (value, fallback) => {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? Math.min(2048, Math.max(320, number)) : fallback;
+  };
+  const width = clampSize(resolvedOptions.width, 960);
+  const height = clampSize(resolvedOptions.height, 600);
+  const overlay = document.createElement('div');
+  const dialog = document.createElement('section');
+  const header = document.createElement('header');
+  const heading = document.createElement('h2');
+  const closeButton = document.createElement('button');
+  const frame = document.createElement('iframe');
+  let closed = false;
+  overlay.className = 'fpasoterm-plugin-web-overlay';
+  dialog.className = 'fpasoterm-plugin-web-dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  heading.textContent = title;
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  frame.width = String(width);
+  frame.height = String(height);
+  frame.src = url.toString();
+  frame.tabIndex = 0;
+  frame.title = title;
+  frame.referrerPolicy = 'strict-origin-when-cross-origin';
+  frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+  frame.setAttribute('allowfullscreen', '');
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.remove();
+    term.focus();
+  };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => {
+    if (event.target === overlay) close();
+  });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.code === 'Escape' || event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    } else if (event.code === 'Tab' || event.key === 'Tab') {
+      event.preventDefault();
+      const focusable = [closeButton, frame];
+      const index = focusable.indexOf(document.activeElement);
+      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
+    }
+  }, true);
+  dialog.addEventListener('focusout', () => {
+    queueMicrotask(() => {
+      if (!closed && !dialog.contains(document.activeElement)) closeButton.focus();
+    });
+  });
+  const style = document.createElement('style');
+  style.textContent = [
+    '.fpasoterm-plugin-web-overlay { position: fixed; inset: 0; z-index: 12000; display: grid; place-items: center; padding: 16px; background: rgba(0, 0, 0, .58); }',
+    '.fpasoterm-plugin-web-dialog { width: min(100%, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; box-sizing: border-box; padding: 14px; border: 1px solid #5a7088; border-radius: 6px; background: #17212b; color: #edf5fc; box-shadow: 0 18px 48px rgba(0, 0, 0, .48); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }',
+    '.fpasoterm-plugin-web-dialog header { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }',
+    '.fpasoterm-plugin-web-dialog h2 { margin: 0; font-size: 16px; }',
+    '.fpasoterm-plugin-web-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }',
+    '.fpasoterm-plugin-web-dialog iframe { display: block; width: min(100%, 2048px); max-height: calc(100vh - 116px); border: 0; background: #000; }',
+    '.fpasoterm-plugin-web-dialog button:focus, .fpasoterm-plugin-web-dialog iframe:focus { outline: 4px solid #ffdb4d; outline-offset: 4px; box-shadow: 0 0 0 8px rgba(0, 0, 0, .72); }',
+  ].join('');
+  header.append(heading, closeButton);
+  dialog.append(header, frame);
+  overlay.append(style, dialog);
+  document.body.append(overlay);
+  closeButton.focus();
+  return Object.freeze({ close, focus: () => frame.focus() });
+}
+
 // Publishes the plugin API and loads enabled user plugins in order.
 async function loadPlugins() {
-  window.fpasotermPluginApi = Object.freeze({
+  const pluginApi = (plugin) => Object.freeze({
     version: pluginVersion,
     terminal: term,
     fitAddon,
@@ -2252,6 +2349,7 @@ async function loadPlugins() {
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
+    openWebPanel: (options) => openPluginWebPanel(options, plugin?.allowedOrigins),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
@@ -2263,6 +2361,7 @@ async function loadPlugins() {
     await new Promise((resolve) => {
       const commandCountBeforeLoad = pluginCommands.size;
       const script = document.createElement('script');
+      window.fpasotermPluginApi = pluginApi(plugin);
       const source = pluginScriptSource(plugin);
       script.src = source;
       script.async = false;
