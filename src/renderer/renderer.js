@@ -420,6 +420,7 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
+    pluginWebPanelFrameUrl: (url) => invoke('plugin_web_panel_frame_url', { url }),
     openExternalUrl: (url) => invoke('open_external_url', { url }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
@@ -2360,14 +2361,14 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
   frame.setAttribute('allowfullscreen', '');
   frame.addEventListener('load', () => {
-    status.textContent = `Loaded ${url.origin}. Use the player controls inside this panel.`;
-    showPluginCommandStatus(`web panel: iframe load event received from ${url.origin}`);
+    status.textContent = `Loaded ${url.origin}. Use the content inside this panel.`;
+    showPluginCommandStatus(`web panel: iframe load event received for ${url.origin}`);
   });
   frame.addEventListener('error', () => {
     status.textContent = `Could not load ${url.origin}. Check the Diagnostics command for details.`;
     showPluginCommandStatus(`web panel: iframe error event from ${url.origin}`, 'error');
   });
-  loadButton.addEventListener('click', () => {
+  loadButton.addEventListener('click', async () => {
     if (remoteContentLoaded) return;
     remoteContentLoaded = true;
     loadButton.disabled = true;
@@ -2375,7 +2376,24 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
     frame.hidden = false;
     status.textContent = `Loading ${url.origin}…`;
     showPluginCommandStatus(`web panel: iframe navigation started for ${url.origin}`);
-    frame.src = url.toString();
+    try {
+      const isYoutubeEmbed = /^https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\//.test(url.toString());
+      if (isYoutubeEmbed) {
+        const wrapperUrl = await window.fpasoterm.pluginWebPanelFrameUrl(url.toString());
+        showPluginCommandStatus(`web panel: local YouTube wrapper ready at ${new URL(wrapperUrl).origin}`);
+        frame.src = wrapperUrl;
+      } else {
+        frame.src = url.toString();
+      }
+    } catch (error) {
+      frame.hidden = true;
+      loadButton.hidden = false;
+      loadButton.disabled = false;
+      remoteContentLoaded = false;
+      status.textContent = `Could not create the local YouTube frame: ${error}`;
+      showPluginCommandStatus(`web panel: loopback wrapper failed: ${error}`, 'error');
+      return;
+    }
     frame.focus();
   });
   const close = () => {

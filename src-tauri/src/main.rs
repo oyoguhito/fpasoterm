@@ -7,10 +7,11 @@ use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Child;
@@ -486,6 +487,8 @@ struct AppState {
     source_id: String,
     started_at: u128,
     broadcast_listener_started: AtomicBool,
+    panel_server_url: Arc<Mutex<Option<String>>>,
+    panel_urls: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Default for AppState {
@@ -498,6 +501,8 @@ impl Default for AppState {
             source_id: format!("{}-{}", std::process::id(), now_millis()),
             started_at: now_millis(),
             broadcast_listener_started: AtomicBool::new(false),
+            panel_server_url: Arc::new(Mutex::new(None)),
+            panel_urls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -766,6 +771,7 @@ fn main() {
             diagnostics_log,
             clipboard_read,
             clipboard_write,
+            plugin_web_panel_frame_url,
             open_external_url,
             app_version,
             update_check,
@@ -8051,6 +8057,95 @@ fn validated_external_url(url: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validated_youtube_embed_url(url: &str) -> Result<String, String> {
+    let value = validated_external_url(url)?;
+    if ![
+        "https://www.youtube.com/embed/",
+        "https://www.youtube-nocookie.com/embed/",
+    ]
+    .iter()
+    .any(|prefix| value.starts_with(prefix))
+    {
+        return Err("only approved YouTube embed URLs may use the loopback panel".to_string());
+    }
+    Ok(value)
+}
+
+fn write_loopback_response(stream: &mut TcpStream, status: &str, body: &str) {
+    let response = format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.as_bytes().len());
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn serve_plugin_panel(mut stream: TcpStream, routes: Arc<Mutex<HashMap<String, String>>>) {
+    let mut request = [0_u8; 4096];
+    let Ok(size) = stream.read(&mut request) else {
+        return;
+    };
+    let line = String::from_utf8_lossy(&request[..size])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let token = line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|path| path.strip_prefix("/youtube/"));
+    let url = token.and_then(|key| routes.lock().ok()?.get(key).cloned());
+    let Some(url) = url else {
+        write_loopback_response(&mut stream, "404 Not Found", "Not found");
+        return;
+    };
+    let escaped = url
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;");
+    let body = format!("<!doctype html><meta name=referrer content=strict-origin-when-cross-origin><style>html,body,iframe{{width:100%;height:100%;margin:0;border:0;background:#000}}</style><iframe title=YouTube src=\"{escaped}\" allow=\"autoplay; encrypted-media; picture-in-picture; fullscreen\" allowfullscreen></iframe>");
+    write_loopback_response(&mut stream, "200 OK", &body);
+}
+
+fn plugin_panel_server_url(state: &AppState) -> Result<String, String> {
+    if let Some(url) = state
+        .panel_server_url
+        .lock()
+        .map_err(|_| "panel server lock failed")?
+        .clone()
+    {
+        return Ok(url);
+    }
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("could not bind loopback panel server: {error}"))?;
+    let url = format!(
+        "http://{}",
+        listener.local_addr().map_err(|error| error.to_string())?
+    );
+    let routes = state.panel_urls.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            serve_plugin_panel(stream, routes.clone());
+        }
+    });
+    *state
+        .panel_server_url
+        .lock()
+        .map_err(|_| "panel server lock failed")? = Some(url.clone());
+    Ok(url)
+}
+
+#[tauri::command]
+fn plugin_web_panel_frame_url(state: State<AppState>, url: String) -> Result<String, String> {
+    let url = validated_youtube_embed_url(&url)?;
+    let token = format!("{}-{}", std::process::id(), now_millis());
+    state
+        .panel_urls
+        .lock()
+        .map_err(|_| "panel route lock failed")?
+        .insert(token.clone(), url);
+    Ok(format!(
+        "{}/youtube/{token}",
+        plugin_panel_server_url(&state)?
+    ))
+}
+
 #[tauri::command]
 // Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
@@ -8765,6 +8860,23 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn youtube_loopback_only_accepts_supported_embed_urls() {
+        assert_eq!(
+            validated_youtube_embed_url("https://www.youtube.com/embed/dQw4w9WgXcQ")
+                .expect("youtube embed URL"),
+            "https://www.youtube.com/embed/dQw4w9WgXcQ"
+        );
+        assert!(
+            validated_youtube_embed_url("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ")
+                .is_ok()
+        );
+        assert!(
+            validated_youtube_embed_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ").is_err()
+        );
+        assert!(validated_youtube_embed_url("https://example.test/embed/dQw4w9WgXcQ").is_err());
+    }
 
     #[test]
     fn direct_cli_validation_rejects_unknown_options() {
