@@ -865,7 +865,9 @@ pluginCommandStatusCopyButton?.addEventListener('click', async () => {
   const text = pluginCommandStatusLines.join('\n');
   if (!text) return;
   try {
-    await window.fpasoterm.writeClipboard(text);
+    // The shared clipboard helper writes through both the WebView and native
+    // paths; the latter alone is not always visible to the host chat client.
+    await writeClipboardText(text);
     pluginCommandStatusCopyButton.textContent = 'Copied';
   } catch (error) {
     pluginCommandStatusCopyButton.textContent = 'Copy failed';
@@ -2567,7 +2569,12 @@ async function runPluginCommand(commandId) {
     await command.handler();
     showPluginCommandStatus(`command completed: ${commandId}`);
   } catch (error) {
-    const detail = error?.stack || error;
+    // WebKitGTK's Error.stack can contain locations without the message.
+    // Preserve every available field so activity/log diagnostics identify the
+    // failed API rather than reporting only a source line.
+    const detail = [error?.name, error?.message, error?.stack || String(error)]
+      .filter((value, index, values) => value && values.indexOf(value) === index)
+      .join('\n');
     showPluginCommandStatus(`command failed: ${commandId}\n${detail}`, 'error');
     showDiagnostic(`plugin command ${commandId} failed: ${detail}`);
   } finally {
