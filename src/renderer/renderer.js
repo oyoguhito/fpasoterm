@@ -105,6 +105,7 @@ const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
 const pluginCommandStatusElement = document.getElementById('plugin-command-status');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
+let pluginActivity = false;
 const diagnosticLines = [];
 let terminalMirrorText = '';
 let pluginCommandStatusLines = [];
@@ -845,6 +846,7 @@ function showDebugDiagnostic(message) {
 // Keeps a renderer-visible trace above plugin overlays. Unlike Diagnostics,
 // this is not hidden by a modal and is also retained after an exception.
 function showPluginCommandStatus(message, state = 'progress') {
+  if (!pluginActivity && state !== 'error') return;
   if (!pluginCommandStatusElement) return;
   const timestamp = new Date().toLocaleTimeString();
   pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
@@ -1630,6 +1632,7 @@ async function loadRuntimeConfig() {
     appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
     activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
+    pluginActivity = pluginActivity || runtimeConfig.diagnostics?.pluginActivity === true;
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);

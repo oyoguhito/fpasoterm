@@ -114,6 +114,7 @@ struct PluginUrl {
 // Diagnostics switches passed from the launcher to the backend and renderer.
 struct DiagnosticsConfig {
     debug_keys: bool,
+    plugin_activity: bool,
     console_diagnostics: bool,
 }
 
@@ -3447,6 +3448,8 @@ fn default_runtime_config() -> RuntimeConfig {
         diagnostics: Some(DiagnosticsConfig {
             debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1")
                 || cli_has_flag(&["--debug-keys", "-k"]),
+            plugin_activity: env::var("FPASOTERM_PLUGIN_ACTIVITY").as_deref() == Ok("1")
+                || cli_has_flag(&["--plugin-activity"]),
             console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
                 || cli_has_flag(&["--console-diagnostics", "-C"]),
         }),

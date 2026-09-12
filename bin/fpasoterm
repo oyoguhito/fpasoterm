@@ -109,6 +109,7 @@ Options:
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
   -k, --debug-keys              Enable key/composition diagnostics.
+      --plugin-activity         Show live plugin command/API activity in the window.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
 Normal launches build and run the local Tauri binary when needed, then detach
@@ -499,6 +500,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--plugin-activity') {
+      env.FPASOTERM_PLUGIN_ACTIVITY = '1';
+      continue;
+    }
+
     if (arg === '--disable-dmabuf') {
       env.FPASOTERM_DISABLE_DMABUF = '1';
       env.WEBKIT_DISABLE_DMABUF_RENDERER = '1';
@@ -633,7 +639,7 @@ function validateArgs(argv) {
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--force', '--enable',
-    '--debug-keys', '-k', '--disable-dmabuf', '--broadcast-sync',
+    '--debug-keys', '-k', '--plugin-activity', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--cwd', '-o', '--command', '-e', '--title', '-t',
@@ -2637,6 +2643,8 @@ function runtimeEnv(options) {
   applyTerminalRuntimeOverrides(runtimeConfig.config.terminal, options.env);
   runtimeConfig.diagnostics = {
     debugKeys: options.env.FPASOTERM_DEBUG_KEYS === '1' || process.env.FPASOTERM_DEBUG_KEYS === '1',
+    pluginActivity:
+      options.env.FPASOTERM_PLUGIN_ACTIVITY === '1' || process.env.FPASOTERM_PLUGIN_ACTIVITY === '1',
     consoleDiagnostics:
       options.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1' || process.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1',
     opaqueTerminal:
