@@ -432,10 +432,13 @@ state, description, and load status. Restart the affected window after an
 enable or source change.
 
 To invoke an enabled plugin's registered command while opening a new GUI
-window, use `fpasoterm --plugin-run <command-id>`. Pass one JSON value to the
-handler with `--plugin-args <json>`, for example
-`fpasoterm --plugin-run youtube-web-panel`. This dispatches only a registered
-command ID; it never runs JavaScript provided by the CLI.
+window, use `fpasoterm --plugin-run <plugin/path[:command-id]>`. Pass one JSON
+value to the handler with `--plugin-args <json>`, for example
+`fpasoterm --plugin-run integration/youtube-web-panel`. A plugin with multiple
+commands must use the unambiguous form such as
+`integration/youtube-web-panel:youtube-web-panel`. The legacy bare command ID
+remains available. This dispatches only a registered command; it never runs
+JavaScript provided by the CLI.
 
 Remove a reviewed local plugin and its enabled entry with
 `fpasoterm --plugin-uninstall <file>`. This is a local-only operation; it does

@@ -347,8 +347,8 @@ function parseArgs(argv) {
 
     if (arg === '--plugin-run') {
       pluginRun = requireValue(argv, index, arg);
-      if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(pluginRun)) {
-        throw new Error('--plugin-run must be a registered plugin command ID');
+      if (!isPluginCommandSelector(pluginRun)) {
+        throw new Error('--plugin-run must be a command ID or plugin/path[:command-id]');
       }
       index += 1;
       continue;
@@ -661,6 +661,14 @@ function parseArgs(argv) {
     disableAllPlugins,
     runtimeArgs,
   };
+}
+
+// Accept either the backward-compatible bare command ID or a plugin-owned
+// selector.  Slashes are only meaningful in the latter and are never source
+// code paths to execute.
+function isPluginCommandSelector(value) {
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(value)
+    || /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+(?::[A-Za-z][A-Za-z0-9._:-]{0,79})?$/.test(value);
 }
 
 // Rejects unknown options before help/version handling can bypass validation.

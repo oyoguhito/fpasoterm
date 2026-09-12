@@ -1678,8 +1678,13 @@ async function loadRuntimeConfig() {
 // accepts only an ID that a trusted local plugin registered after loading.
 function normalizePluginCommandRequest(value) {
   const id = String(value?.id || '').trim();
-  if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(id)) return null;
+  if (!isPluginCommandSelector(id)) return null;
   return { id, args: value.args === undefined ? null : value.args };
+}
+
+function isPluginCommandSelector(value) {
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(value)
+    || /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+(?::[A-Za-z][A-Za-z0-9._:-]{0,79})?$/.test(value);
 }
 
 // Applies window-level visual settings that affect the renderer surface.
@@ -2463,7 +2468,7 @@ async function loadPlugins() {
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
     onReady: registerPluginReadyCallback,
-    registerCommand: registerPluginCommand,
+    registerCommand: (id, title, handler) => registerPluginCommand(id, title, handler, plugin?.name),
   });
 
   for (const plugin of pluginUrls) {
@@ -2555,7 +2560,7 @@ function notifyPluginsReady() {
 }
 
 // Adds a trusted plugin action to the existing keyboard-accessible window menu.
-function registerPluginCommand(id, title, handler) {
+function registerPluginCommand(id, title, handler, pluginName = '') {
   const commandId = String(id || '').trim();
   const commandTitle = String(title || '').trim();
   if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(commandId)) {
@@ -2580,10 +2585,33 @@ function registerPluginCommand(id, title, handler) {
   button.textContent = commandTitle;
   button.dataset.pluginCommand = commandId;
   button.addEventListener('click', () => runPluginCommand(commandId));
-  pluginCommands.set(commandId, { handler, button });
+  pluginCommands.set(commandId, { handler, button, pluginName: normalizePluginCommandOwner(pluginName) });
   pluginCommandItems.appendChild(button);
   updatePluginMenuVisibility();
   showDiagnostic(`plugin command registered id=${commandId}`);
+}
+
+function normalizePluginCommandOwner(name) {
+  return String(name || '')
+    .replace(/^plugins\//, '')
+    .replace(/\.(?:js|ts)$/i, '');
+}
+
+function resolvePluginCommand(selector) {
+  if (!selector.includes('/')) {
+    const command = pluginCommands.get(selector);
+    return command ? { id: selector, command } : { error: `CLI plugin command is not registered: ${selector}` };
+  }
+  const [owner, requestedId] = selector.split(/:(.*)/, 2);
+  const matches = [...pluginCommands.entries()]
+    .filter(([, command]) => command.pluginName === owner)
+    .filter(([id]) => !requestedId || id === requestedId);
+  if (matches.length === 1) return { id: matches[0][0], command: matches[0][1] };
+  if (matches.length === 0) {
+    return { error: `CLI plugin command is not registered: ${selector}` };
+  }
+  const choices = matches.map(([id]) => `${owner}:${id}`).join(', ');
+  return { error: `CLI plugin selector is ambiguous: ${selector}. Choose one of: ${choices}` };
 }
 
 // Invokes a registered command and reports plugin failures without closing the app.
@@ -2619,13 +2647,14 @@ async function runRequestedPluginCommand() {
   const request = pendingPluginCommand;
   pendingPluginCommand = null;
   if (!request) return;
-  if (!pluginCommands.has(request.id)) {
-    showPluginCommandStatus(`CLI plugin command is not registered: ${request.id}`, 'error');
-    showDiagnostic(`CLI plugin command is not registered: ${request.id}`);
+  const resolved = resolvePluginCommand(request.id);
+  if (resolved.error) {
+    showPluginCommandStatus(resolved.error, 'error');
+    showDiagnostic(resolved.error);
     return;
   }
-  showPluginCommandStatus(`CLI requested plugin command: ${request.id}`);
-  await runPluginCommand(request.id, request.args);
+  showPluginCommandStatus(`CLI requested plugin command: ${request.id} -> ${resolved.id}`);
+  await runPluginCommand(resolved.id, request.args);
 }
 
 // Returns true when sync-folder features are enabled in the resolved config.

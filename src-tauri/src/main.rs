@@ -1033,8 +1033,10 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
     let plugin_run = cli_option_value_from_args(args, "--plugin-run");
     let plugin_args = cli_option_value_from_args(args, "--plugin-args");
     if let Some(command) = plugin_run.as_deref() {
-        if !valid_plugin_command_id(command) {
-            return Err("--plugin-run must be a registered plugin command ID".to_string());
+        if !valid_plugin_command_selector(command) {
+            return Err(
+                "--plugin-run must be a command ID or plugin/path[:command-id]".to_string(),
+            );
         }
     }
     if plugin_args.is_some() && plugin_run.is_none() {
@@ -1046,6 +1048,21 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn valid_plugin_command_selector(value: &str) -> bool {
+    if value.contains('/') {
+        let (plugin_path, command) = value.split_once(':').unwrap_or((value, ""));
+        return !plugin_path.is_empty()
+            && plugin_path.split('/').all(|part| {
+                !part.is_empty()
+                    && part.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                    })
+            })
+            && (command.is_empty() || valid_plugin_command_id(command));
+    }
+    valid_plugin_command_id(value)
 }
 
 fn valid_plugin_command_id(value: &str) -> bool {
@@ -9021,6 +9038,11 @@ mod tests {
             ("--plugin-install", "appearance/teal"),
             ("--plugin-install-file", "./my-plugin.ts"),
             ("--plugin-run", "youtube-web-panel"),
+            ("--plugin-run", "integration/youtube-web-panel"),
+            (
+                "--plugin-run",
+                "integration/youtube-web-panel:youtube-web-panel",
+            ),
             ("--shell", "/bin/zsh"),
             ("-s", "/bin/zsh"),
             ("--cwd", "."),
@@ -9092,8 +9114,13 @@ mod tests {
     fn direct_cli_validation_rejects_invalid_plugin_run_requests() {
         assert_eq!(
             validate_direct_cli_args(&["--plugin-run".to_string(), "invalid command".to_string()]),
-            Err("--plugin-run must be a registered plugin command ID".to_string())
+            Err("--plugin-run must be a command ID or plugin/path[:command-id]".to_string())
         );
+        assert!(validate_direct_cli_args(&[
+            "--plugin-run".to_string(),
+            "integration//youtube-web-panel".to_string(),
+        ])
+        .is_err());
         assert_eq!(
             validate_direct_cli_args(&["--plugin-args".to_string(), "null".to_string()]),
             Err("--plugin-args requires --plugin-run <command>".to_string())

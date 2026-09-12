@@ -190,13 +190,17 @@ install 後の plugin では declaration file をローカルへコピーし、r
 command IDだけをdispatchするため、CLIから渡されたJavaScriptを評価することはありません。
 
 ```bash
-fpasoterm --plugin-run youtube-web-panel
-fpasoterm --plugin-run example.action --plugin-args '{"query":"doom"}'
+fpasoterm --plugin-run integration/youtube-web-panel
+fpasoterm --plugin-run integration/youtube-web-panel:youtube-web-panel
+fpasoterm --plugin-run integration/example:search --plugin-args '{"query":"doom"}'
 ```
 
-`--plugin-args`は最大16 KiBのJSON値を一つ受け付け、handlerの第1引数へ渡します。CLI呼出しで
-省略した場合は`null`、menuからの従来呼出しでは`undefined`です。dialog、picker、panelを開くcommandは
-通常どおりGUIを表示します。
+`plugin/path`は先頭の`plugins/`と`.js`/`.ts` suffixを除いたpluginのinstall pathです。登録commandが
+一つだけのpluginでは短縮指定として使えます。複数commandがある場合は、fpasotermが利用可能な
+`plugin/path:command-id`候補を表示します。bare command IDは互換のため使えますがglobalに一意で
+ある必要があるため、新規automationには推奨しません。`--plugin-args`は最大16 KiBのJSON値を一つ受け付け、
+handlerの第1引数へ渡します。CLI呼出しで省略した場合は`null`、menuからの従来呼出しでは`undefined`です。
+dialog、picker、panelを開くcommandは通常どおりGUIを表示します。
 
 現在のrepository内sampleはすべて一つのcommandを登録します。最新版の`hello.ts`、`status-banner.ts`、
 `theme.ts`、`welcome-banner.ts`を有効化すると、4つのbuttonが表示されるのが正しい動作です。古いlocal sampleが

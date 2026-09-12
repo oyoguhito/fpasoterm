@@ -281,14 +281,20 @@ local CLI. This dispatches only the command ID after enabled plugins load; it
 does not evaluate JavaScript supplied on the command line.
 
 ```bash
-fpasoterm --plugin-run youtube-web-panel
-fpasoterm --plugin-run example.action --plugin-args '{"query":"doom"}'
+fpasoterm --plugin-run integration/youtube-web-panel
+fpasoterm --plugin-run integration/youtube-web-panel:youtube-web-panel
+fpasoterm --plugin-run integration/example:search --plugin-args '{"query":"doom"}'
 ```
 
-`--plugin-args` accepts one JSON value up to 16 KiB and is provided as the
-handler's first argument. A missing value is `null` for CLI invocation; menu
-invocation continues to pass `undefined`. Commands that open dialogs, pickers,
-or panels still require and display the normal GUI.
+`plugin/path` is the plugin's install path without the leading `plugins/` or
+the `.js`/`.ts` suffix. It is a short form when that plugin has exactly one
+registered command. If it has multiple commands, fpasoterm reports the
+available `plugin/path:command-id` choices. Bare command IDs remain supported
+for compatibility but are globally unique and therefore not recommended for
+new automation. `--plugin-args` accepts one JSON value up to 16 KiB and is
+provided as the handler's first argument. A missing value is `null` for CLI
+invocation; menu invocation continues to pass `undefined`. Commands that open
+dialogs, pickers, or panels still require and display the normal GUI.
 
 All current in-tree samples register one command, so enabling current copies of
 `hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four
