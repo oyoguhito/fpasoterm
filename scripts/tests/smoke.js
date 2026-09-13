@@ -2017,6 +2017,7 @@ assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation\[hidden\] \{ 
 assert.match(renderer, /event\.code === 'Tab' \|\| event\.key === 'Tab'/);
 assert.match(renderer, /dialog\.addEventListener\('keydown', \(event\) => \{[\s\S]*?\}, true\)/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
+assert.match(read('src-tauri/tauri.conf.json'), /'unsafe-eval'/);
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
 assert.match(renderer, /pluginNativePickerCount/);
 assert.match(renderer, /pluginNativePickerCount === 0/);
