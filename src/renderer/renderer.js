@@ -2364,7 +2364,7 @@ function openPluginElementOverlay(options = {}) {
   return Object.freeze({ element: content, close, focus: () => content.focus() });
 }
 
-function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel' }) {
+function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel', scope = '' }) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     const dialog = document.createElement('section');
@@ -2387,19 +2387,33 @@ function pluginModalPrompt({ title, message, inputType = null, approve = 'Contin
       input.spellcheck = false;
       input.setAttribute('aria-label', inputType === 'password' ? 'Password' : 'Credential');
     }
-    const finish = (value) => { if (done) return; done = true; overlay.remove(); resolve(value); };
+    const dismiss = (event) => {
+      if (!scope || event.detail?.scope === scope) finish(null);
+    };
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('fpasoterm:plugin-prompt-dismiss', dismiss);
+      overlay.remove();
+      resolve(value);
+    };
     cancelButton.addEventListener('click', () => finish(null));
     approveButton.addEventListener('click', () => finish(input ? input.value : true));
     dialog.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') { event.preventDefault(); finish(null); }
       if (event.key === 'Enter' && input && document.activeElement === input) { event.preventDefault(); finish(input.value); }
     });
+    document.addEventListener('fpasoterm:plugin-prompt-dismiss', dismiss);
     actions.append(cancelButton, approveButton);
     dialog.append(heading, text);
     if (input) dialog.append(input);
     dialog.append(actions); overlay.append(dialog); document.body.append(overlay);
     (input || approveButton).focus();
   });
+}
+
+function dismissPluginPrompts(scope) {
+  document.dispatchEvent(new CustomEvent('fpasoterm:plugin-prompt-dismiss', { detail: { scope } }));
 }
 
 async function openPluginVncBridge(options = {}, declaredTargets = []) {
@@ -2579,6 +2593,7 @@ async function loadPlugins() {
       message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
       inputType: 'password',
       approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+      scope: plugin?.name || '',
     }),
     // Credentials are returned to the calling trusted plugin only and are not
     // retained by fpasoterm, configuration, or diagnostics.
@@ -2587,7 +2602,10 @@ async function loadPlugins() {
       message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
       inputType: 'text',
       approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+      scope: plugin?.name || '',
     }),
+    /** Closes only this plugin's outstanding credential prompts. */
+    dismissPrompts: () => dismissPluginPrompts(plugin?.name || ''),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
