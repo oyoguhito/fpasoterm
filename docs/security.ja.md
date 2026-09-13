@@ -8,6 +8,11 @@ fpasoterm はuserが選択したshellを起動するため、そのuser account�
 
 `~/.config/fpasoterm/User/plugins/`で有効化したfileはterminal renderer内でJavaScriptとして実行されます。plugin APIを参照し、現在のuserとして操作できます。内容をreviewしたlocal fileだけを有効化してください。見覚えのあるfile名や未reviewのrepositoryだけを理由に有効化してはいけません。
 
+desktop CSPはreview済みlocal pluginのWebAssembly compileを許可します。狭い`'wasm-unsafe-eval'`を
+認識しない古いmacOS WebKitとの互換のため、`'unsafe-eval'`もfallbackとして維持します。これは未review
+pluginを安全にするものではありません。trusted plugin sourceは元々rendererでJavaScriptとして実行される
+ため、source reviewがsecurity boundaryです。
+
 ### Sync folder Broadcast
 
 remote Broadcastは既定で無効です。`fpasoterm --setup-sync`は32文字以上の`sync.commandSecret`を生成します。同じsecretは信頼できるdeviceとuser accountだけに設定してください。fpasotermはsync command fileへHMAC-SHA-256署名を付け、署名がない、または一致しないfileを無視します。

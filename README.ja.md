@@ -275,6 +275,8 @@ enabled = ["plugins/example.ts"]
 
 plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list` でlocalの `User/plugins` にある検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`--plugin-info welcome-banner`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
 
+新しいGUI windowを開く際に有効pluginの登録済みcommandを実行するには、`fpasoterm --plugin-run <plugin/path[:command-id]>`を使用します。`--plugin-args <json>`でhandlerへJSON値を一つ渡せます。例えば`fpasoterm --plugin-run integration/youtube-web-panel`です。複数commandを持つpluginは`integration/youtube-web-panel:youtube-web-panel`のように一意な指定を使用します。従来のbare command IDも互換のため使用できます。CLIから渡されたJavaScriptを実行せず、登録済みcommandだけをdispatchします。
+
 review済みのlocal pluginとそのenabled entryを削除する場合は`fpasoterm --plugin-uninstall <file>`を使用します。これはlocal-onlyの操作であり、公開port catalogへは接続しません。
 
 ports repository全体をcloneせず、Node.jsも使わずにreview済み公開pluginを取得する場合は、`fpasoterm --plugin-install appearance/teal`を実行します。内容確認後に有効化する場合だけ`--enable`を追加します。固定repository、検証、上書き条件は[プラグイン](docs/plugins.ja.md)を参照してください。

@@ -55,6 +55,16 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
+  /** Opens a focus-trapped HTTPS iframe panel for this plugin's declared, application-approved origins. */
+  openWebPanel: (options: {
+    title?: string;
+    url: string;
+    width?: number;
+    height?: number;
+  }) => {
+    close: () => void;
+    focus: () => void;
+  };
   getOfficialPluginIndex: () => Promise<Array<{
     id: string;
     name: string;
@@ -69,7 +79,8 @@ type FpasotermPluginApi = {
   registerCommand: (
     id: string,
     title: string,
-    handler: () => void | Promise<void>,
+    /** Receives the JSON value passed by `fpasoterm --plugin-run <id> --plugin-args <json>`. */
+    handler: (args?: unknown) => void | Promise<void>,
   ) => void;
 };
 

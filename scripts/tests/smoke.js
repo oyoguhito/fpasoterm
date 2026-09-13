@@ -16,6 +16,7 @@ const {
   missingConfigKeys,
   platformDefaultConfig,
   pluginMetadata,
+  pluginAllowedOrigins,
   profileNames,
   pruneUnsupportedConfig,
   resolvePluginSelector,
@@ -109,6 +110,11 @@ assert.deepEqual(
   pluginMetadata('// @fpasoterm-plugin version: 1.2.3\n// @fpasoterm-plugin description: Example plugin\n'),
   { version: '1.2.3', description: 'Example plugin' },
 );
+assert.deepEqual(
+  pluginAllowedOrigins('// @fpasoterm-plugin allowed-origins: https://www.youtube.com, https://www.youtube-nocookie.com\n'),
+  ['https://www.youtube-nocookie.com', 'https://www.youtube.com'],
+);
+assert.deepEqual(pluginAllowedOrigins('// @fpasoterm-plugin allowed-origins: http://example.com, https://example.com/path\n'), []);
 assert.deepEqual(
   pluginMetadata('// Existing plugin comment\nconst value = 1;\n'),
   { version: '(not declared)', description: 'Existing plugin comment' },
@@ -313,6 +319,10 @@ assert.match(bin, /--enable-plugin/);
 assert.match(bin, /--disable-plugin/);
 assert.match(bin, /--plugin-enable/);
 assert.match(bin, /--plugin-disable/);
+assert.match(bin, /--plugin-run/);
+assert.match(bin, /--plugin-args/);
+assert.match(bin, /FPASOTERM_PLUGIN_RUN/);
+assert.match(bin, /isPluginCommandSelector/);
 assert.match(bin, /--size/);
 assert.match(bin, /-t, --title/);
 assert.match(bin, /-b, --titlebar-color/);
@@ -349,6 +359,8 @@ assert.match(bin, /child\.unref\(\)/);
 assert.match(bin, /windowsHide: !options\.foreground/);
 assert.match(bin, /isBuiltBinaryCurrent/);
 assert.match(bin, /latestRuntimeSourceMtime/);
+assert.match(bin, /runtimeSourceRevision/);
+assert.match(bin, /sourceRevision/);
 assert.match(bin, /latestPathMtime/);
 assert.match(bin, /src\/renderer/);
 assert.match(bin, /cargo-clean-start/);
@@ -1145,7 +1157,10 @@ assert.match(rustMain, /Get-Content -LiteralPath \$args\[0\] -Raw -Encoding UTF8
 assert.doesNotMatch(rustMain, /Set-Clipboard -Value \(\[Console\]::In\.ReadToEnd\(\)\)/);
 assert.doesNotMatch(rustMain, removedSnakeHttpUiPattern);
 assert.doesNotMatch(rustMain, removedKebabHttpUiPattern);
-assert.doesNotMatch(rustMain, /TcpListener::bind/);
+// The YouTube embed wrapper is deliberately loopback-only.  It must never
+// become a general HTTP UI or an externally reachable listener.
+assert.match(rustMain, /TcpListener::bind\("127\.0\.0\.1:0"\)/);
+assert.doesNotMatch(rustMain, /TcpListener::bind\("0\.0\.0\.0/);
 assert.doesNotMatch(rustMain, /handle\.join\(\)/);
 assert.match(rustMain, /terminal_log_start/);
 assert.match(rustMain, /terminal_log_stop/);
@@ -1701,6 +1716,8 @@ assert.match(pluginDocsEn, /local files that you trust/);
 assert.match(pluginDocsEn, /--plugin-list/);
 assert.match(pluginDocsEn, /--plugin-uninstall/);
 assert.match(pluginDocsEn, /registerCommand/);
+assert.match(pluginDocsEn, /--plugin-run/);
+assert.match(pluginDocsEn, /plugin\/path:command-id/);
 assert.match(pluginDocsEn, /@fpasoterm-plugin version/);
 
 const pluginDocsJa = read('docs/plugins.ja.md');
@@ -1711,6 +1728,8 @@ assert.match(pluginDocsJa, /信頼できるローカル file/);
 assert.match(pluginDocsJa, /--plugin-list/);
 assert.match(pluginDocsJa, /--plugin-uninstall/);
 assert.match(pluginDocsJa, /registerCommand/);
+assert.match(pluginDocsJa, /--plugin-run/);
+assert.match(pluginDocsJa, /plugin\/path:command-id/);
 assert.match(pluginDocsJa, /@fpasoterm-plugin version/);
 
 const welcomeBannerPlugin = read('examples/plugins/welcome-banner.ts');
@@ -1937,12 +1956,16 @@ assert.doesNotMatch(pluginTypes, /duplicateWindowMs/);
 assert.match(pluginTypes, /version: string/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
+assert.match(pluginTypes, /plugin-run/);
+assert.match(read('src/renderer/renderer.js'), /normalizePluginCommandOwner/);
+assert.match(read('src/renderer/renderer.js'), /resolvePluginCommand/);
 assert.match(pluginTypes, /getOfficialPluginIndex:/);
 assert.match(pluginTypes, /readClipboard:/);
 assert.match(pluginTypes, /writeClipboard:/);
 assert.match(pluginTypes, /openExternalUrl:/);
 assert.match(pluginTypes, /selectLocalAsset:/);
 assert.match(pluginTypes, /openCanvasOverlay:/);
+assert.match(pluginTypes, /openWebPanel:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
@@ -1979,6 +2002,12 @@ assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClip
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
 assert.match(renderer, /selectLocalAsset: \(options\) => selectPluginLocalAsset\(options\)/);
 assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverlay\(options\)/);
+assert.match(renderer, /openWebPanel: \(options\) => openPluginWebPanel\(options, plugin\?\.allowedOrigins\)/);
+assert.match(renderer, /const supportedPluginPanelOrigins = new Set/);
+assert.match(renderer, /web panel origin is not permitted/);
+assert.match(read('src-tauri/tauri.conf.json'), /frame-src https:\/\/www\.youtube\.com https:\/\/www\.youtube-nocookie\.com/);
+assert.match(read('src-tauri/tauri.conf.json'), /http:\/\/127\.0\.0\.1:\*/);
+assert.match(renderer, /pluginWebPanelFrameUrl/);
 assert.match(renderer, /const confirmClose = resolvedOptions\.confirmClose === true/);
 assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation/);
 assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title\}\?`/);
@@ -1988,6 +2017,7 @@ assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation\[hidden\] \{ 
 assert.match(renderer, /event\.code === 'Tab' \|\| event\.key === 'Tab'/);
 assert.match(renderer, /dialog\.addEventListener\('keydown', \(event\) => \{[\s\S]*?\}, true\)/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
+assert.match(read('src-tauri/tauri.conf.json'), /'unsafe-eval'/);
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);
 assert.match(renderer, /pluginNativePickerCount/);
 assert.match(renderer, /pluginNativePickerCount === 0/);

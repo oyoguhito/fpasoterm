@@ -104,11 +104,14 @@ Options:
       --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.
       --plugin-enable <names>   Alias for --enable-plugin.
       --plugin-disable <names>  Alias for --disable-plugin.
+      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.
+      --plugin-args <json>      JSON value passed to --plugin-run's command handler.
                                 Local selectors may omit plugins/ and .js/.ts when unambiguous.
   -W, --width <px>              Override the configured window width for this launch.
   -H, --height <px>             Override the configured window height for this launch.
   -z, --size <width>x<height>   Override both window dimensions for this launch.
   -k, --debug-keys              Enable key/composition diagnostics.
+      --plugin-activity         Show live plugin command/API activity in the window.
       --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.
 
 Normal launches build and run the local Tauri binary when needed, then detach
@@ -194,6 +197,9 @@ function parseArgs(argv) {
   let pluginInstallFile = '';
   let pluginInstallForce = false;
   let pluginInstallEnable = false;
+  let pluginRun = '';
+  let pluginArgs = 'null';
+  let pluginArgsProvided = false;
   let listInstances = false;
   let closeTarget = '';
   let setupSync = false;
@@ -336,6 +342,28 @@ function parseArgs(argv) {
 
     if (arg === '--enable') {
       pluginInstallEnable = true;
+      continue;
+    }
+
+    if (arg === '--plugin-run') {
+      pluginRun = requireValue(argv, index, arg);
+      if (!isPluginCommandSelector(pluginRun)) {
+        throw new Error('--plugin-run must be a command ID or plugin/path[:command-id]');
+      }
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--plugin-args') {
+      pluginArgs = requireValue(argv, index, arg);
+      pluginArgsProvided = true;
+      if (pluginArgs.length > 16_384) throw new Error('--plugin-args must be at most 16384 bytes');
+      try {
+        JSON.parse(pluginArgs);
+      } catch {
+        throw new Error('--plugin-args must be valid JSON');
+      }
+      index += 1;
       continue;
     }
 
@@ -499,6 +527,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--plugin-activity') {
+      env.FPASOTERM_PLUGIN_ACTIVITY = '1';
+      continue;
+    }
+
     if (arg === '--disable-dmabuf') {
       env.FPASOTERM_DISABLE_DMABUF = '1';
       env.WEBKIT_DISABLE_DMABUF_RENDERER = '1';
@@ -562,6 +595,9 @@ function parseArgs(argv) {
   if (pluginPortsDir && !pluginInstall) {
     throw new Error('--plugin-ports-dir requires --plugin-install <category/name>');
   }
+  if (!pluginRun && pluginArgsProvided) {
+    throw new Error('--plugin-args requires --plugin-run <command>');
+  }
   if (pluginUninstall.length > 0 && (
     enablePlugins.length > 0 || disablePlugins.length > 0 || enableAllPlugins || disableAllPlugins || pluginInstallCount > 0
   )) {
@@ -594,6 +630,8 @@ function parseArgs(argv) {
     pluginInstallFile,
     pluginInstallForce,
     pluginInstallEnable,
+    pluginRun,
+    pluginArgs,
     listInstances,
     closeTarget,
     setupSync,
@@ -614,6 +652,7 @@ function parseArgs(argv) {
     env: {
       ...env,
       ...(startCommand ? { FPASOTERM_START_COMMAND: startCommand } : {}),
+      ...(pluginRun ? { FPASOTERM_PLUGIN_RUN: pluginRun, FPASOTERM_PLUGIN_ARGS: pluginArgs } : {}),
     },
     startCommand,
     enablePlugins,
@@ -622,6 +661,14 @@ function parseArgs(argv) {
     disableAllPlugins,
     runtimeArgs,
   };
+}
+
+// Accept either the backward-compatible bare command ID or a plugin-owned
+// selector.  Slashes are only meaningful in the latter and are never source
+// code paths to execute.
+function isPluginCommandSelector(value) {
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(value)
+    || /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+(?::[A-Za-z][A-Za-z0-9._:-]{0,79})?$/.test(value);
 }
 
 // Rejects unknown options before help/version handling can bypass validation.
@@ -633,13 +680,14 @@ function validateArgs(argv) {
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--force', '--enable',
-    '--debug-keys', '-k', '--disable-dmabuf', '--broadcast-sync',
+    '--debug-keys', '-k', '--plugin-activity', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--cwd', '-o', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--plugin-uninstall', '--width', '-W',
     '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
     '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-install-file',
+    '--plugin-run', '--plugin-args',
   ]);
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -2418,12 +2466,25 @@ function readBuildStamp() {
   }
 }
 
-// Writes the binary/source mtimes after a successful normal cargo build.
+// Returns the checkout revision when this launcher runs from a Git worktree.
+// Source mtimes alone are not sufficient because switching branches can make
+// an older source tree appear older than a binary from another branch.
+function runtimeSourceRevision() {
+  try {
+    const result = spawnSync('git', ['-C', root, 'rev-parse', 'HEAD'], { encoding: 'utf8' });
+    return result.status === 0 ? result.stdout.trim() : '';
+  } catch {
+    return '';
+  }
+}
+
+// Writes the binary/source identity after a successful normal cargo build.
 function writeBuildStamp(binary) {
   const stamp = {
     binary,
     binaryMtime: fs.statSync(binary).mtimeMs,
     sourceMtime: latestRuntimeSourceMtime(),
+    sourceRevision: runtimeSourceRevision(),
   };
   fs.writeFileSync(buildStampPath(), JSON.stringify(stamp, null, 2));
 }
@@ -2436,6 +2497,9 @@ function findStampedTauriBinary() {
     return undefined;
   }
   if (stamp.sourceMtime !== latestRuntimeSourceMtime()) {
+    return undefined;
+  }
+  if (stamp.sourceRevision !== runtimeSourceRevision()) {
     return undefined;
   }
   if (stamp.binaryMtime !== fs.statSync(binary).mtimeMs) {
@@ -2452,7 +2516,7 @@ function startupPreparationStatus(options) {
   if (findStampedTauriBinary()) {
     return 'using cached local runtime';
   }
-  if (findTauriBinary()) {
+  if (findTauriBinary() && !runtimeSourceRevision()) {
     return 'using local runtime';
   }
   return 'building local runtime with cargo (first launch can take several minutes)';
@@ -2460,7 +2524,7 @@ function startupPreparationStatus(options) {
 
 // Detects the only startup path that needs visible work before a window exists.
 function requiresLocalRuntimeBuild(options) {
-  return options.dev || (!findStampedTauriBinary() && !findTauriBinary());
+  return options.dev || (!findStampedTauriBinary() && (!findTauriBinary() || Boolean(runtimeSourceRevision())));
 }
 
 // Builds the debug binary used by normal source-checkout launches.
@@ -2476,7 +2540,10 @@ function buildTauriBinary(options) {
   }
 
   const currentBinary = findTauriBinary();
-  if (currentBinary) {
+  // A source archive has no revision to compare, so keep the existing
+  // timestamp fallback there. A Git checkout must rebuild rather than stamp a
+  // binary produced by a different branch.
+  if (currentBinary && !runtimeSourceRevision()) {
     writeBuildStamp(currentBinary);
     appendLauncherLog(`launcher build=skip current binary=${currentBinary}`);
     return Promise.resolve(currentBinary);
@@ -2618,12 +2685,17 @@ function runtimeEnv(options) {
   applyTerminalRuntimeOverrides(runtimeConfig.config.terminal, options.env);
   runtimeConfig.diagnostics = {
     debugKeys: options.env.FPASOTERM_DEBUG_KEYS === '1' || process.env.FPASOTERM_DEBUG_KEYS === '1',
+    pluginActivity:
+      options.env.FPASOTERM_PLUGIN_ACTIVITY === '1' || process.env.FPASOTERM_PLUGIN_ACTIVITY === '1',
     consoleDiagnostics:
       options.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1' || process.env.FPASOTERM_CONSOLE_DIAGNOSTICS === '1',
     opaqueTerminal:
       options.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1' ||
       process.env.FPASOTERM_DEBUG_OPAQUE_TERMINAL === '1',
   };
+  if (options.pluginRun) {
+    runtimeConfig.pluginCommand = { id: options.pluginRun, args: JSON.parse(options.pluginArgs) };
+  }
   return {
     ...process.env,
     ...options.env,

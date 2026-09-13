@@ -8,6 +8,12 @@ fpasoterm starts a user-selected shell and has the same authority as that user a
 
 Files enabled from `~/.config/fpasoterm/User/plugins/` run as JavaScript in the terminal renderer. They can read the exposed plugin API and act as the current user. Enable only reviewed local files. Do not enable a plugin merely because it has a familiar file name or came from an unreviewed repository.
 
+The desktop CSP permits WebAssembly compilation for reviewed local plugins. It
+also retains `'unsafe-eval'` as a compatibility fallback for older macOS WebKit
+versions that reject the narrower `'wasm-unsafe-eval'` source expression. This
+does not make unreviewed plugins safe: trusted plugin source already executes
+as JavaScript in the renderer, so review remains the security boundary.
+
 ### Sync-folder Broadcast
 
 Remote Broadcast is disabled by default. `fpasoterm --setup-sync` generates a 32-character-or-longer `sync.commandSecret`. Configure the same secret only on devices and user accounts that you trust. fpasoterm signs synced command files with HMAC-SHA-256 and ignores unsigned or invalidly signed files.

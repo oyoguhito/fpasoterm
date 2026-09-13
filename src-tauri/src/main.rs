@@ -7,10 +7,11 @@ use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
-use std::collections::{HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::net::{TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Child;
@@ -70,6 +71,18 @@ struct RuntimeConfig {
     #[serde(default)]
     active_profile: String,
     diagnostics: Option<DiagnosticsConfig>,
+    #[serde(default)]
+    plugin_command: Option<PluginCommandRequest>,
+}
+
+// One command requested by the local CLI. The renderer resolves the ID only
+// after trusted local plugins register their handlers; it never evaluates CLI
+// source text.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginCommandRequest {
+    id: String,
+    args: serde_json::Value,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -103,10 +116,13 @@ struct WindowConfig {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 // Resolved plugin script URL exposed to the renderer.
 struct PluginUrl {
     name: String,
     url: String,
+    #[serde(default)]
+    allowed_origins: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -114,6 +130,7 @@ struct PluginUrl {
 // Diagnostics switches passed from the launcher to the backend and renderer.
 struct DiagnosticsConfig {
     debug_keys: bool,
+    plugin_activity: bool,
     console_diagnostics: bool,
 }
 
@@ -482,6 +499,8 @@ struct AppState {
     source_id: String,
     started_at: u128,
     broadcast_listener_started: AtomicBool,
+    panel_server_url: Arc<Mutex<Option<String>>>,
+    panel_urls: Arc<Mutex<HashMap<String, String>>>,
 }
 
 impl Default for AppState {
@@ -494,6 +513,8 @@ impl Default for AppState {
             source_id: format!("{}-{}", std::process::id(), now_millis()),
             started_at: now_millis(),
             broadcast_listener_started: AtomicBool::new(false),
+            panel_server_url: Arc::new(Mutex::new(None)),
+            panel_urls: Arc::new(Mutex::new(HashMap::new())),
         }
     }
 }
@@ -513,7 +534,14 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 
 // The direct binary has the same core options as the Node launcher.
 fn cli_help_text() -> String {
-    HELP_TEXT.to_string()
+    HELP_TEXT.replace(
+        "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
+        "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
+    )
+    .replace(
+        "Use this local fpasoterm-plugins checkout.",
+        "Use this local fpasoterm-plugins checkout or its ports directory.",
+    )
 }
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
@@ -762,6 +790,7 @@ fn main() {
             diagnostics_log,
             clipboard_read,
             clipboard_write,
+            plugin_web_panel_frame_url,
             open_external_url,
             app_version,
             update_check,
@@ -853,6 +882,8 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-install",
         "--plugin-ports-dir",
         "--plugin-install-file",
+        "--plugin-run",
+        "--plugin-args",
         "--shell",
         "-s",
         "--cwd",
@@ -1003,7 +1034,64 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
             "--plugin-uninstall cannot be combined with other plugin mutation options".to_string(),
         );
     }
+    let plugin_run = cli_option_value_from_args(args, "--plugin-run");
+    let plugin_args = cli_option_value_from_args(args, "--plugin-args");
+    if let Some(command) = plugin_run.as_deref() {
+        if !valid_plugin_command_selector(command) {
+            return Err(
+                "--plugin-run must be a command ID or plugin/path[:command-id]".to_string(),
+            );
+        }
+    }
+    if plugin_args.is_some() && plugin_run.is_none() {
+        return Err("--plugin-args requires --plugin-run <command>".to_string());
+    }
+    if let Some(args) = plugin_args {
+        if args.len() > 16_384 || serde_json::from_str::<serde_json::Value>(&args).is_err() {
+            return Err("--plugin-args must be valid JSON of at most 16384 bytes".to_string());
+        }
+    }
     Ok(())
+}
+
+fn valid_plugin_command_selector(value: &str) -> bool {
+    if value.contains('/') {
+        let (plugin_path, command) = value.split_once(':').unwrap_or((value, ""));
+        return !plugin_path.is_empty()
+            && plugin_path.split('/').all(|part| {
+                !part.is_empty()
+                    && part.chars().all(|character| {
+                        character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | '-')
+                    })
+            })
+            && (command.is_empty() || valid_plugin_command_id(command));
+    }
+    valid_plugin_command_id(value)
+}
+
+fn valid_plugin_command_id(value: &str) -> bool {
+    let mut characters = value.chars();
+    matches!(characters.next(), Some(character) if character.is_ascii_alphabetic())
+        && value.len() <= 80
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '.' | '_' | ':' | '-')
+        })
+}
+
+fn cli_option_value_from_args(args: &[String], flag: &str) -> Option<String> {
+    let equals_prefix = format!("{flag}=");
+    args.iter().enumerate().find_map(|(index, argument)| {
+        if argument == flag {
+            args.get(index + 1)
+                .map(|value| sanitize_cli_value(value))
+                .filter(|value| !value.is_empty())
+        } else {
+            argument
+                .strip_prefix(&equals_prefix)
+                .map(sanitize_cli_value)
+                .filter(|value| !value.is_empty())
+        }
+    })
 }
 
 // Checks values whose invalid form previously fell through to a normal launch.
@@ -3294,6 +3382,7 @@ fn resolve_direct_plugin_urls(config: &Config, config_dir: &Path) -> Vec<PluginU
             urls.push(PluginUrl {
                 name: name.replace('\\', "/"),
                 url,
+                allowed_origins: plugin_allowed_origins(&source),
             });
         }
     }
@@ -3447,10 +3536,25 @@ fn default_runtime_config() -> RuntimeConfig {
         diagnostics: Some(DiagnosticsConfig {
             debug_keys: env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1")
                 || cli_has_flag(&["--debug-keys", "-k"]),
+            plugin_activity: env::var("FPASOTERM_PLUGIN_ACTIVITY").as_deref() == Ok("1")
+                || cli_has_flag(&["--plugin-activity"]),
             console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
                 || cli_has_flag(&["--console-diagnostics", "-C"]),
         }),
+        plugin_command: direct_plugin_command_request(),
     }
+}
+
+fn direct_plugin_command_request() -> Option<PluginCommandRequest> {
+    let id = env::var("FPASOTERM_PLUGIN_RUN")
+        .ok()
+        .or_else(|| cli_option_value("--plugin-run"))?;
+    let args_text = env::var("FPASOTERM_PLUGIN_ARGS")
+        .ok()
+        .or_else(|| cli_option_value("--plugin-args"))
+        .unwrap_or_else(|| "null".to_string());
+    let args = serde_json::from_str(&args_text).ok()?;
+    Some(PluginCommandRequest { id, args })
 }
 
 // Resolves the user's home directory on Unix-like systems and Windows.
@@ -4063,6 +4167,33 @@ struct PluginMetadata {
     description: String,
 }
 
+// Reads the same declarative HTTPS origin header as the Node launcher. The
+// renderer additionally intersects these declarations with its small core
+// allowlist before a web panel is opened.
+fn plugin_allowed_origins(source: &str) -> Vec<String> {
+    let mut origins = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let Some(values) = trimmed.strip_prefix("// @fpasoterm-plugin allowed-origins:") else {
+            continue;
+        };
+        for value in values.split(',').map(str::trim) {
+            let Some(host) = value.strip_prefix("https://") else {
+                continue;
+            };
+            if host.is_empty()
+                || host.contains(['/', '?', '#', '@'])
+                || origins.iter().any(|origin| origin == value)
+            {
+                continue;
+            }
+            origins.push(value.to_string());
+        }
+    }
+    origins.sort();
+    origins
+}
+
 // Parses `// @fpasoterm-plugin version: ...` and description headers while
 // preserving a normal leading comment as a backwards-compatible description.
 fn plugin_metadata(source: &str) -> PluginMetadata {
@@ -4434,17 +4565,21 @@ fn install_public_plugin_port(
     install_plugin_source(config_path, &port, source, force)
 }
 
-// Locates a checked-out fpasoterm-plugins tree for reviewed local port installs.
+// Locates either a fpasoterm-plugins checkout or its direct ports/ directory.
 fn local_plugin_ports_directory(explicit: Option<String>) -> Result<PathBuf, String> {
     let directory = explicit
         .map(PathBuf::from)
         .ok_or_else(|| "--plugin-ports-dir requires a path".to_string())?;
-    if directory.join("ports").is_dir() {
-        Ok(directory)
+    let ports_directory = if directory.file_name().is_some_and(|name| name == "ports") {
+        directory
+    } else {
+        directory.join("ports")
+    };
+    if ports_directory.is_dir() {
+        Ok(ports_directory)
     } else {
         Err(
-            "local fpasoterm-plugins checkout not found; pass --plugin-ports-dir <path>"
-                .to_string(),
+            "local fpasoterm-plugins checkout or its ports directory not found; pass --plugin-ports-dir <path>".to_string(),
         )
     }
 }
@@ -4474,8 +4609,8 @@ fn install_local_plugin_port(
     force: bool,
 ) -> Result<String, String> {
     let id = validate_public_plugin_port_id(selector)?;
-    let root = local_plugin_ports_directory(ports_directory)?;
-    let port_directory = root.join("ports").join(&id);
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let port_directory = ports_root.join(&id);
     let manifest = read_local_plugin_file(
         &port_directory.join("port.toml"),
         PUBLIC_PLUGIN_MANIFEST_LIMIT,
@@ -8017,6 +8152,95 @@ fn validated_external_url(url: &str) -> Result<String, String> {
     Ok(value.to_string())
 }
 
+fn validated_youtube_embed_url(url: &str) -> Result<String, String> {
+    let value = validated_external_url(url)?;
+    if ![
+        "https://www.youtube.com/embed/",
+        "https://www.youtube-nocookie.com/embed/",
+    ]
+    .iter()
+    .any(|prefix| value.starts_with(prefix))
+    {
+        return Err("only approved YouTube embed URLs may use the loopback panel".to_string());
+    }
+    Ok(value)
+}
+
+fn write_loopback_response(stream: &mut TcpStream, status: &str, body: &str) {
+    let response = format!("HTTP/1.1 {status}\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}", body.as_bytes().len());
+    let _ = stream.write_all(response.as_bytes());
+}
+
+fn serve_plugin_panel(mut stream: TcpStream, routes: Arc<Mutex<HashMap<String, String>>>) {
+    let mut request = [0_u8; 4096];
+    let Ok(size) = stream.read(&mut request) else {
+        return;
+    };
+    let line = String::from_utf8_lossy(&request[..size])
+        .lines()
+        .next()
+        .unwrap_or_default()
+        .to_string();
+    let token = line
+        .split_whitespace()
+        .nth(1)
+        .and_then(|path| path.strip_prefix("/youtube/"));
+    let url = token.and_then(|key| routes.lock().ok()?.get(key).cloned());
+    let Some(url) = url else {
+        write_loopback_response(&mut stream, "404 Not Found", "Not found");
+        return;
+    };
+    let escaped = url
+        .replace('&', "&amp;")
+        .replace('"', "&quot;")
+        .replace('<', "&lt;");
+    let body = format!("<!doctype html><meta name=referrer content=strict-origin-when-cross-origin><style>html,body,iframe{{width:100%;height:100%;margin:0;border:0;background:#000}}</style><iframe title=YouTube src=\"{escaped}\" allow=\"autoplay; encrypted-media; picture-in-picture; fullscreen\" allowfullscreen></iframe>");
+    write_loopback_response(&mut stream, "200 OK", &body);
+}
+
+fn plugin_panel_server_url(state: &AppState) -> Result<String, String> {
+    if let Some(url) = state
+        .panel_server_url
+        .lock()
+        .map_err(|_| "panel server lock failed")?
+        .clone()
+    {
+        return Ok(url);
+    }
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("could not bind loopback panel server: {error}"))?;
+    let url = format!(
+        "http://{}",
+        listener.local_addr().map_err(|error| error.to_string())?
+    );
+    let routes = state.panel_urls.clone();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            serve_plugin_panel(stream, routes.clone());
+        }
+    });
+    *state
+        .panel_server_url
+        .lock()
+        .map_err(|_| "panel server lock failed")? = Some(url.clone());
+    Ok(url)
+}
+
+#[tauri::command]
+fn plugin_web_panel_frame_url(state: State<AppState>, url: String) -> Result<String, String> {
+    let url = validated_youtube_embed_url(&url)?;
+    let token = format!("{}-{}", std::process::id(), now_millis());
+    state
+        .panel_urls
+        .lock()
+        .map_err(|_| "panel route lock failed")?
+        .insert(token.clone(), url);
+    Ok(format!(
+        "{}/youtube/{token}",
+        plugin_panel_server_url(&state)?
+    ))
+}
+
 #[tauri::command]
 // Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
@@ -8733,6 +8957,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn youtube_loopback_only_accepts_supported_embed_urls() {
+        assert_eq!(
+            validated_youtube_embed_url("https://www.youtube.com/embed/dQw4w9WgXcQ")
+                .expect("youtube embed URL"),
+            "https://www.youtube.com/embed/dQw4w9WgXcQ"
+        );
+        assert!(
+            validated_youtube_embed_url("https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ")
+                .is_ok()
+        );
+        assert!(
+            validated_youtube_embed_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ").is_err()
+        );
+        assert!(validated_youtube_embed_url("https://example.test/embed/dQw4w9WgXcQ").is_err());
+    }
+
+    #[test]
     fn direct_cli_validation_rejects_unknown_options() {
         let args = vec!["--foo".to_string()];
         assert_eq!(
@@ -8804,6 +9045,12 @@ mod tests {
             ("--plugin-disable", "welcome-banner.ts"),
             ("--plugin-install", "appearance/teal"),
             ("--plugin-install-file", "./my-plugin.ts"),
+            ("--plugin-run", "youtube-web-panel"),
+            ("--plugin-run", "integration/youtube-web-panel"),
+            (
+                "--plugin-run",
+                "integration/youtube-web-panel:youtube-web-panel",
+            ),
             ("--shell", "/bin/zsh"),
             ("-s", "/bin/zsh"),
             ("--cwd", "."),
@@ -8840,6 +9087,15 @@ mod tests {
             Ok(())
         );
         assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-run".to_string(),
+                "youtube-web-panel".to_string(),
+                "--plugin-args".to_string(),
+                "{\"query\":\"doom\"}".to_string(),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
             validate_direct_cli_args(&["--size=800x600".to_string()]),
             Ok(())
         );
@@ -8859,6 +9115,54 @@ mod tests {
         assert_eq!(
             validate_direct_cli_args(&args),
             Err("--width must be a positive integer".to_string())
+        );
+    }
+
+    #[test]
+    fn local_plugin_ports_directory_accepts_checkout_or_ports_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "fpasoterm-local-ports-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        let ports = root.join("ports");
+        fs::create_dir_all(&ports).expect("create ports directory");
+        assert_eq!(
+            local_plugin_ports_directory(Some(root.to_string_lossy().to_string()))
+                .expect("checkout root"),
+            ports
+        );
+        assert_eq!(
+            local_plugin_ports_directory(Some(ports.to_string_lossy().to_string()))
+                .expect("ports directory"),
+            ports
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_invalid_plugin_run_requests() {
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-run".to_string(), "invalid command".to_string()]),
+            Err("--plugin-run must be a command ID or plugin/path[:command-id]".to_string())
+        );
+        assert!(validate_direct_cli_args(&[
+            "--plugin-run".to_string(),
+            "integration//youtube-web-panel".to_string(),
+        ])
+        .is_err());
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-args".to_string(), "null".to_string()]),
+            Err("--plugin-args requires --plugin-run <command>".to_string())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-run".to_string(),
+                "youtube-web-panel".to_string(),
+                "--plugin-args".to_string(),
+                "not-json".to_string(),
+            ]),
+            Err("--plugin-args must be valid JSON of at most 16384 bytes".to_string())
         );
     }
 
@@ -9118,6 +9422,33 @@ installPath = "appearance/other.ts"
                 version: "(not declared)".to_string(),
                 description: "Existing plugin comment".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn plugin_allowed_origins_reads_unique_https_origins() {
+        assert_eq!(
+            plugin_allowed_origins(
+                "// @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com, https://www.youtube.com\n// @fpasoterm-plugin allowed-origins: http://example.test, https://www.youtube.com/path\n"
+            ),
+            vec![
+                "https://www.youtube-nocookie.com".to_string(),
+                "https://www.youtube.com".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn plugin_url_serializes_allowed_origins_for_the_renderer() {
+        let value = serde_json::to_value(PluginUrl {
+            name: "plugins/example.ts".to_string(),
+            url: "file:///tmp/example.js".to_string(),
+            allowed_origins: vec!["https://www.youtube-nocookie.com".to_string()],
+        })
+        .expect("serialize plugin URL");
+        assert_eq!(
+            value["allowedOrigins"],
+            serde_json::json!(["https://www.youtube-nocookie.com"])
         );
     }
 

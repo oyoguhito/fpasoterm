@@ -423,11 +423,12 @@ body {
 
 #terminal-mirror {
   position: fixed;
-  top: calc(var(--titlebar-height) + 8px);
+  /* Keep debug output away from the titlebar and normal terminal content. */
+  bottom: 8px;
   right: 8px;
   left: 8px;
   z-index: 9;
-  max-height: min(34vh, 260px);
+  max-height: min(22vh, 160px);
   margin: 0;
   overflow: auto;
   padding: 8px;
@@ -442,6 +443,156 @@ body {
 
 #terminal-mirror[hidden] {
   display: none;
+}
+
+/* This host is part of the initial document rather than being a transient
+ * grid child. Plugin web panels therefore always sit above the terminal even
+ * on WebKit builds which defer dynamic stylesheet application. */
+#plugin-web-panel-host {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.58);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#plugin-web-panel-host[hidden] {
+  display: none;
+}
+
+/* Kept above plugin overlays so a failed panel invocation is diagnosable even
+ * when the embedded page paints only a black surface. */
+#plugin-command-status {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 8px);
+  right: 8px;
+  left: 8px;
+  z-index: 13000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  max-height: min(30vh, 220px);
+  overflow: hidden;
+  padding: 8px 10px;
+  border: 2px solid #67c587;
+  border-radius: 6px;
+  background: rgba(13, 28, 20, 0.98);
+  color: #e8fff0;
+  font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#plugin-command-status[data-state="error"] {
+  border-color: #ff8f8f;
+  background: rgba(49, 16, 19, 0.98);
+  color: #fff0f0;
+}
+
+#plugin-command-status[hidden] {
+  display: none;
+}
+
+.plugin-command-status-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 5px;
+  font-weight: 700;
+  cursor: move;
+  touch-action: none;
+}
+
+#plugin-command-status-copy {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.10);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#plugin-command-status-text {
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+}
+
+.fpasoterm-plugin-web-dialog {
+  width: min(100%, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  overflow: auto;
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #5a7088;
+  border-radius: 6px;
+  background: #17212b;
+  color: #edf5fc;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, 0.48);
+  font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.fpasoterm-plugin-web-dialog header,
+.fpasoterm-plugin-web-dialog header > div {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.fpasoterm-plugin-web-dialog header {
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.fpasoterm-plugin-web-dialog h2 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.fpasoterm-plugin-web-dialog button {
+  padding: 7px 9px;
+  border: 1px solid #59738c;
+  border-radius: 4px;
+  background: #263b4e;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.fpasoterm-plugin-web-dialog button:disabled {
+  cursor: wait;
+  opacity: 0.68;
+}
+
+.fpasoterm-plugin-web-status {
+  min-height: 1.2em;
+  margin: 0 0 10px;
+  color: #c8d9e8;
+}
+
+.fpasoterm-plugin-web-dialog iframe {
+  display: block;
+  width: min(100%, 2048px);
+  max-height: calc(100vh - 116px);
+  border: 0;
+  background: #000;
+}
+
+.fpasoterm-plugin-web-dialog iframe[hidden] {
+  display: none !important;
+}
+
+.fpasoterm-plugin-web-dialog button:focus,
+.fpasoterm-plugin-web-dialog iframe:focus {
+  outline: 4px solid #ffdb4d;
+  outline-offset: 4px;
+  box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.72);
 }
 
 .resize-edge,
