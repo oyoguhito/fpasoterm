@@ -2364,13 +2364,13 @@ function openPluginElementOverlay(options = {}) {
   return Object.freeze({ element: content, close, focus: () => content.focus() });
 }
 
-function pluginModalPrompt({ title, message, secret = false, approve = 'Continue', cancel = 'Cancel' }) {
+function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel' }) {
   return new Promise((resolve) => {
     const overlay = document.createElement('div');
     const dialog = document.createElement('section');
     const heading = document.createElement('h2');
     const text = document.createElement('p');
-    const input = secret ? document.createElement('input') : null;
+    const input = inputType ? document.createElement('input') : null;
     const actions = document.createElement('div');
     const cancelButton = document.createElement('button');
     const approveButton = document.createElement('button');
@@ -2381,7 +2381,12 @@ function pluginModalPrompt({ title, message, secret = false, approve = 'Continue
     heading.textContent = title; text.textContent = message;
     cancelButton.type = 'button'; cancelButton.textContent = cancel;
     approveButton.type = 'button'; approveButton.textContent = approve;
-    if (input) { input.type = 'password'; input.autocomplete = 'new-password'; input.spellcheck = false; input.setAttribute('aria-label', 'Password'); }
+    if (input) {
+      input.type = inputType;
+      input.autocomplete = inputType === 'password' ? 'new-password' : 'username';
+      input.spellcheck = false;
+      input.setAttribute('aria-label', inputType === 'password' ? 'Password' : 'Credential');
+    }
     const finish = (value) => { if (done) return; done = true; overlay.remove(); resolve(value); };
     cancelButton.addEventListener('click', () => finish(null));
     approveButton.addEventListener('click', () => finish(input ? input.value : true));
@@ -2572,7 +2577,15 @@ async function loadPlugins() {
     promptSecret: (options = {}) => pluginModalPrompt({
       title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
       message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
-      secret: true,
+      inputType: 'password',
+      approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+    }),
+    // Credentials are returned to the calling trusted plugin only and are not
+    // retained by fpasoterm, configuration, or diagnostics.
+    promptText: (options = {}) => pluginModalPrompt({
+      title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
+      message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
+      inputType: 'text',
       approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
     }),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
