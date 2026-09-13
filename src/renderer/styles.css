@@ -27,7 +27,9 @@ body {
 
 #drag-region {
   position: relative;
-  z-index: 10000;
+  /* The titlebar owns the menu stacking context. Keep the whole context over
+   * plugin overlays/activity so a menu item remains visible and clickable. */
+  z-index: 14000;
   display: flex;
   align-items: center;
   min-width: 0;
@@ -150,7 +152,7 @@ body {
   position: absolute;
   top: 28px;
   right: 0;
-  z-index: 10020;
+  z-index: 14020;
   display: grid;
   min-width: 128px;
   max-width: calc(100vw - 12px);
