@@ -772,6 +772,50 @@ function pluginMetadata(source) {
   };
 }
 
+// Reads a plugin's declarative remote-frame origins.  Origins are deliberately
+// limited to HTTPS scheme/host pairs: paths, credentials, query strings, and
+// fragments would make the policy ambiguous.  Invalid declarations grant no
+// permission, so a malformed local plugin cannot broaden its web-panel scope.
+function pluginAllowedOrigins(source) {
+  const origins = new Set();
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const header = line.trim().match(/^\/\/\s*@fpasoterm-plugin\s+allowed-origins\s*:\s*(.+?)\s*$/i);
+    if (!header) continue;
+    for (const value of header[1].split(',')) {
+      try {
+        const url = new URL(value.trim());
+        if (url.protocol === 'https:' && url.origin === value.trim()
+          && !url.username && !url.password && url.pathname === '/' && !url.search && !url.hash) {
+          origins.add(url.origin);
+        }
+      } catch {
+        // An invalid declaration is ignored; opening a panel will be denied.
+      }
+    }
+  }
+  return [...origins].sort();
+}
+
+// Reads exact loopback-bridge destinations. The native process independently
+// parses and enforces this same header, so malformed entries grant nothing.
+function pluginAllowedTcpTargets(source) {
+  const targets = new Set();
+  for (const line of String(source || '').split(/\r?\n/)) {
+    const header = line.trim().match(/^\/\/\s*@fpasoterm-plugin\s+allowed-tcp-targets\s*:\s*(.+?)\s*$/i);
+    if (!header) continue;
+    for (const value of header[1].split(',')) {
+      const candidate = value.trim();
+      const match = candidate.match(/^(tcp|tls):\/\/(?:\[([^\]/?#@\s]+)\]|([^\/:?#@\s]+)):(\d{1,5})$/i);
+      if (!match) continue;
+      const port = Number(match[4]);
+      const host = match[2] || match[3];
+      if (!Number.isSafeInteger(port) || port < 1 || port > 65535 || !/^[\x00-\x7F]+$/.test(host)) continue;
+      targets.add(`${match[1].toLowerCase()}://${host.includes(':') ? `[${host.toLowerCase()}]` : host.toLowerCase()}:${port}`);
+    }
+  }
+  return [...targets].sort();
+}
+
 // Loads metadata from one trusted plugin source for CLI reporting.
 function readPluginMetadata(pluginPath) {
   return pluginMetadata(fs.readFileSync(pluginPath, 'utf8'));
@@ -826,6 +870,8 @@ function resolvePluginUrls(config, rootDir) {
     return [{
       name: path.relative(rootDir, pluginPath),
       url: pathToFileURL(compiledPath).toString(),
+      allowedOrigins: pluginAllowedOrigins(source),
+      allowedTcpTargets: pluginAllowedTcpTargets(source),
     }];
   });
 }
@@ -871,6 +917,8 @@ module.exports = {
   discoverPluginFiles,
   profileDir,
   pluginMetadata,
+  pluginAllowedOrigins,
+  pluginAllowedTcpTargets,
   readPluginMetadata,
   readUserConfig,
   validateUserConfig,

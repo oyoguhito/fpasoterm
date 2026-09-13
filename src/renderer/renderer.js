@@ -103,9 +103,14 @@ const sshfsManagerPasswordToggleButton = document.getElementById('sshfs-manager-
 const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-local-path');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
+const pluginCommandStatusElement = document.getElementById('plugin-command-status');
+const pluginCommandStatusTextElement = document.getElementById('plugin-command-status-text');
+const pluginCommandStatusCopyButton = document.getElementById('plugin-command-status-copy');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
+let pluginActivity = false;
 const diagnosticLines = [];
 let terminalMirrorText = '';
+let pluginCommandStatusLines = [];
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {
@@ -197,12 +202,17 @@ const fallbackConfig = {
 let appConfig = fallbackConfig;
 let activeConfigPath = '';
 let pluginUrls = [];
+let pendingPluginCommand = null;
 let pluginVersion = 'unknown';
 let pluginsReady = false;
 let pluginReadyTimer = null;
 let pluginReadyGeneration = 0;
 const pluginReadyCallbacks = [];
 const pluginCommands = new Map();
+// WebKitGTK does not consistently retain navigator.userActivation through a
+// nested menu callback. Keep this capability scoped to the registered command
+// handler itself; a plugin startup script or timer still has no such access.
+let pluginCommandInvocationDepth = 0;
 let pluginCatalogEntries = [];
 let term;
 let fitAddon;
@@ -411,6 +421,8 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
+    pluginWebPanelFrameUrl: (url) => invoke('plugin_web_panel_frame_url', { url }),
+    pluginVncBridgeOpen: (target) => invoke('plugin_vnc_bridge_open', { request: { target } }),
     openExternalUrl: (url) => invoke('open_external_url', { url }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
@@ -835,6 +847,39 @@ function showDebugDiagnostic(message) {
     showDiagnostic(message);
   }
 }
+
+// Keeps a renderer-visible trace above plugin overlays. Unlike Diagnostics,
+// this is not hidden by a modal and is also retained after an exception.
+function showPluginCommandStatus(message, state = 'progress') {
+  const diagnostic = `plugin activity: ${message}`;
+  console.error(diagnostic);
+  window.fpasoterm?.logDiagnostic?.(diagnostic).catch(() => {});
+  if (!pluginActivity && state !== 'error') return;
+  if (!pluginCommandStatusElement || !pluginCommandStatusTextElement) return;
+  const timestamp = new Date().toLocaleTimeString();
+  pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
+  if (pluginCommandStatusLines.length > 10) pluginCommandStatusLines.shift();
+  pluginCommandStatusElement.dataset.state = state;
+  pluginCommandStatusTextElement.textContent = pluginCommandStatusLines.join('\n');
+  pluginCommandStatusElement.hidden = false;
+}
+
+pluginCommandStatusCopyButton?.addEventListener('click', async () => {
+  const text = pluginCommandStatusLines.join('\n');
+  if (!text) return;
+  try {
+    // The shared clipboard helper writes through both the WebView and native
+    // paths; the latter alone is not always visible to the host chat client.
+    await writeClipboardText(text);
+    pluginCommandStatusCopyButton.textContent = 'Copied';
+  } catch (error) {
+    pluginCommandStatusCopyButton.textContent = 'Copy failed';
+    console.error(`plugin activity copy failed: ${error}`);
+  }
+  setTimeout(() => {
+    pluginCommandStatusCopyButton.textContent = 'Copy';
+  }, 1400);
+});
 
 // Converts control characters into visible markers for diagnostics output.
 function printableDiagnosticData(data) {
@@ -1612,7 +1657,12 @@ async function loadRuntimeConfig() {
     appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
     activeConfigPath = String(runtimeConfig.configPath || '');
     debugKeys = debugKeys || runtimeConfig.diagnostics?.debugKeys || runtimeConfig.diagnostics?.consoleDiagnostics;
+    pluginActivity = pluginActivity || runtimeConfig.diagnostics?.pluginActivity === true;
+    if (pluginActivity) {
+      showPluginCommandStatus('plugin activity enabled');
+    }
     pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
+    pendingPluginCommand = normalizePluginCommandRequest(runtimeConfig.pluginCommand);
     applyKeybindingLabels();
     showDiagnostic(`renderer loaded config ${runtimeConfig.configPath}`);
     showDiagnostic(
@@ -1623,6 +1673,19 @@ async function loadRuntimeConfig() {
     appConfig = fallbackConfig;
     pluginUrls = [];
   }
+}
+
+// The launcher/backend validates this request first.  The renderer still
+// accepts only an ID that a trusted local plugin registered after loading.
+function normalizePluginCommandRequest(value) {
+  const id = String(value?.id || '').trim();
+  if (!isPluginCommandSelector(id)) return null;
+  return { id, args: value.args === undefined ? null : value.args };
+}
+
+function isPluginCommandSelector(value) {
+  return /^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(value)
+    || /^[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9][A-Za-z0-9._-]*)+(?::[A-Za-z][A-Za-z0-9._:-]{0,79})?$/.test(value);
 }
 
 // Applies window-level visual settings that affect the renderer surface.
@@ -2020,6 +2083,9 @@ function pluginUserActivationError(apiName) {
 }
 
 function requirePluginUserActivation(apiName) {
+  if (pluginCommandInvocationDepth > 0) {
+    return;
+  }
   if (navigator.userActivation?.isActive === false) {
     throw pluginUserActivationError(apiName);
   }
@@ -2239,9 +2305,276 @@ function openPluginCanvasOverlay(options = {}) {
   return Object.freeze({ canvas, close, focus: () => canvas.focus() });
 }
 
+// Remote panel origins are a small application policy, not a plugin-controlled
+// list. A plugin must declare a subset in its metadata before it receives the
+// capability for that origin. Add new origins only with matching CSP review.
+const supportedPluginPanelOrigins = new Set([
+  'https://www.youtube.com',
+  'https://www.youtube-nocookie.com',
+]);
+
+// Opens a local DOM host for reviewed plugins whose renderer needs more than a
+// canvas (for example, the noVNC RFB library). It deliberately provides no
+// navigation or browser/network capability.
+function openPluginElementOverlay(options = {}) {
+  const resolved = options && typeof options === 'object' ? options : {};
+  const title = typeof resolved.title === 'string' && resolved.title.trim() ? resolved.title.trim().slice(0, 120) : 'Plugin panel';
+  const size = (value, fallback) => Number.isSafeInteger(Number(value)) ? Math.min(2048, Math.max(320, Number(value))) : fallback;
+  const overlay = document.createElement('div');
+  const dialog = document.createElement('section');
+  const header = document.createElement('header');
+  const heading = document.createElement('h2');
+  const closeButton = document.createElement('button');
+  const content = document.createElement('div');
+  let closed = false;
+  overlay.className = 'fpasoterm-plugin-element-overlay';
+  dialog.className = 'fpasoterm-plugin-element-dialog';
+  dialog.style.width = `${size(resolved.width, 960)}px`;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  heading.textContent = title;
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  content.className = 'fpasoterm-plugin-element-content';
+  content.tabIndex = 0;
+  content.style.height = `${size(resolved.height, 600)}px`;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.remove();
+    term.focus();
+  };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const focusable = [closeButton, content];
+      const index = focusable.indexOf(document.activeElement);
+      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
+    }
+  }, true);
+  header.append(heading, closeButton);
+  dialog.append(header, content);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  content.focus();
+  return Object.freeze({ element: content, close, focus: () => content.focus() });
+}
+
+function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel', scope = '' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    const dialog = document.createElement('section');
+    const heading = document.createElement('h2');
+    const text = document.createElement('p');
+    const input = inputType ? document.createElement('input') : null;
+    const actions = document.createElement('div');
+    const cancelButton = document.createElement('button');
+    const approveButton = document.createElement('button');
+    let done = false;
+    overlay.className = 'fpasoterm-plugin-prompt-overlay';
+    dialog.className = 'fpasoterm-plugin-prompt-dialog';
+    dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', title);
+    heading.textContent = title; text.textContent = message;
+    cancelButton.type = 'button'; cancelButton.textContent = cancel;
+    approveButton.type = 'button'; approveButton.textContent = approve;
+    if (input) {
+      input.type = inputType;
+      input.autocomplete = inputType === 'password' ? 'new-password' : 'username';
+      input.spellcheck = false;
+      input.setAttribute('aria-label', inputType === 'password' ? 'Password' : 'Credential');
+    }
+    const dismiss = (event) => {
+      if (!scope || event.detail?.scope === scope) finish(null);
+    };
+    const finish = (value) => {
+      if (done) return;
+      done = true;
+      document.removeEventListener('fpasoterm:plugin-prompt-dismiss', dismiss);
+      overlay.remove();
+      resolve(value);
+    };
+    cancelButton.addEventListener('click', () => finish(null));
+    approveButton.addEventListener('click', () => finish(input ? input.value : true));
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); finish(null); }
+      if (event.key === 'Enter' && input && document.activeElement === input) { event.preventDefault(); finish(input.value); }
+    });
+    document.addEventListener('fpasoterm:plugin-prompt-dismiss', dismiss);
+    actions.append(cancelButton, approveButton);
+    dialog.append(heading, text);
+    if (input) dialog.append(input);
+    dialog.append(actions); overlay.append(dialog); document.body.append(overlay);
+    (input || approveButton).focus();
+  });
+}
+
+function dismissPluginPrompts(scope) {
+  document.dispatchEvent(new CustomEvent('fpasoterm:plugin-prompt-dismiss', { detail: { scope } }));
+}
+
+async function openPluginVncBridge(options = {}, declaredTargets = []) {
+  showPluginCommandStatus('VNC bridge: checking user action and target policy');
+  requirePluginUserActivation('openVncBridge');
+  const target = String(options?.target || '').trim();
+  if (!Array.isArray(declaredTargets) || !declaredTargets.includes(target)) {
+    throw new Error(`VNC bridge target is not permitted: ${target || '(empty)'}`);
+  }
+  const protocol = target.split('://', 1)[0];
+  const warning = protocol === 'tcp'
+    ? 'This opens an unencrypted VNC connection. Continue only on a trusted network.'
+    : 'The TLS certificate and host name will be verified before connecting.';
+  const approved = await pluginModalPrompt({ title: 'Connect VNC', message: `${target}\n${warning}`, approve: 'Connect' });
+  if (!approved) throw new Error('VNC connection cancelled');
+  const url = await window.fpasoterm.pluginVncBridgeOpen(target);
+  showPluginCommandStatus(`VNC bridge: loopback WebSocket opened for ${target}`);
+  return url;
+}
+
+function openPluginWebPanel(options = {}, declaredOrigins = []) {
+  showPluginCommandStatus('web panel: checking user action and origin policy');
+  requirePluginUserActivation('openWebPanel');
+  const resolvedOptions = options && typeof options === 'object' ? options : {};
+  const title = typeof resolvedOptions.title === 'string' && resolvedOptions.title.trim()
+    ? resolvedOptions.title.trim().slice(0, 120) : 'Plugin web panel';
+  let url;
+  try {
+    url = new URL(String(resolvedOptions.url || ''));
+  } catch {
+    throw new Error('openWebPanel requires a valid HTTPS URL');
+  }
+  const grantedOrigins = new Set(Array.isArray(declaredOrigins) ? declaredOrigins : []);
+  if (url.protocol !== 'https:' || url.username || url.password
+    || !grantedOrigins.has(url.origin) || !supportedPluginPanelOrigins.has(url.origin)) {
+    throw new Error(`web panel origin is not permitted: ${url.origin}`);
+  }
+  showPluginCommandStatus(`web panel: policy accepted for ${url.origin}`);
+  const clampSize = (value, fallback) => {
+    const number = Number(value);
+    return Number.isSafeInteger(number) ? Math.min(2048, Math.max(320, number)) : fallback;
+  };
+  const width = clampSize(resolvedOptions.width, 960);
+  const height = clampSize(resolvedOptions.height, 600);
+  const overlay = document.getElementById('plugin-web-panel-host');
+  if (!overlay) {
+    throw new Error('web panel host is unavailable');
+  }
+  const dialog = document.createElement('section');
+  const header = document.createElement('header');
+  const heading = document.createElement('h2');
+  const loadButton = document.createElement('button');
+  const closeButton = document.createElement('button');
+  const status = document.createElement('p');
+  const frame = document.createElement('iframe');
+  let closed = false;
+  let remoteContentLoaded = false;
+  dialog.className = 'fpasoterm-plugin-web-dialog';
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  heading.textContent = title;
+  loadButton.type = 'button';
+  loadButton.textContent = 'Load content';
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  status.className = 'fpasoterm-plugin-web-status';
+  // An iframe failure is intentionally not allowed to turn this into an
+  // indistinguishable black surface.  The embedded page is cross-origin, so
+  // its response body is not inspectable, but its load lifecycle still gives
+  // users an unambiguous indication that the panel itself is alive.
+  // Do not load the remote document until this local dialog has painted.  In
+  // particular, a WebKit/media failure must not make an otherwise useful
+  // close/status surface look like a blank application window.
+  status.textContent = `Ready to load ${url.origin}.`;
+  frame.width = String(width);
+  frame.height = String(height);
+  frame.hidden = true;
+  frame.tabIndex = 0;
+  frame.title = title;
+  frame.referrerPolicy = 'strict-origin-when-cross-origin';
+  frame.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture; fullscreen');
+  frame.setAttribute('allowfullscreen', '');
+  frame.addEventListener('load', () => {
+    status.textContent = `Loaded ${url.origin}. Use the content inside this panel.`;
+    showPluginCommandStatus(`web panel: iframe load event received for ${url.origin}`);
+  });
+  frame.addEventListener('error', () => {
+    status.textContent = `Could not load ${url.origin}. Check the Diagnostics command for details.`;
+    showPluginCommandStatus(`web panel: iframe error event from ${url.origin}`, 'error');
+  });
+  loadButton.addEventListener('click', async () => {
+    if (remoteContentLoaded) return;
+    remoteContentLoaded = true;
+    loadButton.disabled = true;
+    loadButton.hidden = true;
+    frame.hidden = false;
+    status.textContent = `Loading ${url.origin}…`;
+    showPluginCommandStatus(`web panel: iframe navigation started for ${url.origin}`);
+    try {
+      const isYoutubeEmbed = /^https:\/\/www\.youtube(?:-nocookie)?\.com\/embed\//.test(url.toString());
+      if (isYoutubeEmbed) {
+        const wrapperUrl = await window.fpasoterm.pluginWebPanelFrameUrl(url.toString());
+        showPluginCommandStatus(`web panel: local YouTube wrapper ready at ${new URL(wrapperUrl).origin}`);
+        frame.src = wrapperUrl;
+      } else {
+        frame.src = url.toString();
+      }
+    } catch (error) {
+      frame.hidden = true;
+      loadButton.hidden = false;
+      loadButton.disabled = false;
+      remoteContentLoaded = false;
+      status.textContent = `Could not create the local YouTube frame: ${error}`;
+      showPluginCommandStatus(`web panel: loopback wrapper failed: ${error}`, 'error');
+      return;
+    }
+    frame.focus();
+  });
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.onclick = null;
+    overlay.replaceChildren();
+    overlay.hidden = true;
+    term.focus();
+  };
+  closeButton.addEventListener('click', close);
+  overlay.onclick = (event) => {
+    if (event.target === overlay) close();
+  };
+  dialog.addEventListener('keydown', (event) => {
+    if (event.code === 'Escape' || event.key === 'Escape') {
+      event.preventDefault();
+      close();
+    } else if (event.code === 'Tab' || event.key === 'Tab') {
+      event.preventDefault();
+      const focusable = frame.hidden ? [loadButton, closeButton] : [closeButton, frame];
+      const index = focusable.indexOf(document.activeElement);
+      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
+    }
+  }, true);
+  dialog.addEventListener('focusout', () => {
+    queueMicrotask(() => {
+      if (!closed && !dialog.contains(document.activeElement)) closeButton.focus();
+    });
+  });
+  const actions = document.createElement('div');
+  actions.append(loadButton, closeButton);
+  header.append(heading, actions);
+  dialog.append(header, status, frame);
+  overlay.replaceChildren(dialog);
+  overlay.hidden = false;
+  showPluginCommandStatus('web panel: local host displayed; select Load content to start the iframe');
+  closeButton.focus();
+  return Object.freeze({ close, focus: () => frame.focus() });
+}
+
 // Publishes the plugin API and loads enabled user plugins in order.
 async function loadPlugins() {
-  window.fpasotermPluginApi = Object.freeze({
+  const pluginApi = (plugin) => Object.freeze({
     version: pluginVersion,
     terminal: term,
     fitAddon,
@@ -2252,17 +2585,42 @@ async function loadPlugins() {
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
+    openElementOverlay: (options) => openPluginElementOverlay(options),
+    openWebPanel: (options) => openPluginWebPanel(options, plugin?.allowedOrigins),
+    openVncBridge: (options) => openPluginVncBridge(options, plugin?.allowedTcpTargets),
+    promptSecret: (options = {}) => pluginModalPrompt({
+      title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
+      message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
+      inputType: 'password',
+      approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+      scope: plugin?.name || '',
+    }),
+    // Credentials are returned to the calling trusted plugin only and are not
+    // retained by fpasoterm, configuration, or diagnostics.
+    promptText: (options = {}) => pluginModalPrompt({
+      title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
+      message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
+      inputType: 'text',
+      approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+      scope: plugin?.name || '',
+    }),
+    /** Closes only this plugin's outstanding credential prompts. */
+    dismissPrompts: () => dismissPluginPrompts(plugin?.name || ''),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
     onReady: registerPluginReadyCallback,
-    registerCommand: registerPluginCommand,
+    registerCommand: (id, title, handler) => registerPluginCommand(id, title, handler, plugin?.name),
   });
 
   for (const plugin of pluginUrls) {
     await new Promise((resolve) => {
       const commandCountBeforeLoad = pluginCommands.size;
       const script = document.createElement('script');
+      showPluginCommandStatus(
+        `plugin metadata: ${plugin.name} allowed origins=${(plugin.allowedOrigins || []).join(',') || '(none)'} allowed TCP targets=${(plugin.allowedTcpTargets || []).join(',') || '(none)'}`,
+      );
+      window.fpasotermPluginApi = pluginApi(plugin);
       const source = pluginScriptSource(plugin);
       script.src = source;
       script.async = false;
@@ -2344,7 +2702,7 @@ function notifyPluginsReady() {
 }
 
 // Adds a trusted plugin action to the existing keyboard-accessible window menu.
-function registerPluginCommand(id, title, handler) {
+function registerPluginCommand(id, title, handler, pluginName = '') {
   const commandId = String(id || '').trim();
   const commandTitle = String(title || '').trim();
   if (!/^[A-Za-z][A-Za-z0-9._:-]{0,79}$/.test(commandId)) {
@@ -2369,24 +2727,76 @@ function registerPluginCommand(id, title, handler) {
   button.textContent = commandTitle;
   button.dataset.pluginCommand = commandId;
   button.addEventListener('click', () => runPluginCommand(commandId));
-  pluginCommands.set(commandId, { handler, button });
+  pluginCommands.set(commandId, { handler, button, pluginName: normalizePluginCommandOwner(pluginName) });
   pluginCommandItems.appendChild(button);
   updatePluginMenuVisibility();
   showDiagnostic(`plugin command registered id=${commandId}`);
 }
 
+function normalizePluginCommandOwner(name) {
+  return String(name || '')
+    .replace(/^plugins\//, '')
+    .replace(/\.(?:js|ts)$/i, '');
+}
+
+function resolvePluginCommand(selector) {
+  if (!selector.includes('/')) {
+    const command = pluginCommands.get(selector);
+    return command ? { id: selector, command } : { error: `CLI plugin command is not registered: ${selector}` };
+  }
+  const [owner, requestedId] = selector.split(/:(.*)/, 2);
+  const matches = [...pluginCommands.entries()]
+    .filter(([, command]) => command.pluginName === owner)
+    .filter(([id]) => !requestedId || id === requestedId);
+  if (matches.length === 1) return { id: matches[0][0], command: matches[0][1] };
+  if (matches.length === 0) {
+    return { error: `CLI plugin command is not registered: ${selector}` };
+  }
+  const choices = matches.map(([id]) => `${owner}:${id}`).join(', ');
+  return { error: `CLI plugin selector is ambiguous: ${selector}. Choose one of: ${choices}` };
+}
+
 // Invokes a registered command and reports plugin failures without closing the app.
-async function runPluginCommand(commandId) {
+async function runPluginCommand(commandId, args) {
   const command = pluginCommands.get(commandId);
   if (!command) {
     return;
   }
   setWindowMenuOpen(false);
+  pluginCommandStatusLines = [];
+  showPluginCommandStatus(`command started: ${commandId}`);
+  pluginCommandInvocationDepth += 1;
   try {
-    await command.handler();
+    await command.handler(args);
+    showPluginCommandStatus(`command completed: ${commandId}`);
   } catch (error) {
-    showDiagnostic(`plugin command ${commandId} failed: ${error?.stack || error}`);
+    // WebKitGTK's Error.stack can contain locations without the message.
+    // Preserve every available field so activity/log diagnostics identify the
+    // failed API rather than reporting only a source line.
+    const detail = [error?.name, error?.message, error?.stack || String(error)]
+      .filter((value, index, values) => value && values.indexOf(value) === index)
+      .join('\n');
+    showPluginCommandStatus(`command failed: ${commandId}\n${detail}`, 'error');
+    showDiagnostic(`plugin command ${commandId} failed: ${detail}`);
+  } finally {
+    pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
   }
+}
+
+// Runs a one-shot local CLI request after every enabled plugin had the chance
+// to register its command.  This is command dispatch, never CLI JavaScript.
+async function runRequestedPluginCommand() {
+  const request = pendingPluginCommand;
+  pendingPluginCommand = null;
+  if (!request) return;
+  const resolved = resolvePluginCommand(request.id);
+  if (resolved.error) {
+    showPluginCommandStatus(resolved.error, 'error');
+    showDiagnostic(resolved.error);
+    return;
+  }
+  showPluginCommandStatus(`CLI requested plugin command: ${request.id} -> ${resolved.id}`);
+  await runPluginCommand(resolved.id, request.args);
 }
 
 // Returns true when sync-folder features are enabled in the resolved config.
@@ -2567,6 +2977,10 @@ function enableFloatingPanelDrag(panel, handle) {
 
 enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
 enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
+enableFloatingPanelDrag(
+  pluginCommandStatusElement,
+  pluginCommandStatusElement?.querySelector('[data-panel-drag-handle]'),
+);
 
 // WebView checkbox keyboard activation differs on Windows. Keep Space and Enter
 // consistent for Broadcast target controls and preserve their normal change event.
@@ -4644,6 +5058,7 @@ Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   });
 
   await loadPlugins();
+  await runRequestedPluginCommand();
   installTerminalPasteHandlers();
   await afterNextPaint();
   fitAddon.fit();

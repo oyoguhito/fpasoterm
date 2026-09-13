@@ -113,14 +113,15 @@ fn jj_working_copy_commit(root: &Path) -> Option<String> {
     (!value.is_empty()).then_some(value)
 }
 
-// Embeds an override for reproducible packaging, the jj working copy for
-// contributor builds, or the checkout's Git HEAD. The value is shown by Help.
+// Embeds an override for reproducible packaging or the checkout's Git HEAD.
+// The launcher also identifies a source checkout by Git HEAD, so using the
+// same value prevents Help from showing an unrelated jj working-copy ID.
 fn build_commit(root: &Path) -> String {
     env::var("FPASOTERM_BUILD_COMMIT")
         .ok()
         .filter(|value| !value.trim().is_empty())
-        .or_else(|| jj_working_copy_commit(root))
         .or_else(|| git_output(root, &["rev-parse", "HEAD"]))
+        .or_else(|| jj_working_copy_commit(root))
         .unwrap_or_else(|| "unknown".to_string())
 }
 

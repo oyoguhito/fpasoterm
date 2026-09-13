@@ -71,6 +71,14 @@
     <div id="ime-preedit" hidden aria-live="polite" aria-label="IME preedit text"></div>
     <div id="ime-status" hidden aria-live="polite">IME composing...</div>
     <pre id="terminal-mirror" hidden aria-label="Terminal data mirror"></pre>
+    <section id="plugin-web-panel-host" hidden></section>
+    <section id="plugin-command-status" hidden aria-live="assertive">
+      <div class="plugin-command-status-toolbar" data-panel-drag-handle>
+        <span>Plugin activity</span>
+        <button id="plugin-command-status-copy" type="button">Copy</button>
+      </div>
+      <pre id="plugin-command-status-text"></pre>
+    </section>
     <div class="resize-edge resize-edge-top" data-resize-direction="north"></div>
     <div class="resize-edge resize-edge-right" data-resize-direction="east"></div>
     <div class="resize-edge resize-edge-bottom" data-resize-direction="south"></div>

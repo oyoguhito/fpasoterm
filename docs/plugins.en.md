@@ -69,6 +69,32 @@ as `1.0.0` for consistency. It is distinct from `api.version`, which is the
 running fpasoterm application version. Omit the header for older plugins; the
 CLI reports their version as `(not declared)`.
 
+Plugins that use `openWebPanel` must also declare their HTTPS frame origins:
+
+```ts
+// @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com
+```
+
+Plugins that use the local VNC bridge must declare every exact TCP endpoint in
+their source. Wildcards, paths, credentials, and port ranges are not accepted.
+
+```ts
+// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900, tls://vnc.example.test:5901
+```
+
+`openVncBridge({ target })` asks the user for every connection and returns one
+short-lived `ws://127.0.0.1/...` URL. The native bridge accepts that URL once,
+then relays binary WebSocket frames to the exact declared endpoint. It is not a
+general TCP proxy. `tls://` performs system-root certificate and server-name
+validation with no insecure override. `tcp://` is deliberately supported for
+normal local VNC/RFB, but is unencrypted and should be limited to localhost or
+a trusted network. Credentials are requested through `promptSecret()` and are
+not persisted or written to Diagnostics.
+
+The declaration is a capability request, not an unrestricted permission.
+fpasoterm grants it only when the origin is in its reviewed application
+allowlist and CSP. Invalid origins grant no access.
+
 ## Enable plugins
 
 fpasoterm creates `User/plugins` on its first normal launch. For a manually
@@ -253,6 +279,16 @@ provides:
   accessible canvas modal. It returns the canvas plus
   `close()` and `focus()`. Escape, the Close button, and clicking the backdrop
   close the modal and return focus to the terminal.
+- `openWebPanel({ title, url, width, height })`: open a focus-trapped HTTPS
+  iframe panel for an origin declared with `allowed-origins` and approved by
+  fpasoterm. The call must be a direct user action; the panel can be closed
+  with Escape, Close, or its backdrop. It is not a general-purpose browser.
+- `openElementOverlay({ title, width, height })`: open a focus-trapped local
+  DOM host without navigation or network access; useful for a reviewed renderer
+  library such as noVNC.
+- `openVncBridge({ target })`: after an explicit user action and confirmation,
+  open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
+- `promptSecret({ title, message, approve })`: request a secret in memory only.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
   used by `fpasoterm --plugin-search`. It does not download, install, enable,
   or execute plugin source.
@@ -261,6 +297,26 @@ provides:
   hamburger menu's `Plugins` submenu. The submenu is always available and
   includes a built-in `Plugin Catalog` action. Enabling a plugin alone does not
   add a button because fpasoterm has no action handler to invoke.
+
+The same registered command can be invoked during a new GUI launch from the
+local CLI. This dispatches only the command ID after enabled plugins load; it
+does not evaluate JavaScript supplied on the command line.
+
+```bash
+fpasoterm --plugin-run integration/youtube-web-panel
+fpasoterm --plugin-run integration/youtube-web-panel:youtube-web-panel
+fpasoterm --plugin-run integration/example:search --plugin-args '{"query":"doom"}'
+```
+
+`plugin/path` is the plugin's install path without the leading `plugins/` or
+the `.js`/`.ts` suffix. It is a short form when that plugin has exactly one
+registered command. If it has multiple commands, fpasoterm reports the
+available `plugin/path:command-id` choices. Bare command IDs remain supported
+for compatibility but are globally unique and therefore not recommended for
+new automation. `--plugin-args` accepts one JSON value up to 16 KiB and is
+provided as the handler's first argument. A missing value is `null` for CLI
+invocation; menu invocation continues to pass `undefined`. Commands that open
+dialogs, pickers, or panels still require and display the normal GUI.
 
 All current in-tree samples register one command, so enabling current copies of
 `hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four

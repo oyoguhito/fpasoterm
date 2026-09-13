@@ -55,6 +55,38 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
+  /** Opens a focus-trapped local DOM host. It does not provide navigation or network access. */
+  openElementOverlay: (options?: {
+    title?: string;
+    width?: number;
+    height?: number;
+  }) => {
+    element: HTMLDivElement;
+    close: () => void;
+    focus: () => void;
+  };
+  /** Opens a focus-trapped HTTPS iframe panel for this plugin's declared, application-approved origins. */
+  openWebPanel: (options: {
+    title?: string;
+    url: string;
+    width?: number;
+    height?: number;
+  }) => {
+    close: () => void;
+    focus: () => void;
+  };
+  /**
+   * Opens one ephemeral loopback WebSocket to an exact target declared in this
+   * plugin's `allowed-tcp-targets` source header. Prompts for every connection.
+   * `tls://` verifies the certificate and target host using system trust roots.
+   */
+  openVncBridge: (options: { target: string }) => Promise<string>;
+  /** Prompts for a credential without persisting or logging its returned value. */
+  promptSecret: (options?: { title?: string; message?: string; approve?: string }) => Promise<string | null>;
+  /** Prompts for non-secret connection text without persisting or logging it. */
+  promptText: (options?: { title?: string; message?: string; approve?: string }) => Promise<string | null>;
+  /** Closes this plugin's outstanding credential prompts. */
+  dismissPrompts: () => void;
   getOfficialPluginIndex: () => Promise<Array<{
     id: string;
     name: string;
@@ -69,7 +101,8 @@ type FpasotermPluginApi = {
   registerCommand: (
     id: string,
     title: string,
-    handler: () => void | Promise<void>,
+    /** Receives the JSON value passed by `fpasoterm --plugin-run <id> --plugin-args <json>`. */
+    handler: (args?: unknown) => void | Promise<void>,
   ) => void;
 };
 
