@@ -8419,11 +8419,18 @@ async fn relay_vnc_websocket(
     Ok(())
 }
 
-async fn serve_plugin_vnc_bridge(
-    listener: TokioTcpListener,
-    target: PluginTcpTarget,
-    token: String,
-) {
+async fn serve_plugin_vnc_bridge(listener: TcpListener, target: PluginTcpTarget, token: String) {
+    // `plugin_vnc_bridge_open` is invoked on the WebView IPC thread, which is
+    // not a Tokio context on Linux/WebKit. Convert the standard loopback
+    // listener only after entering Tauri's async runtime; doing it earlier
+    // panics with "there is no reactor running" and aborts the GUI process.
+    let listener = match TokioTcpListener::from_std(listener) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("could not initialize plugin VNC bridge runtime: {error}");
+            return;
+        }
+    };
     let accepted = timeout(Duration::from_secs(30), listener.accept()).await;
     let Ok(Ok((stream, _))) = accepted else {
         return;
@@ -8485,7 +8492,6 @@ fn plugin_vnc_bridge_open(request: PluginVncBridgeRequest) -> Result<String, Str
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
     let address = listener.local_addr().map_err(|error| error.to_string())?;
-    let listener = TokioTcpListener::from_std(listener).map_err(|error| error.to_string())?;
     let mut token_bytes = [0_u8; 32];
     rand::rngs::OsRng.fill_bytes(&mut token_bytes);
     let token = token_bytes
