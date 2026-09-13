@@ -422,6 +422,7 @@ function installTauriApiAdapter() {
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
     pluginWebPanelFrameUrl: (url) => invoke('plugin_web_panel_frame_url', { url }),
+    pluginVncBridgeOpen: (target) => invoke('plugin_vnc_bridge_open', { request: { target } }),
     openExternalUrl: (url) => invoke('open_external_url', { url }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
@@ -2312,6 +2313,108 @@ const supportedPluginPanelOrigins = new Set([
   'https://www.youtube-nocookie.com',
 ]);
 
+// Opens a local DOM host for reviewed plugins whose renderer needs more than a
+// canvas (for example, the noVNC RFB library). It deliberately provides no
+// navigation or browser/network capability.
+function openPluginElementOverlay(options = {}) {
+  const resolved = options && typeof options === 'object' ? options : {};
+  const title = typeof resolved.title === 'string' && resolved.title.trim() ? resolved.title.trim().slice(0, 120) : 'Plugin panel';
+  const size = (value, fallback) => Number.isSafeInteger(Number(value)) ? Math.min(2048, Math.max(320, Number(value))) : fallback;
+  const overlay = document.createElement('div');
+  const dialog = document.createElement('section');
+  const header = document.createElement('header');
+  const heading = document.createElement('h2');
+  const closeButton = document.createElement('button');
+  const content = document.createElement('div');
+  let closed = false;
+  overlay.className = 'fpasoterm-plugin-element-overlay';
+  dialog.className = 'fpasoterm-plugin-element-dialog';
+  dialog.style.width = `${size(resolved.width, 960)}px`;
+  dialog.setAttribute('role', 'dialog');
+  dialog.setAttribute('aria-modal', 'true');
+  dialog.setAttribute('aria-label', title);
+  heading.textContent = title;
+  closeButton.type = 'button';
+  closeButton.textContent = 'Close';
+  content.className = 'fpasoterm-plugin-element-content';
+  content.tabIndex = 0;
+  content.style.height = `${size(resolved.height, 600)}px`;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    overlay.remove();
+    term.focus();
+  };
+  closeButton.addEventListener('click', close);
+  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
+  dialog.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
+    if (event.key === 'Tab') {
+      event.preventDefault();
+      const focusable = [closeButton, content];
+      const index = focusable.indexOf(document.activeElement);
+      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
+    }
+  }, true);
+  header.append(heading, closeButton);
+  dialog.append(header, content);
+  overlay.append(dialog);
+  document.body.append(overlay);
+  content.focus();
+  return Object.freeze({ element: content, close, focus: () => content.focus() });
+}
+
+function pluginModalPrompt({ title, message, secret = false, approve = 'Continue', cancel = 'Cancel' }) {
+  return new Promise((resolve) => {
+    const overlay = document.createElement('div');
+    const dialog = document.createElement('section');
+    const heading = document.createElement('h2');
+    const text = document.createElement('p');
+    const input = secret ? document.createElement('input') : null;
+    const actions = document.createElement('div');
+    const cancelButton = document.createElement('button');
+    const approveButton = document.createElement('button');
+    let done = false;
+    overlay.className = 'fpasoterm-plugin-prompt-overlay';
+    dialog.className = 'fpasoterm-plugin-prompt-dialog';
+    dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', title);
+    heading.textContent = title; text.textContent = message;
+    cancelButton.type = 'button'; cancelButton.textContent = cancel;
+    approveButton.type = 'button'; approveButton.textContent = approve;
+    if (input) { input.type = 'password'; input.autocomplete = 'new-password'; input.spellcheck = false; input.setAttribute('aria-label', 'Password'); }
+    const finish = (value) => { if (done) return; done = true; overlay.remove(); resolve(value); };
+    cancelButton.addEventListener('click', () => finish(null));
+    approveButton.addEventListener('click', () => finish(input ? input.value : true));
+    dialog.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') { event.preventDefault(); finish(null); }
+      if (event.key === 'Enter' && input && document.activeElement === input) { event.preventDefault(); finish(input.value); }
+    });
+    actions.append(cancelButton, approveButton);
+    dialog.append(heading, text);
+    if (input) dialog.append(input);
+    dialog.append(actions); overlay.append(dialog); document.body.append(overlay);
+    (input || approveButton).focus();
+  });
+}
+
+async function openPluginVncBridge(options = {}, declaredTargets = []) {
+  showPluginCommandStatus('VNC bridge: checking user action and target policy');
+  requirePluginUserActivation('openVncBridge');
+  const target = String(options?.target || '').trim();
+  if (!Array.isArray(declaredTargets) || !declaredTargets.includes(target)) {
+    throw new Error(`VNC bridge target is not permitted: ${target || '(empty)'}`);
+  }
+  const protocol = target.split('://', 1)[0];
+  const warning = protocol === 'tcp'
+    ? 'This opens an unencrypted VNC connection. Continue only on a trusted network.'
+    : 'The TLS certificate and host name will be verified before connecting.';
+  const approved = await pluginModalPrompt({ title: 'Connect VNC', message: `${target}\n${warning}`, approve: 'Connect' });
+  if (!approved) throw new Error('VNC connection cancelled');
+  const url = await window.fpasoterm.pluginVncBridgeOpen(target);
+  showPluginCommandStatus(`VNC bridge: loopback WebSocket opened for ${target}`);
+  return url;
+}
+
 function openPluginWebPanel(options = {}, declaredOrigins = []) {
   showPluginCommandStatus('web panel: checking user action and origin policy');
   requirePluginUserActivation('openWebPanel');
@@ -2463,7 +2566,15 @@ async function loadPlugins() {
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
+    openElementOverlay: (options) => openPluginElementOverlay(options),
     openWebPanel: (options) => openPluginWebPanel(options, plugin?.allowedOrigins),
+    openVncBridge: (options) => openPluginVncBridge(options, plugin?.allowedTcpTargets),
+    promptSecret: (options = {}) => pluginModalPrompt({
+      title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
+      message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
+      secret: true,
+      approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+    }),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),
     // Plugins may only open an HTTP(S) URL after an explicit user action.
     openExternalUrl: (url) => window.fpasoterm.openExternalUrl(url),
@@ -2476,7 +2587,7 @@ async function loadPlugins() {
       const commandCountBeforeLoad = pluginCommands.size;
       const script = document.createElement('script');
       showPluginCommandStatus(
-        `plugin metadata: ${plugin.name} allowed origins=${(plugin.allowedOrigins || []).join(',') || '(none)'}`,
+        `plugin metadata: ${plugin.name} allowed origins=${(plugin.allowedOrigins || []).join(',') || '(none)'} allowed TCP targets=${(plugin.allowedTcpTargets || []).join(',') || '(none)'}`,
       );
       window.fpasotermPluginApi = pluginApi(plugin);
       const source = pluginScriptSource(plugin);

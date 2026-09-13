@@ -3,8 +3,12 @@
 #[cfg(windows)]
 use base64::Engine;
 use encoding_rs::{EUC_JP, SHIFT_JIS};
+use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
+use rand::RngCore;
+use rustls::pki_types::ServerName;
+use rustls::{ClientConfig, RootCertStore};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::{HashMap, HashSet, VecDeque};
@@ -26,6 +30,14 @@ use std::{ptr, slice};
 use tauri::{
     AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, State, WebviewWindow, WindowEvent,
 };
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
+use tokio::net::{TcpListener as TokioTcpListener, TcpStream as TokioTcpStream};
+use tokio::time::timeout;
+use tokio_rustls::TlsConnector;
+use tokio_tungstenite::tungstenite::handshake::server::{
+    Request as WebSocketRequest, Response as WebSocketResponse,
+};
+use tokio_tungstenite::tungstenite::Message;
 #[cfg(target_os = "windows")]
 use windows_sys::Win32::Foundation::{CloseHandle, GlobalFree, INVALID_HANDLE_VALUE};
 #[cfg(target_os = "windows")]
@@ -123,6 +135,34 @@ struct PluginUrl {
     url: String,
     #[serde(default)]
     allowed_origins: Vec<String>,
+    #[serde(default)]
+    allowed_tcp_targets: Vec<String>,
+}
+
+// A narrowly declared TCP destination exposed only through an ephemeral
+// loopback WebSocket; plugins never receive arbitrary raw-socket access.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PluginTcpTarget {
+    protocol: String,
+    host: String,
+    port: u16,
+}
+
+impl PluginTcpTarget {
+    fn canonical(&self) -> String {
+        let host = if self.host.contains(':') {
+            format!("[{}]", self.host)
+        } else {
+            self.host.clone()
+        };
+        format!("{}://{}:{}", self.protocol, host, self.port)
+    }
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PluginVncBridgeRequest {
+    target: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -791,6 +831,7 @@ fn main() {
             clipboard_read,
             clipboard_write,
             plugin_web_panel_frame_url,
+            plugin_vnc_bridge_open,
             open_external_url,
             app_version,
             update_check,
@@ -3383,6 +3424,7 @@ fn resolve_direct_plugin_urls(config: &Config, config_dir: &Path) -> Vec<PluginU
                 name: name.replace('\\', "/"),
                 url,
                 allowed_origins: plugin_allowed_origins(&source),
+                allowed_tcp_targets: plugin_allowed_tcp_targets(&source),
             });
         }
     }
@@ -4192,6 +4234,67 @@ fn plugin_allowed_origins(source: &str) -> Vec<String> {
     }
     origins.sort();
     origins
+}
+
+// Parses exact TCP/TLS destinations from a plugin header.  This deliberately
+// accepts no wildcards, paths, credentials, query values, or port ranges.
+fn parse_plugin_tcp_target(value: &str) -> Option<PluginTcpTarget> {
+    let (protocol, address) = value.trim().split_once("://")?;
+    if !matches!(protocol, "tcp" | "tls")
+        || address.is_empty()
+        || address.contains(['/', '?', '#', '@', ' '])
+    {
+        return None;
+    }
+    let (host, port_text) = if let Some(rest) = address.strip_prefix('[') {
+        let (host, port) = rest.split_once("]:")?;
+        if host.is_empty() || port.contains(':') {
+            return None;
+        }
+        (host, port)
+    } else {
+        let (host, port) = address.rsplit_once(':')?;
+        if host.is_empty() || host.contains(':') {
+            return None;
+        }
+        (host, port)
+    };
+    let port = port_text.parse::<u16>().ok().filter(|port| *port != 0)?;
+    if !host.is_ascii()
+        || host
+            .chars()
+            .any(|character| character.is_ascii_control() || character.is_whitespace())
+    {
+        return None;
+    }
+    Some(PluginTcpTarget {
+        protocol: protocol.to_string(),
+        host: host.to_ascii_lowercase(),
+        port,
+    })
+}
+
+// Reads strict, declarative loopback-bridge targets.  An invalid declaration
+// grants no access; the native command checks the resulting target again.
+fn plugin_allowed_tcp_targets(source: &str) -> Vec<String> {
+    let mut targets = Vec::new();
+    for line in source.lines() {
+        let trimmed = line.trim();
+        let Some(values) = trimmed.strip_prefix("// @fpasoterm-plugin allowed-tcp-targets:") else {
+            continue;
+        };
+        for value in values.split(',').map(str::trim) {
+            let Some(target) = parse_plugin_tcp_target(value) else {
+                continue;
+            };
+            let target = target.canonical();
+            if !targets.contains(&target) {
+                targets.push(target);
+            }
+        }
+    }
+    targets.sort();
+    targets
 }
 
 // Parses `// @fpasoterm-plugin version: ...` and description headers while
@@ -8241,6 +8344,158 @@ fn plugin_web_panel_frame_url(state: State<AppState>, url: String) -> Result<Str
     ))
 }
 
+trait VncRemoteStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> VncRemoteStream for T {}
+
+// Connects the declared remote endpoint. `tls://` always uses the operating
+// system trust store and rustls hostname verification; this bridge has no
+// insecure-certificate bypass.
+async fn connect_plugin_tcp_target(
+    target: &PluginTcpTarget,
+) -> Result<Box<dyn VncRemoteStream>, String> {
+    let address = format!("{}:{}", target.host, target.port);
+    let stream = timeout(Duration::from_secs(10), TokioTcpStream::connect(&address))
+        .await
+        .map_err(|_| format!("connection timed out: {}", target.canonical()))?
+        .map_err(|error| format!("could not connect to {}: {error}", target.canonical()))?;
+    if target.protocol == "tcp" {
+        return Ok(Box::new(stream));
+    }
+    let native_roots = rustls_native_certs::load_native_certs();
+    let mut roots = RootCertStore::empty();
+    for certificate in native_roots.certs {
+        roots
+            .add(certificate)
+            .map_err(|error| format!("could not load a system TLS certificate: {error}"))?;
+    }
+    if roots.is_empty() {
+        return Err("no trusted TLS certificates are available on this system".to_string());
+    }
+    let server_name = ServerName::try_from(target.host.clone())
+        .map_err(|_| format!("TLS target has an invalid server name: {}", target.host))?;
+    let config = ClientConfig::builder()
+        .with_root_certificates(roots)
+        .with_no_client_auth();
+    let stream = timeout(
+        Duration::from_secs(10),
+        TlsConnector::from(Arc::new(config)).connect(server_name, stream),
+    )
+    .await
+    .map_err(|_| format!("TLS handshake timed out: {}", target.canonical()))?
+    .map_err(|error| {
+        format!(
+            "TLS certificate or handshake validation failed for {}: {error}",
+            target.canonical()
+        )
+    })?;
+    Ok(Box::new(stream))
+}
+
+async fn relay_vnc_websocket(
+    websocket: tokio_tungstenite::WebSocketStream<TokioTcpStream>,
+    remote: Box<dyn VncRemoteStream>,
+) -> Result<(), String> {
+    let (mut websocket_writer, mut websocket_reader) = websocket.split();
+    let (mut remote_reader, mut remote_writer) = tokio::io::split(remote);
+    let mut buffer = vec![0_u8; 32 * 1024];
+    loop {
+        tokio::select! {
+            message = websocket_reader.next() => match message {
+                Some(Ok(Message::Binary(bytes))) => remote_writer.write_all(&bytes).await.map_err(|error| format!("VNC write failed: {error}"))?,
+                Some(Ok(Message::Close(_))) | None => break,
+                Some(Ok(Message::Ping(bytes))) => websocket_writer.send(Message::Pong(bytes)).await.map_err(|error| error.to_string())?,
+                Some(Ok(Message::Pong(_))) => {},
+                Some(Ok(_)) => return Err("VNC bridge accepts binary WebSocket messages only".to_string()),
+                Some(Err(error)) => return Err(format!("local WebSocket read failed: {error}")),
+            },
+            read = remote_reader.read(&mut buffer) => {
+                let read = read.map_err(|error| format!("VNC read failed: {error}"))?;
+                if read == 0 { break; }
+                websocket_writer.send(Message::Binary(buffer[..read].to_vec())).await.map_err(|error| format!("local WebSocket write failed: {error}"))?;
+            }
+        }
+    }
+    let _ = websocket_writer.send(Message::Close(None)).await;
+    Ok(())
+}
+
+async fn serve_plugin_vnc_bridge(
+    listener: TokioTcpListener,
+    target: PluginTcpTarget,
+    token: String,
+) {
+    let accepted = timeout(Duration::from_secs(30), listener.accept()).await;
+    let Ok(Ok((stream, _))) = accepted else {
+        return;
+    };
+    let requested_path = Arc::new(Mutex::new(String::new()));
+    let path_for_callback = requested_path.clone();
+    let websocket = tokio_tungstenite::accept_hdr_async(
+        stream,
+        move |request: &WebSocketRequest, response: WebSocketResponse| {
+            if let Ok(mut path) = path_for_callback.lock() {
+                *path = request.uri().path().to_string();
+            }
+            Ok(response)
+        },
+    )
+    .await;
+    let Ok(mut websocket) = websocket else {
+        return;
+    };
+    if requested_path.lock().ok().as_deref().map(String::as_str)
+        != Some(format!("/vnc/{token}").as_str())
+    {
+        let _ = websocket.close(None).await;
+        return;
+    }
+    let remote = match connect_plugin_tcp_target(&target).await {
+        Ok(remote) => remote,
+        Err(error) => {
+            eprintln!("plugin VNC bridge {}: {error}", target.canonical());
+            let _ = websocket.close(None).await;
+            return;
+        }
+    };
+    if let Err(error) = relay_vnc_websocket(websocket, remote).await {
+        eprintln!("plugin VNC bridge {}: {error}", target.canonical());
+    }
+}
+
+#[tauri::command]
+fn plugin_vnc_bridge_open(request: PluginVncBridgeRequest) -> Result<String, String> {
+    let target = parse_plugin_tcp_target(&request.target).ok_or_else(|| {
+        "VNC bridge target must be an exact tcp://host:port or tls://host:port declaration"
+            .to_string()
+    })?;
+    let target_text = target.canonical();
+    if !runtime_config().plugin_urls.iter().any(|plugin| {
+        plugin
+            .allowed_tcp_targets
+            .iter()
+            .any(|allowed| allowed == &target_text)
+    }) {
+        return Err(format!(
+            "VNC bridge target is not declared by an enabled plugin: {target_text}"
+        ));
+    }
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("could not bind local VNC bridge: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let address = listener.local_addr().map_err(|error| error.to_string())?;
+    let listener = TokioTcpListener::from_std(listener).map_err(|error| error.to_string())?;
+    let mut token_bytes = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut token_bytes);
+    let token = token_bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    tauri::async_runtime::spawn(serve_plugin_vnc_bridge(listener, target, token.clone()));
+    Ok(format!("ws://{address}/vnc/{token}"))
+}
+
 #[tauri::command]
 // Returns the resolved runtime config to the renderer.
 fn config_get() -> RuntimeConfig {
@@ -9439,16 +9694,31 @@ installPath = "appearance/other.ts"
     }
 
     #[test]
-    fn plugin_url_serializes_allowed_origins_for_the_renderer() {
+    fn plugin_allowed_tcp_targets_are_exact_and_normalized() {
+        assert_eq!(
+            plugin_allowed_tcp_targets(
+                "// @fpasoterm-plugin allowed-tcp-targets: tcp://LOCALHOST:5900, tls://[::1]:5901, tcp://bad:0, tcp://host:22/path\n"
+            ),
+            vec!["tcp://localhost:5900".to_string(), "tls://[::1]:5901".to_string()]
+        );
+    }
+
+    #[test]
+    fn plugin_url_serializes_declared_capabilities_for_the_renderer() {
         let value = serde_json::to_value(PluginUrl {
             name: "plugins/example.ts".to_string(),
             url: "file:///tmp/example.js".to_string(),
             allowed_origins: vec!["https://www.youtube-nocookie.com".to_string()],
+            allowed_tcp_targets: vec!["tcp://127.0.0.1:5900".to_string()],
         })
         .expect("serialize plugin URL");
         assert_eq!(
             value["allowedOrigins"],
             serde_json::json!(["https://www.youtube-nocookie.com"])
+        );
+        assert_eq!(
+            value["allowedTcpTargets"],
+            serde_json::json!(["tcp://127.0.0.1:5900"])
         );
     }
 

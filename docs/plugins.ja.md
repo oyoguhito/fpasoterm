@@ -49,6 +49,20 @@ plugin source の comment に version と description を宣言できます。ma
 // @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com
 ```
 
+local VNC bridgeを使うpluginは、接続先をsource headerへ完全一致で宣言します。
+wildcard、path、credential、port rangeは許可されません。
+
+```ts
+// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900, tls://vnc.example.test:5901
+```
+
+`openVncBridge({ target })` は接続のたび確認を表示し、一度だけ使える
+`ws://127.0.0.1/...` を返します。native bridgeはbinary WebSocketを宣言済みの
+接続先へrelayするだけで、汎用TCP proxyではありません。`tls://` はOS trust store
+で証明書と接続先名を検証し、無効化するoptionはありません。`tcp://` は通常のlocal
+VNC/RFB用に対応しますが暗号化されないため、localhostまたは信頼できるnetworkに限ります。
+credentialは`promptSecret()`でmemory上だけに保持し、設定・Diagnosticsへ保存しません。
+
 これは無制限の許可ではありません。fpasotermがreview済みのapplication allowlistとCSPに含むoriginだけを許可し、不正なoriginの宣言には権限を与えません。
 
 ## plugin の有効化
@@ -178,6 +192,11 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `openWebPanel({ title, url, width, height })`: `allowed-origins`で宣言し、fpasotermが
   承認したoriginだけをiframeで表示するkeyboard操作可能なHTTPS panelを開く。userの直接操作から
   呼び出し、Escape、Close button、backdrop clickで閉じる。汎用browser APIではない。
+- `openElementOverlay({ title, width, height })`: navigation/network権限を持たない
+  local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。
+- `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
+  `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
+- `promptSecret({ title, message, approve })`: secretをmemory上だけで入力する。
 - `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
   `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
   行いません。

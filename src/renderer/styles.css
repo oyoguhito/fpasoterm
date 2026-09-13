@@ -595,6 +595,52 @@ body {
   box-shadow: 0 0 0 8px rgba(0, 0, 0, 0.72);
 }
 
+.fpasoterm-plugin-element-overlay,
+.fpasoterm-plugin-prompt-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 12000;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, .58);
+}
+
+.fpasoterm-plugin-element-dialog,
+.fpasoterm-plugin-prompt-dialog {
+  max-width: calc(100vw - 32px);
+  max-height: calc(100vh - 32px);
+  box-sizing: border-box;
+  padding: 14px;
+  border: 1px solid #5a7088;
+  border-radius: 6px;
+  background: #17212b;
+  color: #edf5fc;
+  box-shadow: 0 18px 48px rgba(0, 0, 0, .48);
+}
+
+.fpasoterm-plugin-element-dialog header,
+.fpasoterm-plugin-element-dialog header > div,
+.fpasoterm-plugin-prompt-dialog > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.fpasoterm-plugin-element-dialog h2,
+.fpasoterm-plugin-prompt-dialog h2 { margin: 0; font-size: 16px; }
+.fpasoterm-plugin-prompt-dialog { width: min(460px, calc(100vw - 32px)); font: 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.fpasoterm-plugin-prompt-dialog p { white-space: pre-line; line-height: 1.45; }
+.fpasoterm-plugin-prompt-dialog input { width: 100%; box-sizing: border-box; margin: 4px 0 14px; padding: 8px; background: #0d151c; color: inherit; border: 1px solid #59738c; border-radius: 4px; }
+.fpasoterm-plugin-element-dialog button,
+.fpasoterm-plugin-prompt-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }
+.fpasoterm-plugin-element-content { overflow: auto; background: #000; outline: none; }
+.fpasoterm-plugin-element-dialog button:focus,
+.fpasoterm-plugin-element-content:focus,
+.fpasoterm-plugin-prompt-dialog button:focus,
+.fpasoterm-plugin-prompt-dialog input:focus { outline: 4px solid #ffdb4d; outline-offset: 3px; }
+
 .resize-edge,
 .resize-corner {
   position: fixed;

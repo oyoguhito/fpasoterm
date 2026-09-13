@@ -55,6 +55,16 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
+  /** Opens a focus-trapped local DOM host. It does not provide navigation or network access. */
+  openElementOverlay: (options?: {
+    title?: string;
+    width?: number;
+    height?: number;
+  }) => {
+    element: HTMLDivElement;
+    close: () => void;
+    focus: () => void;
+  };
   /** Opens a focus-trapped HTTPS iframe panel for this plugin's declared, application-approved origins. */
   openWebPanel: (options: {
     title?: string;
@@ -65,6 +75,14 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
+  /**
+   * Opens one ephemeral loopback WebSocket to an exact target declared in this
+   * plugin's `allowed-tcp-targets` source header. Prompts for every connection.
+   * `tls://` verifies the certificate and target host using system trust roots.
+   */
+  openVncBridge: (options: { target: string }) => Promise<string>;
+  /** Prompts for a credential without persisting or logging its returned value. */
+  promptSecret: (options?: { title?: string; message?: string; approve?: string }) => Promise<string | null>;
   getOfficialPluginIndex: () => Promise<Array<{
     id: string;
     name: string;

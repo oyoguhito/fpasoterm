@@ -17,6 +17,7 @@ const {
   platformDefaultConfig,
   pluginMetadata,
   pluginAllowedOrigins,
+  pluginAllowedTcpTargets,
   profileNames,
   pruneUnsupportedConfig,
   resolvePluginSelector,
@@ -115,6 +116,10 @@ assert.deepEqual(
   ['https://www.youtube-nocookie.com', 'https://www.youtube.com'],
 );
 assert.deepEqual(pluginAllowedOrigins('// @fpasoterm-plugin allowed-origins: http://example.com, https://example.com/path\n'), []);
+assert.deepEqual(
+  pluginAllowedTcpTargets('// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900, tls://[::1]:5901, tcp://host:0, tcp://host:22/path\n'),
+  ['tcp://127.0.0.1:5900', 'tls://[::1]:5901'],
+);
 assert.deepEqual(
   pluginMetadata('// Existing plugin comment\nconst value = 1;\n'),
   { version: '(not declared)', description: 'Existing plugin comment' },
