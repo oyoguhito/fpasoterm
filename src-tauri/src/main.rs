@@ -538,6 +538,10 @@ fn cli_help_text() -> String {
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
     )
+    .replace(
+        "Use this local fpasoterm-plugins checkout.",
+        "Use this local fpasoterm-plugins checkout or its ports directory.",
+    )
 }
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
@@ -4561,17 +4565,21 @@ fn install_public_plugin_port(
     install_plugin_source(config_path, &port, source, force)
 }
 
-// Locates a checked-out fpasoterm-plugins tree for reviewed local port installs.
+// Locates either a fpasoterm-plugins checkout or its direct ports/ directory.
 fn local_plugin_ports_directory(explicit: Option<String>) -> Result<PathBuf, String> {
     let directory = explicit
         .map(PathBuf::from)
         .ok_or_else(|| "--plugin-ports-dir requires a path".to_string())?;
-    if directory.join("ports").is_dir() {
-        Ok(directory)
+    let ports_directory = if directory.file_name().is_some_and(|name| name == "ports") {
+        directory
+    } else {
+        directory.join("ports")
+    };
+    if ports_directory.is_dir() {
+        Ok(ports_directory)
     } else {
         Err(
-            "local fpasoterm-plugins checkout not found; pass --plugin-ports-dir <path>"
-                .to_string(),
+            "local fpasoterm-plugins checkout or its ports directory not found; pass --plugin-ports-dir <path>".to_string(),
         )
     }
 }
@@ -4601,8 +4609,8 @@ fn install_local_plugin_port(
     force: bool,
 ) -> Result<String, String> {
     let id = validate_public_plugin_port_id(selector)?;
-    let root = local_plugin_ports_directory(ports_directory)?;
-    let port_directory = root.join("ports").join(&id);
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let port_directory = ports_root.join(&id);
     let manifest = read_local_plugin_file(
         &port_directory.join("port.toml"),
         PUBLIC_PLUGIN_MANIFEST_LIMIT,
@@ -9108,6 +9116,28 @@ mod tests {
             validate_direct_cli_args(&args),
             Err("--width must be a positive integer".to_string())
         );
+    }
+
+    #[test]
+    fn local_plugin_ports_directory_accepts_checkout_or_ports_directory() {
+        let root = std::env::temp_dir().join(format!(
+            "fpasoterm-local-ports-{}-{}",
+            std::process::id(),
+            now_millis()
+        ));
+        let ports = root.join("ports");
+        fs::create_dir_all(&ports).expect("create ports directory");
+        assert_eq!(
+            local_plugin_ports_directory(Some(root.to_string_lossy().to_string()))
+                .expect("checkout root"),
+            ports
+        );
+        assert_eq!(
+            local_plugin_ports_directory(Some(ports.to_string_lossy().to_string()))
+                .expect("ports directory"),
+            ports
+        );
+        fs::remove_dir_all(root).expect("remove fixture");
     }
 
     #[test]
