@@ -873,11 +873,17 @@ function showPluginCommandStatus(message, state = 'progress') {
   if (!pluginActivity && state !== 'error') return;
   if (!pluginCommandStatusElement || !pluginCommandStatusTextElement) return;
   const timestamp = new Date().toLocaleTimeString();
+  const wasAtBottom =
+    pluginCommandStatusTextElement.scrollTop + pluginCommandStatusTextElement.clientHeight >=
+    pluginCommandStatusTextElement.scrollHeight - 8;
   pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
-  if (pluginCommandStatusLines.length > 10) pluginCommandStatusLines.shift();
+  // Keep enough history for an investigation without unbounded renderer memory.
+  if (pluginCommandStatusLines.length > 1000) pluginCommandStatusLines.shift();
   pluginCommandStatusElement.dataset.state = state;
   pluginCommandStatusTextElement.textContent = pluginCommandStatusLines.join('\n');
   pluginCommandStatusElement.hidden = false;
+  // Follow new activity only while the user has not intentionally scrolled up.
+  if (wasAtBottom) pluginCommandStatusTextElement.scrollTop = pluginCommandStatusTextElement.scrollHeight;
 }
 
 pluginCommandStatusCopyButton?.addEventListener('click', async () => {
@@ -2801,7 +2807,6 @@ async function runPluginCommand(commandId, args) {
     return;
   }
   setWindowMenuOpen(false);
-  pluginCommandStatusLines = [];
   showPluginCommandStatus(`command started: ${commandId}`);
   pluginCommandInvocationDepth += 1;
   try {
