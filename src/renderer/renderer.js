@@ -2611,7 +2611,14 @@ async function loadPlugins() {
     fitAddon,
     imageAddon,
     config: appConfig,
-    log: (message) => showDiagnostic(`plugin: ${message}`),
+    // Plugin Activity is the user-facing execution trace. Mirror explicit
+    // plugin logs there as well as Diagnostics so runtime progress is visible
+    // even while an element overlay covers the terminal.
+    log: (message) => {
+      const text = String(message);
+      showDiagnostic(`plugin: ${text}`);
+      showPluginCommandStatus(`plugin: ${text}`);
+    },
     readClipboard: () => window.fpasoterm.readClipboard(),
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
