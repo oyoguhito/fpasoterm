@@ -1227,6 +1227,9 @@ fn apply_direct_cli_env_overrides() {
     if cli_has_flag(&["--console-diagnostics", "-C"]) {
         env::set_var("FPASOTERM_CONSOLE_DIAGNOSTICS", "1");
     }
+    if cli_has_flag(&["--plugin-activity"]) {
+        env::set_var("FPASOTERM_PLUGIN_ACTIVITY", "1");
+    }
     if cli_has_flag(&["--disable-dmabuf"]) {
         env::set_var("FPASOTERM_DISABLE_DMABUF", "1");
     }

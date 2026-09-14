@@ -111,6 +111,22 @@ let pluginActivity = false;
 const diagnosticLines = [];
 let terminalMirrorText = '';
 let pluginCommandStatusLines = [];
+// An element-overlay plugin can claim the keyboard while its reviewed local UI
+// is active. Register this before terminal/menu handlers so a WebView that
+// routes keys directly to a canvas still has one deterministic host path.
+let activePluginElementKeyCapture = null;
+document.addEventListener('keydown', (event) => {
+  const capture = activePluginElementKeyCapture;
+  if (!capture) return;
+  try {
+    if (capture.handler(event) === true) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  } catch (error) {
+    showDiagnostic(`plugin element key capture failed: ${error}`);
+  }
+}, true);
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {
@@ -2327,6 +2343,20 @@ function openPluginElementOverlay(options = {}) {
   const closeButton = document.createElement('button');
   const content = document.createElement('div');
   let closed = false;
+  const keyCaptureOwner = Symbol('plugin-element-key-capture');
+  const releaseKeyCapture = () => {
+    if (activePluginElementKeyCapture?.owner === keyCaptureOwner) {
+      activePluginElementKeyCapture = null;
+    }
+  };
+  const captureKeys = (handler) => {
+    if (typeof handler !== 'function') {
+      releaseKeyCapture();
+      return () => {};
+    }
+    activePluginElementKeyCapture = { owner: keyCaptureOwner, handler };
+    return releaseKeyCapture;
+  };
   overlay.className = 'fpasoterm-plugin-element-overlay';
   dialog.className = 'fpasoterm-plugin-element-dialog';
   dialog.style.width = `${size(resolved.width, 960)}px`;
@@ -2342,6 +2372,7 @@ function openPluginElementOverlay(options = {}) {
   const close = () => {
     if (closed) return;
     closed = true;
+    releaseKeyCapture();
     overlay.remove();
     term.focus();
   };
@@ -2361,7 +2392,7 @@ function openPluginElementOverlay(options = {}) {
   overlay.append(dialog);
   document.body.append(overlay);
   content.focus();
-  return Object.freeze({ element: content, close, focus: () => content.focus() });
+  return Object.freeze({ element: content, close, focus: () => content.focus(), captureKeys });
 }
 
 function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel', scope = '' }) {
