@@ -337,7 +337,11 @@ function matchesKeybinding(event, name) {
 function keybindingLabel(name) {
   return keybindingSpec(name)
     .replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl')
-    .replace(/\bDigit([0-9])\b/g, '$1');
+    .replace(/\bDigit([0-9])\b/g, '$1')
+    // A letter key is case-insensitive in fpasoterm's shortcut matcher. Show
+    // it consistently in lowercase, including older full bindings such as
+    // Ctrl+Shift+M retained in an existing config.toml.
+    .replace(/([+^])([A-Z])$/, (_, separator, letter) => `${separator}${letter.toLowerCase()}`);
 }
 
 // Returns the compact action-key label used in the constrained titlebar menu.
