@@ -111,6 +111,22 @@ let pluginActivity = false;
 const diagnosticLines = [];
 let terminalMirrorText = '';
 let pluginCommandStatusLines = [];
+// An element-overlay plugin can claim the keyboard while its reviewed local UI
+// is active. Register this before terminal/menu handlers so a WebView that
+// routes keys directly to a canvas still has one deterministic host path.
+let activePluginElementKeyCapture = null;
+document.addEventListener('keydown', (event) => {
+  const capture = activePluginElementKeyCapture;
+  if (!capture) return;
+  try {
+    if (capture.handler(event) === true) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    }
+  } catch (error) {
+    showDiagnostic(`plugin element key capture failed: ${error}`);
+  }
+}, true);
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {
@@ -321,7 +337,11 @@ function matchesKeybinding(event, name) {
 function keybindingLabel(name) {
   return keybindingSpec(name)
     .replace(/\bMod\b/g, navigator.platform.toLowerCase().includes('mac') ? 'Cmd' : 'Ctrl')
-    .replace(/\bDigit([0-9])\b/g, '$1');
+    .replace(/\bDigit([0-9])\b/g, '$1')
+    // A letter key is case-insensitive in fpasoterm's shortcut matcher. Show
+    // it consistently in lowercase, including older full bindings such as
+    // Ctrl+Shift+M retained in an existing config.toml.
+    .replace(/([+^])([A-Z])$/, (_, separator, letter) => `${separator}${letter.toLowerCase()}`);
 }
 
 // Returns the compact action-key label used in the constrained titlebar menu.
@@ -857,11 +877,17 @@ function showPluginCommandStatus(message, state = 'progress') {
   if (!pluginActivity && state !== 'error') return;
   if (!pluginCommandStatusElement || !pluginCommandStatusTextElement) return;
   const timestamp = new Date().toLocaleTimeString();
+  const wasAtBottom =
+    pluginCommandStatusTextElement.scrollTop + pluginCommandStatusTextElement.clientHeight >=
+    pluginCommandStatusTextElement.scrollHeight - 8;
   pluginCommandStatusLines.push(`[${timestamp}] ${message}`);
-  if (pluginCommandStatusLines.length > 10) pluginCommandStatusLines.shift();
+  // Keep enough history for an investigation without unbounded renderer memory.
+  if (pluginCommandStatusLines.length > 1000) pluginCommandStatusLines.shift();
   pluginCommandStatusElement.dataset.state = state;
   pluginCommandStatusTextElement.textContent = pluginCommandStatusLines.join('\n');
   pluginCommandStatusElement.hidden = false;
+  // Follow new activity only while the user has not intentionally scrolled up.
+  if (wasAtBottom) pluginCommandStatusTextElement.scrollTop = pluginCommandStatusTextElement.scrollHeight;
 }
 
 pluginCommandStatusCopyButton?.addEventListener('click', async () => {
@@ -2327,6 +2353,20 @@ function openPluginElementOverlay(options = {}) {
   const closeButton = document.createElement('button');
   const content = document.createElement('div');
   let closed = false;
+  const keyCaptureOwner = Symbol('plugin-element-key-capture');
+  const releaseKeyCapture = () => {
+    if (activePluginElementKeyCapture?.owner === keyCaptureOwner) {
+      activePluginElementKeyCapture = null;
+    }
+  };
+  const captureKeys = (handler) => {
+    if (typeof handler !== 'function') {
+      releaseKeyCapture();
+      return () => {};
+    }
+    activePluginElementKeyCapture = { owner: keyCaptureOwner, handler };
+    return releaseKeyCapture;
+  };
   overlay.className = 'fpasoterm-plugin-element-overlay';
   dialog.className = 'fpasoterm-plugin-element-dialog';
   dialog.style.width = `${size(resolved.width, 960)}px`;
@@ -2342,6 +2382,7 @@ function openPluginElementOverlay(options = {}) {
   const close = () => {
     if (closed) return;
     closed = true;
+    releaseKeyCapture();
     overlay.remove();
     term.focus();
   };
@@ -2361,7 +2402,7 @@ function openPluginElementOverlay(options = {}) {
   overlay.append(dialog);
   document.body.append(overlay);
   content.focus();
-  return Object.freeze({ element: content, close, focus: () => content.focus() });
+  return Object.freeze({ element: content, close, focus: () => content.focus(), captureKeys });
 }
 
 function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel', scope = '' }) {
@@ -2580,7 +2621,14 @@ async function loadPlugins() {
     fitAddon,
     imageAddon,
     config: appConfig,
-    log: (message) => showDiagnostic(`plugin: ${message}`),
+    // Plugin Activity is the user-facing execution trace. Mirror explicit
+    // plugin logs there as well as Diagnostics so runtime progress is visible
+    // even while an element overlay covers the terminal.
+    log: (message) => {
+      const text = String(message);
+      showDiagnostic(`plugin: ${text}`);
+      showPluginCommandStatus(`plugin: ${text}`);
+    },
     readClipboard: () => window.fpasoterm.readClipboard(),
     writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
@@ -2763,7 +2811,6 @@ async function runPluginCommand(commandId, args) {
     return;
   }
   setWindowMenuOpen(false);
-  pluginCommandStatusLines = [];
   showPluginCommandStatus(`command started: ${commandId}`);
   pluginCommandInvocationDepth += 1;
   try {

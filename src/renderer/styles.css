@@ -621,6 +621,14 @@ body {
   box-shadow: 0 18px 48px rgba(0, 0, 0, .48);
 }
 
+/* Element overlays may request a desktop-sized content area. Keep the header
+ * and the requested content together inside the available viewport instead of
+ * letting the bottom of a plugin surface extend below the window. */
+.fpasoterm-plugin-element-dialog {
+  display: flex;
+  flex-direction: column;
+}
+
 .fpasoterm-plugin-element-dialog header,
 .fpasoterm-plugin-element-dialog header > div,
 .fpasoterm-plugin-prompt-dialog > div {
@@ -637,7 +645,14 @@ body {
 .fpasoterm-plugin-prompt-dialog input { width: 100%; box-sizing: border-box; margin: 4px 0 14px; padding: 8px; background: #0d151c; color: inherit; border: 1px solid #59738c; border-radius: 4px; }
 .fpasoterm-plugin-element-dialog button,
 .fpasoterm-plugin-prompt-dialog button { padding: 7px 9px; border: 1px solid #59738c; border-radius: 4px; background: #263b4e; color: inherit; font: inherit; cursor: pointer; }
-.fpasoterm-plugin-element-content { overflow: auto; background: #000; outline: none; }
+.fpasoterm-plugin-element-content {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height: calc(100vh - 104px);
+  overflow: auto;
+  background: #000;
+  outline: none;
+}
 .fpasoterm-plugin-element-dialog button:focus,
 .fpasoterm-plugin-element-content:focus,
 .fpasoterm-plugin-prompt-dialog button:focus,
