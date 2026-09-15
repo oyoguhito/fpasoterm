@@ -1098,7 +1098,7 @@ dependencies = [
 
 [[package]]
 name = "fpasoterm"
-version = "1.6.4"
+version = "1.6.5"
 dependencies = [
  "base64 0.22.1",
  "encoding_rs",
