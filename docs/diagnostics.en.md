@@ -31,9 +31,11 @@ fpasoterm --doctor
 `--doctor` is read-only. The Node launcher validates the selected config,
 compares the installed version with npm `latest`, and runs `npm audit --omit=dev`.
 It never installs an update or changes configuration; follow its explicit
-`--self-update` suggestion only after reviewing the report. Standalone bundled
-binaries run the config and update checks but report npm audit as unavailable,
-because they do not include an npm package manifest.
+`--self-update` suggestion only after reviewing the report when using the Node
+launcher. Standalone bundled binaries run the config and update checks but do
+not support `--self-update`; when an update is available they direct users to
+the GitHub Release download page. They report npm audit as unavailable because
+they do not include an npm package manifest.
 
 ## Diagnostics Report
 

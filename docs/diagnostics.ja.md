@@ -30,8 +30,10 @@ fpasoterm --doctor
 
 `--doctor`はread-onlyです。Node launcherでは選択中のconfig検証、npmの`latest`との比較、
 `npm audit --omit=dev`を実行します。自動更新やconfig書換は行わず、結果に応じて明示的な
-`--self-update`だけを案内します。standalone binaryではconfigと更新確認を実行しますが、
-npm package manifestを持たないためnpm auditは`unavailable`として表示します。
+Node launcherでのみ、結果に応じて明示的な`--self-update`を案内します。standalone binaryでは
+configと更新確認を実行しますが、`--self-update`は利用できません。更新がある場合はGitHub
+Releaseのdownload pageを案内します。npm package manifestを持たないためnpm auditは
+`unavailable`として表示します。
 
 ## 診断report
 

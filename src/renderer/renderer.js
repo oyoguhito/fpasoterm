@@ -4774,7 +4774,7 @@ checkForUpdatesButton?.addEventListener('click', async () => {
   try {
     const status = await window.fpasoterm.checkForUpdate();
     const result = status.updateAvailable
-      ? 'Status: update available. Run: fpasoterm --self-update'
+      ? 'Status: update available. Download: https://github.com/oyoguhito/fpasoterm/releases/latest'
       : status.localBuildNewer
         ? 'Status: local build is newer than npm latest.'
         : 'Status: up to date.';

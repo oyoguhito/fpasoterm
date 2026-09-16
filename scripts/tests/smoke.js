@@ -942,6 +942,7 @@ assert.match(rustMain, /fn cli_help_text/);
 assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
 assert.match(rustMain, /fn npm_update_check/);
+assert.match(rustMain, /github\.com\/oyoguhito\/fpasoterm\/releases\/latest/);
 assert.match(rustMain, /fn public_plugin_search_text/);
 assert.match(rustMain, /fn public_plugin_catalog_entries/);
 assert.match(rustMain, /fn plugin_catalog/);

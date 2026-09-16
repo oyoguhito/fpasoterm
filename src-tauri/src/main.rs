@@ -8582,7 +8582,10 @@ fn npm_update_check_text(status: &NpmUpdateCheck) -> String {
     ];
     if status.update_available {
         lines.push("status: update available".to_string());
-        lines.push("update: fpasoterm --self-update".to_string());
+        lines.push(
+            "update: download the latest standalone artifact from https://github.com/oyoguhito/fpasoterm/releases/latest"
+                .to_string(),
+        );
     } else if status.local_build_newer {
         lines.push("status: local build is newer than npm latest".to_string());
     } else {
@@ -8610,7 +8613,7 @@ fn doctor_cli() {
     match npm_update_check() {
         Ok(status) if status.update_available => {
             print_cli_text(&format!(
-                "- npm latest: {}\n- update: available; run fpasoterm --self-update\n",
+                "- npm latest: {}\n- update: available; download the latest standalone artifact from https://github.com/oyoguhito/fpasoterm/releases/latest\n",
                 status.latest
             ));
         }
