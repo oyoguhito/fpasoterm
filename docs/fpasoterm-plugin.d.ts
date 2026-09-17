@@ -64,6 +64,12 @@ type FpasotermPluginApi = {
     element: HTMLDivElement;
     close: () => void;
     focus: () => void;
+    /**
+     * Claims keyboard events while this overlay is open. Return true after
+     * handling an event to prevent fpasoterm's local shortcuts from receiving
+     * it. Call the returned function to release the claim early.
+     */
+    captureKeys: (handler: (event: KeyboardEvent) => boolean) => () => void;
   };
   /** Opens a focus-trapped HTTPS iframe panel for this plugin's declared, application-approved origins. */
   openWebPanel: (options: {

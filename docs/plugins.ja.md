@@ -193,10 +193,17 @@ install 後の plugin では declaration file をローカルへコピーし、r
   承認したoriginだけをiframeで表示するkeyboard操作可能なHTTPS panelを開く。userの直接操作から
   呼び出し、Escape、Close button、backdrop clickで閉じる。汎用browser APIではない。
 - `openElementOverlay({ title, width, height })`: navigation/network権限を持たない
-  local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。
+  local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。返された
+  `captureKeys(handler)`はoverlay表示中のkeyboard eventを取得する。plugin側で処理し、
+  local fpasoterm shortcutへ渡してはいけないeventだけ`true`を返す。不要になった時は
+  戻り値のrelease functionを呼ぶ。
 - `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
   `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
 - `promptSecret({ title, message, approve })`: secretをmemory上だけで入力する。
+  cancel時は`null`を返す。
+- `promptText({ title, message, approve })`: secretではない接続用textをmemory上だけで
+  入力する。cancel時は`null`を返す。
+- `dismissPrompts()`: このpluginが表示中のcredential promptを閉じる。接続完了後などに使う。
 - `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
   `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は
   行いません。

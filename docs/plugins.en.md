@@ -285,10 +285,18 @@ provides:
   with Escape, Close, or its backdrop. It is not a general-purpose browser.
 - `openElementOverlay({ title, width, height })`: open a focus-trapped local
   DOM host without navigation or network access; useful for a reviewed renderer
-  library such as noVNC.
+  library such as noVNC. Its `captureKeys(handler)` method claims keyboard
+  events while the overlay is open. Return `true` from `handler` only when the
+  plugin handled the event and must prevent a local fpasoterm shortcut; call
+  the returned release function when the claim is no longer needed.
 - `openVncBridge({ target })`: after an explicit user action and confirmation,
   open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
-- `promptSecret({ title, message, approve })`: request a secret in memory only.
+- `promptSecret({ title, message, approve })`: request a secret in memory only;
+  cancellation returns `null`.
+- `promptText({ title, message, approve })`: request non-secret connection text
+  in memory only; cancellation returns `null`.
+- `dismissPrompts()`: close this plugin's outstanding credential prompts, for
+  example after a connection has completed.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`
   used by `fpasoterm --plugin-search`. It does not download, install, enable,
   or execute plugin source.

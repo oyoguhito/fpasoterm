@@ -1,5 +1,13 @@
 # Changelog
 
+## 1.6.6
+
+- Clarified that standalone artifacts update through GitHub Releases rather
+  than `--self-update`, which remains available to npm-installed Node launchers.
+- Completed the plugin API contract for local DOM overlays and connection
+  prompts: `captureKeys()`, `promptText()`, and `dismissPrompts()` are now
+  documented in the English and Japanese plugin guides and TypeScript API file.
+
 ## 1.5.7
 
 - Added sync-folder status, cleanup, and Markdown diagnostics commands: `--sync-status`, `--sync-clean`, and `--sync-diagnostics`.
