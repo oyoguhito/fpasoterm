@@ -146,8 +146,9 @@ whether an update is available. It is not run automatically at startup, from
 `--doctor` is a read-only maintenance report. From the Node launcher it checks
 the selected config, npm latest version, and `npm audit --omit=dev`; it only
 suggests `--self-update` and never updates automatically. A standalone bundled
-binary reports config and update health, while npm audit is unavailable because
-it has no npm package context.
+binary reports config and update health, directs an available update to the
+GitHub Release download page, and does not support `--self-update`; npm audit
+is unavailable because it has no npm package context.
 
 In the GUI, open the hamburger menu, choose **Help**, then select **Check for
 Updates**. The same panel shows the installed build, npm latest version, and
