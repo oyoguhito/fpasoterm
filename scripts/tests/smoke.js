@@ -2142,7 +2142,7 @@ assert.match(rustMain, /app\.run_on_main_thread/);
 assert.match(rustMain, /GTK clipboard write did not complete/);
 assert.match(rustMain, /clipboard\.store\(\)/);
 assert.match(rustMain, /display\.flush\(\)/);
-assert.match(rustMain, /Prefer the compositor\/X11 clipboard helper/);
+assert.match(rustMain, /xclip\/xsel can successfully spawn inside the Linux container/);
 assert.match(rustMain, /same ChromeOS shared-clipboard owner as an ordinary fpasoterm selection/);
 assert.match(rustMain, /fn clipboard_write_osc52[\s\S]*write_linux_clipboard_native\(&app, text\.clone\(\)\)\.or_else/);
 assert.match(rustMain, /clipboard command fallback failed/);
