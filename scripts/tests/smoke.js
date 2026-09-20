@@ -2138,6 +2138,7 @@ assert.match(renderer, /keybindingLabel\('kill'\)/);
 assert.match(renderer, /Kill the running terminal command and keep its shell open/);
 assert.match(rustMain, /process_group_leader/);
 assert.match(rustMain, /write_linux_clipboard_native/);
+assert.match(read('src-tauri/Cargo.toml'), /cfg\(all\(unix, not\(target_os = "macos"\)\)\)/);
 assert.match(rustMain, /app\.run_on_main_thread/);
 assert.match(rustMain, /GTK clipboard write did not complete/);
 assert.match(rustMain, /clipboard\.store\(\)/);
