@@ -791,7 +791,7 @@ assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
-assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
+assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
 assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
 assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*pluginCatalogSearchElement,\s*terminalLogShowSelectedButton/);
 
