@@ -4,6 +4,8 @@
 use base64::Engine;
 use encoding_rs::{EUC_JP, SHIFT_JIS};
 use futures_util::{SinkExt, StreamExt};
+#[cfg(all(unix, not(target_os = "macos")))]
+use gtk::{gdk, Clipboard};
 use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use rand::RngCore;
@@ -23,7 +25,7 @@ use std::process::Child;
 use std::process::Output;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
@@ -704,7 +706,7 @@ fn main() {
         return;
     }
     if cli_has_flag(&["--copy-diagnostics"]) {
-        match clipboard_write(diagnostics_markdown_cli()) {
+        match clipboard_write_cli(diagnostics_markdown_cli()) {
             Ok(()) => print_cli_text("copied diagnostics to clipboard\n"),
             Err(error) => {
                 print_cli_error(&format!("fpasoterm: could not copy diagnostics: {error}\n"));
@@ -830,6 +832,7 @@ fn main() {
             diagnostics_log,
             clipboard_read,
             clipboard_write,
+            clipboard_write_osc52,
             plugin_web_panel_frame_url,
             plugin_vnc_bridge_open,
             open_external_url,
@@ -8153,9 +8156,49 @@ fn clipboard_read() -> Result<String, String> {
     }
 }
 
-#[tauri::command]
-// Writes text to the OS clipboard for terminal OSC 52 copy requests.
-fn clipboard_write(text: String) -> Result<(), String> {
+// GTK clipboard calls must run on its main thread. Tauri commands are allowed
+// to execute off that thread, so schedule the write when necessary and wait for
+// its result before reporting an OSC 52 or terminal copy as successful.  Store
+// and flush before returning: a terminal outside fpasoterm can otherwise paste
+// before the X/Wayland selection ownership request has left this process.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn write_linux_clipboard_native(app: &AppHandle, text: String) -> Result<(), String> {
+    if !gtk::is_initialized() {
+        return Err("GTK clipboard is unavailable before the desktop runtime starts".to_string());
+    }
+    let write = move || {
+        let clipboard = Clipboard::get(&gdk::SELECTION_CLIPBOARD);
+        clipboard.set_text(&text);
+        // A clipboard manager keeps the content available beyond the immediate
+        // GTK selection owner, which is essential across ChromeOS's container
+        // boundary.
+        clipboard.store();
+        if let Some(display) = gdk::Display::default() {
+            display.flush();
+        }
+    };
+    if gtk::glib::MainContext::default().is_owner() {
+        write();
+        return Ok(());
+    }
+    let (sender, receiver) = mpsc::sync_channel(1);
+    app.run_on_main_thread(move || {
+        let result = if gtk::is_initialized() {
+            write();
+            Ok(())
+        } else {
+            Err("GTK clipboard is unavailable on the main thread".to_string())
+        };
+        let _ = sender.send(result);
+    })
+    .map_err(|error| format!("could not schedule GTK clipboard write: {error}"))?;
+    receiver
+        .recv_timeout(Duration::from_secs(1))
+        .map_err(|_| "GTK clipboard write did not complete".to_string())?
+}
+
+// Uses platform commands for CLI-only operations before a GUI runtime exists.
+fn clipboard_write_cli(text: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         return write_clipboard_with_commands(&[("pbcopy", &[])], &text);
@@ -8180,6 +8223,49 @@ fn clipboard_write(text: String) -> Result<(), String> {
             ],
             &text,
         )
+    }
+}
+
+#[tauri::command]
+// Writes user-initiated terminal selections through the desktop runtime first.
+// On ChromeOS this GTK owner is the reliable route to the shared host clipboard.
+fn clipboard_write(app: AppHandle, text: String) -> Result<(), String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return write_linux_clipboard_native(&app, text.clone()).or_else(|native_error| {
+            clipboard_write_cli(text).map_err(|command_error| {
+                format!("GTK clipboard failed: {native_error}; clipboard command fallback failed: {command_error}")
+            })
+        });
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let _ = app;
+        clipboard_write_cli(text)
+    }
+}
+
+#[tauri::command]
+// OSC 52 is terminal output rather than a WebView gesture, but it must use the
+// same ChromeOS shared-clipboard owner as an ordinary fpasoterm selection.
+// xclip/xsel can successfully spawn inside the Linux container while writing
+// only that container's X selection, so trying them first incorrectly reports
+// success and prevents the GTK clipboard from reaching the host clipboard.
+fn clipboard_write_osc52(app: AppHandle, text: String) -> Result<(), String> {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        return write_linux_clipboard_native(&app, text.clone()).or_else(|native_error| {
+            clipboard_write_cli(text).map_err(|command_error| {
+                format!("GTK clipboard failed: {native_error}; clipboard command fallback failed: {command_error}")
+            })
+        });
+    }
+
+    #[cfg(any(target_os = "macos", target_os = "windows"))]
+    {
+        let _ = app;
+        clipboard_write_cli(text)
     }
 }
 

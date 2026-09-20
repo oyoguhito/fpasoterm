@@ -432,14 +432,43 @@ body {
   z-index: 9;
   max-height: min(22vh, 160px);
   margin: 0;
-  overflow: auto;
+  overflow: hidden;
   padding: 8px;
   border: 1px solid #41546a;
   border-radius: 6px;
   background: rgba(10, 14, 18, 0.92);
   color: #d6f6ff;
   font: 12px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  pointer-events: none;
+  pointer-events: auto;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+.terminal-mirror-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 5px;
+  font-weight: 700;
+  cursor: move;
+  touch-action: none;
+}
+
+#close-terminal-mirror {
+  padding: 3px 8px;
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.10);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+#terminal-mirror-text {
+  max-height: calc(min(22vh, 160px) - 32px);
+  margin: 0;
+  overflow: auto;
   white-space: pre-wrap;
 }
 

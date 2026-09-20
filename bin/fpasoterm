@@ -57,7 +57,7 @@ Options:
       --broadcast-target <pid|title>
                                 Limit Broadcast targets (comma-separated/repeatable).
       --broadcast-sync          Also send Broadcast through the trusted sync channel.
-  -d, --dev                     Force a local debug-binary rebuild and launch.
+  -d, --dev                     Force an incremental local debug-binary rebuild and launch.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
   -c, --config <path>           Use a specific config.toml for this launch.
@@ -2553,6 +2553,44 @@ function buildTauriBinary(options) {
   return buildLocalTauriBinary(options);
 }
 
+// Finds the LLD binary bundled with the active Rust toolchain. It is available
+// on standard rustup installs even when the host has not installed an `lld`
+// package. We use it only for local Linux debug builds; release artifacts keep
+// their CI-selected linker and platform settings.
+function bundledRustLldDirectory() {
+  if (process.platform !== 'linux' || process.env.FPASOTERM_DISABLE_BUNDLED_LLD === '1') {
+    return undefined;
+  }
+  const rustc = process.env.RUSTC || 'rustc';
+  const sysroot = spawnSync(rustc, ['--print', 'sysroot'], { encoding: 'utf8' });
+  const verbose = spawnSync(rustc, ['-vV'], { encoding: 'utf8' });
+  if (sysroot.status !== 0 || verbose.status !== 0) {
+    return undefined;
+  }
+  const target = /^host: (.+)$/m.exec(verbose.stdout)?.[1]?.trim();
+  if (!target) {
+    return undefined;
+  }
+  const directory = path.join(sysroot.stdout.trim(), 'lib', 'rustlib', target, 'bin', 'gcc-ld');
+  return fs.existsSync(path.join(directory, 'ld.lld')) ? directory : undefined;
+}
+
+// Uses the rustup-bundled LLD only while compiling the local debug runtime.
+// GNU BFD is particularly slow at the final Tauri/WebKit link on ARM64.
+function localCargoBuildEnvironment() {
+  const env = { ...process.env };
+  const lldDirectory = bundledRustLldDirectory();
+  if (!lldDirectory) {
+    appendLauncherLog('launcher linker=system-default');
+    return env;
+  }
+  env.PATH = `${lldDirectory}${path.delimiter}${env.PATH || ''}`;
+  const lldFlag = '-C link-arg=-fuse-ld=lld';
+  env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${lldFlag}` : lldFlag;
+  appendLauncherLog(`launcher linker=rustup-lld directory=${lldDirectory}`);
+  return env;
+}
+
 // Builds the static-asset debug binary without starting a localhost dev server.
 function buildLocalTauriBinary(options) {
   appendLaunchPhase('cargo-build-start');
@@ -2569,37 +2607,14 @@ function buildLocalTauriBinary(options) {
       appendLauncherLog(`launcher cargo log fd error=${error.message}`);
     }
   }
-  // Tauri embeds frontendDist in the native binary, but Cargo does not always
-  // notice a renderer-only edit. Clean only this crate before building so an
-  // updated launcher never opens stale renderer assets.
-  appendLaunchPhase('cargo-clean-start');
-  const cleanResult = spawnSync('cargo', [
-    'clean',
-    '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'),
-    '-p', 'fpasoterm',
-  ], {
-    cwd: root,
-    env: process.env,
-    stdio,
-    windowsHide: !options.foreground,
-  });
-  if (cleanResult.error) {
-    if (logFd !== undefined) {
-      fs.closeSync(logFd);
-    }
-    return Promise.reject(new Error(`failed to start cargo clean: ${cleanResult.error.message}`));
-  }
-  if (cleanResult.status !== 0) {
-    if (logFd !== undefined) {
-      fs.closeSync(logFd);
-    }
-    return Promise.reject(new Error(`cargo clean failed with exit code ${cleanResult.status}`));
-  }
-  appendLaunchPhase('cargo-clean-complete');
+  // build.rs watches every frontend asset, so Cargo rebuilds the embedded
+  // WebView payload when needed. Do not cargo clean here: --dev is commonly
+  // used for repeated GUI checks and a clean recompiles the whole Tauri graph.
+  appendLauncherLog('launcher cargo build=incremental');
 
   const result = spawn('cargo', ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')], {
     cwd: root,
-    env: process.env,
+    env: localCargoBuildEnvironment(),
     stdio,
     windowsHide: !options.foreground,
   });
