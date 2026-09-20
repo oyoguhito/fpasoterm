@@ -65,6 +65,7 @@ const terminalKillButton = document.getElementById('terminal-kill');
 const terminalResetButton = document.getElementById('terminal-reset');
 const terminalCopyButton = document.getElementById('terminal-copy');
 const terminalPasteButton = document.getElementById('terminal-paste');
+const terminalCopyLastOsc52Button = document.getElementById('terminal-copy-last-osc52');
 const pluginCommandItems = document.getElementById('plugin-command-items');
 const terminalBroadcastButton = document.getElementById('terminal-broadcast');
 const terminalBroadcastDialog = document.getElementById('terminal-broadcast-dialog');
@@ -103,6 +104,8 @@ const sshfsManagerPasswordToggleButton = document.getElementById('sshfs-manager-
 const sshfsManagerLocalPathElement = document.getElementById('sshfs-manager-local-path');
 const windowTitleElement = document.getElementById('window-title');
 const terminalMirrorElement = document.getElementById('terminal-mirror');
+const terminalMirrorTextElement = document.getElementById('terminal-mirror-text');
+const closeTerminalMirrorButton = document.getElementById('close-terminal-mirror');
 const pluginCommandStatusElement = document.getElementById('plugin-command-status');
 const pluginCommandStatusTextElement = document.getElementById('plugin-command-status-text');
 const pluginCommandStatusCopyButton = document.getElementById('plugin-command-status-copy');
@@ -110,7 +113,12 @@ let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 let pluginActivity = false;
 const diagnosticLines = [];
 let terminalMirrorText = '';
+let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
+let lastOsc52ClipboardText = '';
+// A keyboard-only terminal copy starts here. The visible one-cell xterm
+// selection is intentional feedback that a mark has been set.
+let terminalKeyboardCopyMark = null;
 // An element-overlay plugin can claim the keyboard while its reviewed local UI
 // is active. Register this before terminal/menu handlers so a WebView that
 // routes keys directly to a canvas still has one deterministic host path.
@@ -254,6 +262,9 @@ const oscSessionMetadata = {
   lastNotification: '',
 };
 let diagnosticsPanelMode = 'diagnostics';
+// A user may close Diagnostics while background debug events continue. Keep the
+// panel closed until they explicitly open a diagnostics view again.
+let diagnosticsPanelDismissed = false;
 let syncDiagnosticsEnabled = false;
 let syncDiagnosticsTimer = null;
 let terminalLogSearchState = {
@@ -441,6 +452,7 @@ function installTauriApiAdapter() {
     logDiagnostic: (message) => invoke('diagnostics_log', { message }),
     readClipboard: () => invoke('clipboard_read'),
     writeClipboard: (text) => invoke('clipboard_write', { text }),
+    writeOsc52Clipboard: (text) => invoke('clipboard_write_osc52', { text }),
     pluginWebPanelFrameUrl: (url) => invoke('plugin_web_panel_frame_url', { url }),
     pluginVncBridgeOpen: (target) => invoke('plugin_vnc_bridge_open', { request: { target } }),
     openExternalUrl: (url) => invoke('open_external_url', { url }),
@@ -802,9 +814,25 @@ function appendDiagnosticLine(message) {
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
-  diagnosticsPanel.hidden = false;
   diagnosticsElement.value = diagnosticLines.join('\n');
   diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+  if (!diagnosticsPanelDismissed) {
+    diagnosticsPanel.hidden = false;
+  }
+}
+
+// Opens the shared Diagnostics panel only for an explicit user-facing view.
+function showDiagnosticsPanel() {
+  diagnosticsPanelDismissed = false;
+  diagnosticsPanel.hidden = false;
+}
+
+// Hides the panel without discarding collected diagnostics. Background events
+// remain recorded, but must not immediately undo the user's Close action.
+function closeDiagnosticsPanel() {
+  diagnosticsPanelDismissed = true;
+  diagnosticsPanel.hidden = true;
+  focusTerminalInput();
 }
 
 // Restores the shared panel's regular text body after another diagnostics view.
@@ -976,7 +1004,7 @@ function queueTerminalOutput(data) {
 
 // Mirrors PTY output outside xterm.js so renderer delivery can be verified.
 function mirrorTerminalData(data) {
-  if (!debugKeys || !terminalMirrorElement) {
+  if (!debugKeys || !terminalMirrorElement || !terminalMirrorTextElement) {
     return;
   }
 
@@ -984,9 +1012,11 @@ function mirrorTerminalData(data) {
   if (terminalMirrorText.length > 6000) {
     terminalMirrorText = terminalMirrorText.slice(-6000);
   }
-  terminalMirrorElement.hidden = false;
-  terminalMirrorElement.textContent = terminalMirrorText;
-  terminalMirrorElement.scrollTop = terminalMirrorElement.scrollHeight;
+  terminalMirrorTextElement.textContent = terminalMirrorText;
+  terminalMirrorTextElement.scrollTop = terminalMirrorTextElement.scrollHeight;
+  if (!terminalMirrorDismissed) {
+    terminalMirrorElement.hidden = false;
+  }
 }
 
 // Writes a visible startup error into the terminal area when the backend fails.
@@ -1137,6 +1167,53 @@ function selectedDiagnosticsClipboardText() {
 // Selects the text source that should be copied by a user copy gesture.
 function selectedClipboardText() {
   return selectedDiagnosticsClipboardText() || selectedTerminalText();
+}
+
+// Returns a stable absolute xterm buffer position rather than a viewport row.
+// baseY changes while terminal output scrolls, whereas the selection API uses
+// absolute buffer rows.
+function terminalCursorBufferPosition() {
+  const buffer = term?.buffer?.active;
+  if (!buffer || !Number.isInteger(buffer.cursorX) || !Number.isInteger(buffer.cursorY) || !term?.cols) {
+    return null;
+  }
+  return {
+    column: Math.max(0, Math.min(buffer.cursorX, term.cols - 1)),
+    row: Math.max(0, buffer.baseY + buffer.cursorY),
+    columns: term.cols,
+  };
+}
+
+// Marks the terminal cursor for keyboard-only selection. Selecting one cell
+// makes the mark visible without adding a second cursor or modifying PTY data.
+function setTerminalKeyboardCopyMark() {
+  const position = terminalCursorBufferPosition();
+  if (!position || typeof term.select !== 'function') {
+    showDiagnostic('terminal keyboard copy mark skipped: terminal buffer is unavailable');
+    return false;
+  }
+  terminalKeyboardCopyMark = position;
+  term.select(position.column, position.row, 1);
+  showDiagnostic(`terminal keyboard copy mark set row=${position.row} column=${position.column}`);
+  return true;
+}
+
+// Converts the marked/cursor endpoints to xterm's linear selection length.
+// xterm select() accepts a range spanning wrapped and physical buffer lines.
+function selectTerminalKeyboardCopyRange() {
+  const mark = terminalKeyboardCopyMark;
+  const cursor = terminalCursorBufferPosition();
+  if (!mark || !cursor || mark.columns !== cursor.columns || typeof term.select !== 'function') {
+    return false;
+  }
+  const markIndex = mark.row * mark.columns + mark.column;
+  const cursorIndex = cursor.row * cursor.columns + cursor.column;
+  const start = markIndex <= cursorIndex ? mark : cursor;
+  const length = Math.abs(cursorIndex - markIndex) + 1;
+  term.select(start.column, start.row, length);
+  terminalKeyboardCopyMark = null;
+  showDiagnostic(`terminal keyboard copy range selected cells=${length}`);
+  return true;
 }
 
 // Copies the current xterm.js selection to the OS clipboard.
@@ -1395,7 +1472,36 @@ function installTerminalPasteHandlers() {
   });
 
   window.addEventListener('keydown', (event) => {
+    const isKeyboardCopyMark =
+      event.ctrlKey &&
+      event.shiftKey &&
+      !event.altKey &&
+      !event.metaKey &&
+      event.code === 'Space';
+    if (isKeyboardCopyMark) {
+      if (isTextEntryControl(event.target) || !diagnosticsPanel.hidden) {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      setTerminalKeyboardCopyMark();
+      focusTerminalInput();
+      return;
+    }
+
     const isCopyShortcut = matchesKeybinding(event, 'copy');
+    if (isCopyShortcut && terminalKeyboardCopyMark) {
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      if (selectTerminalKeyboardCopyRange()) {
+        copyTerminalSelection().catch((error) => {
+          showDiagnostic(`terminal keyboard range copy failed: ${error}`);
+        });
+      } else {
+        showDiagnostic('terminal keyboard range copy skipped: mark is no longer available');
+      }
+      return;
+    }
     if (isCopyShortcut && selectedClipboardText()) {
       event.preventDefault();
       copyTerminalSelection().catch((error) => {
@@ -1484,10 +1590,12 @@ function installTerminalPasteHandlers() {
     event.preventDefault();
     event.clipboardData?.setData('text/plain', text);
     event.clipboardData?.setData('text', text);
-    window.fpasoterm.writeClipboard(text).then(() => {
+    // Keep ordinary browser copy gestures on the exact same browser-plus-native
+    // route as Ctrl+Shift+C and the toolbar Copy action.
+    writeClipboardText(text).then(() => {
       showDiagnostic(`selection copied via copy event bytes=${text.length}`);
     }).catch((error) => {
-      showDiagnostic(`copy event backend write failed: ${error}`);
+      showDiagnostic(`copy event clipboard write failed: ${error}`);
     });
   });
 }
@@ -1508,6 +1616,32 @@ function decodeOsc52Text(encodedText) {
   const binary = atob(String(encodedText || ''));
   const bytes = Uint8Array.from(binary, (character) => character.charCodeAt(0));
   return new TextDecoder().decode(bytes);
+}
+
+// OSC 52 arrives as terminal output, not a WebView user gesture. WebKit may
+// keep navigator.clipboard.write() pending for such requests, which would
+// prevent the native clipboard fallback from ever running. Use the native
+// command/GTK path directly; it is deliberately used for trusted OSC output.
+async function writeOsc52ClipboardText(text) {
+  const value = String(text || '');
+  if (!value) {
+    return 0;
+  }
+  await window.fpasoterm.writeOsc52Clipboard(value);
+  return value.length;
+}
+
+// ChromeOS Terminal accepts OSC 52 directly, while a GUI app's asynchronous
+// terminal output does not carry a browser user activation. Preserve trusted
+// OSC 52 text so an explicit menu click can use the host WebView clipboard
+// route without changing the terminal or multiplexer copy operation.
+async function copyLastOsc52ToHostClipboard() {
+  const value = lastOsc52ClipboardText;
+  if (!value) {
+    throw new Error('no trusted OSC 52 clipboard text is available');
+  }
+  await writeBrowserClipboardText(value);
+  showDiagnostic(`latest OSC 52 text copied to host clipboard bytes=${value.length}`);
 }
 
 // Applies terminal OSC 52 clipboard write requests from tools such as multiplexers.
@@ -1532,7 +1666,12 @@ function applyOsc52Clipboard(selection, encodedText) {
       showDiagnostic(`ignored OSC 52 clipboard request exceeding ${maxBytes} bytes`);
       return;
     }
-    window.fpasoterm.writeClipboard(text).then(() => {
+    lastOsc52ClipboardText = text;
+    if (terminalCopyLastOsc52Button) {
+      terminalCopyLastOsc52Button.disabled = false;
+    }
+    showDiagnostic(`OSC 52 clipboard received bytes=${text.length} selection=${selection || 'clipboard'}`);
+    writeOsc52ClipboardText(text).then(() => {
       showDiagnostic(`OSC 52 clipboard wrote bytes=${text.length} selection=${selection || 'clipboard'}`);
     }).catch((error) => {
       showDiagnostic(`OSC 52 clipboard write failed: ${error}`);
@@ -3025,9 +3164,19 @@ function enableFloatingPanelDrag(panel, handle) {
 enableFloatingPanelDrag(diagnosticsPanel, diagnosticsPanel?.querySelector('[data-panel-drag-handle]'));
 enableFloatingPanelDrag(terminalBroadcastDialog, terminalBroadcastTitle);
 enableFloatingPanelDrag(
+  terminalMirrorElement,
+  terminalMirrorElement?.querySelector('[data-panel-drag-handle]'),
+);
+enableFloatingPanelDrag(
   pluginCommandStatusElement,
   pluginCommandStatusElement?.querySelector('[data-panel-drag-handle]'),
 );
+
+closeTerminalMirrorButton?.addEventListener('click', () => {
+  terminalMirrorDismissed = true;
+  terminalMirrorElement.hidden = true;
+  focusTerminalInput();
+});
 
 // WebView checkbox keyboard activation differs on Windows. Keep Space and Enter
 // consistent for Broadcast target controls and preserve their normal change event.
@@ -3747,7 +3896,7 @@ function showFontGlyphTest() {
     'Nerd Font code points: U+E0A0 U+E0B0 U+E0B2 U+F423 U+F010D U+F0627 U+F02A2',
   ].join('\n');
   diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   fontGlyphPreviewElement.focus({ preventScroll: true });
 }
 
@@ -3779,7 +3928,7 @@ async function showTerminalCapabilityTest() {
     "Test in terminal: printf '\\033[38;2;255;80;80mred \\033[38;2;80;220;140mgreen \\033[38;2;90;150;255mblue\\033[0m\\n'",
     'Expected: three visibly different RGB color words.',
     '',
-    'OSC 52 clipboard: supported for received OSC 52 text payloads; writes OS clipboard.',
+    'OSC 52 clipboard: received trusted text is written to the Linux clipboard. Use Copy Last OSC 52 from the window menu when an explicit host clipboard copy is needed.',
     `OSC 52 safety: ${oscSecurityConfig().osc52}; maximum payload: ${osc52MaximumBytes()} bytes.`,
     `OSC 8 hyperlink: click a URL to show copy/open confirmation; external opening: ${oscSecurityConfig().osc8Open === true ? 'enabled' : 'disabled'}.`,
     `OSC 9/99 notifications: ${oscSecurityConfig().oscNotifications === true ? `enabled; minimum interval ${oscNotificationMinimumInterval()} ms` : 'disabled'}${oscSessionMetadata.lastNotification ? `; last: ${oscSessionMetadata.lastNotification}` : ''}.`,
@@ -3794,7 +3943,7 @@ async function showTerminalCapabilityTest() {
     terminalEncodingSelectElement.value = capabilities.encoding || 'utf-8';
   }
   diagnosticsPathElement.textContent = `Config: ${activeConfigPath || '(default runtime config)'}`;
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   terminalCapabilityPreviewElement.focus({ preventScroll: true });
 }
 
@@ -3828,7 +3977,7 @@ async function showKeyboardShortcutsHelp() {
   ].join('\n');
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = '';
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   if (checkForUpdatesButton) {
     checkForUpdatesButton.hidden = false;
     checkForUpdatesButton.disabled = false;
@@ -3873,7 +4022,7 @@ async function showSyncStatus() {
   diagnosticsElement.value = lines.join('\n');
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = status.path || '';
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   closeDiagnosticsButton.focus({ preventScroll: true });
 }
 
@@ -3932,7 +4081,7 @@ function renderTerminalLogPreview(preview) {
   if (preview.text) {
     lines.push('', preview.text);
   }
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   diagnosticsElement.value = lines.join('\n') || 'No terminal output log found.';
   diagnosticsElement.scrollTop = 0;
   diagnosticsPathElement.textContent = preview.path || '';
@@ -3975,7 +4124,7 @@ async function clearTerminalOutputLog() {
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Terminal Log';
   }
-  diagnosticsPanel.hidden = false;
+  showDiagnosticsPanel();
   diagnosticsElement.value = `${status.message}\npath: ${status.path || '(none)'}\nbytes: ${status.bytesWritten || 0}`;
   diagnosticsPathElement.textContent = status.path || '';
   await refreshTerminalLogList(status.path || '');
@@ -4015,8 +4164,7 @@ async function deleteSelectedTerminalOutputLog() {
 
 // Hides the diagnostics/log panel when it blocks the terminal view.
 closeDiagnosticsButton.addEventListener('click', () => {
-  diagnosticsPanel.hidden = true;
-  focusTerminalInput();
+  closeDiagnosticsPanel();
 });
 
 terminalLogToggleButton.addEventListener('click', () => {
@@ -4079,7 +4227,7 @@ pluginCatalogButton.addEventListener('click', () => {
     if (pluginCatalogSearchElement) pluginCatalogSearchElement.value = '';
     setPluginCatalogSearchVisible(true);
     diagnosticsTitleElement.textContent = 'Plugin Catalog';
-    diagnosticsPanel.hidden = false;
+    showDiagnosticsPanel();
     renderPluginCatalog();
     setWindowMenuOpen(false);
     pluginCatalogSearchElement?.focus({ preventScroll: true });
@@ -4200,6 +4348,12 @@ terminalCopyButton.addEventListener('click', () => {
 terminalPasteButton.addEventListener('click', () => {
   pasteClipboardToTerminal().catch((error) => {
     showDiagnostic(`terminal menu paste failed: ${error}`);
+  }).finally(() => setWindowMenuOpen(false));
+});
+
+terminalCopyLastOsc52Button?.addEventListener('click', () => {
+  copyLastOsc52ToHostClipboard().catch((error) => {
+    showDiagnostic(`host OSC 52 copy failed: ${error}`);
   }).finally(() => setWindowMenuOpen(false));
 });
 
@@ -4408,8 +4562,7 @@ diagnosticsPanel.addEventListener('keydown', (event) => {
 
   if (event.key === 'Escape') {
     event.preventDefault();
-    diagnosticsPanel.hidden = true;
-    focusTerminalInput();
+    closeDiagnosticsPanel();
     return;
   }
 

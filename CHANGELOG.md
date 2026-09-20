@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.6.7
+
+- Made terminal OSC 52 clipboard payloads available through the explicit
+  `Copy Last OSC 52` window-menu action. This allows a user-initiated host
+  clipboard copy on ChromeOS without changing terminal, tmux, or herdr copy
+  behavior.
+- Improved native Linux clipboard writes for terminal selections and OSC 52,
+  while retaining the existing browser clipboard path for normal fpasoterm
+  copy actions.
+- Reduced local Rust development build time and documented the Linux WebKitGTK
+  development packages required for a fresh build.
+
 ## 1.6.6
 
 - Clarified that standalone artifacts update through GitHub Releases rather

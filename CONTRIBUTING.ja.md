@@ -15,6 +15,22 @@ installしてください。
 - Windows: Visual Studio Build Toolsの **Desktop development with C++** と
   Microsoft Edge WebView2 Runtime
 
+Debian、Ubuntu、ChromeOS Linuxでは、Linux用prerequisiteを次でinstallします。
+
+```sh
+sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+`libwebkit2gtk-4.1-dev` は、Tauriが必要とする`libsoup-3.0`と
+`javascriptcoregtk-4.1`のpkg-config metadataを提供します。Cargoが
+`soup3-sys`または`javascriptcore-rs-sys`のlibraryを発見できないと表示した場合は、
+上記packageを導入します。意図的に標準外のlibrary install先を使用していない限り、
+`PKG_CONFIG_PATH`を設定する必要はありません。次で確認できます。
+
+```sh
+pkg-config --modversion libsoup-3.0 javascriptcoregtk-4.1
+```
+
 ```sh
 npm ci
 npm run check

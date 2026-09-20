@@ -57,6 +57,15 @@ For local ChromeOS Linux development:
 sudo apt install build-essential curl libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
+If Cargo reports missing `libsoup-3.0` or `javascriptcoregtk-4.1` while
+building Tauri, the WebKitGTK development package was not installed correctly.
+Reinstall `libwebkit2gtk-4.1-dev`, then verify it without setting
+`PKG_CONFIG_PATH`:
+
+```sh
+pkg-config --modversion libsoup-3.0 javascriptcoregtk-4.1
+```
+
 Node.js and Rust are managed by mise in this workspace. You can also use system installations.
 
 ## Run
@@ -95,6 +104,14 @@ To update the local command, launcher entry, and icons after pulling a newer che
 
 ```sh
 npm run update:desktop
+```
+
+This also runs an incremental local Cargo build when the runtime is out of
+date. To refresh only the command, desktop entries, and icons after a build
+has already completed, use:
+
+```sh
+FPASOTERM_SKIP_DESKTOP_BUILD=1 npm run update:desktop
 ```
 
 To update an npm-installed fpasoterm package from the terminal:

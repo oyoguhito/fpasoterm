@@ -18,6 +18,32 @@ const iconsDir = path.join(dataHome, 'icons', 'hicolor');
 const iconSizes = [16, 32, 48, 64, 128, 192, 256, 512];
 const buildStampPath = path.join(root, 'src-tauri', 'target', 'debug', '.fpasoterm-normal-build.json');
 
+// Finds the LLD binary bundled with a standard rustup toolchain. This keeps
+// the final local Tauri/WebKit link fast on Linux ARM64 without requiring a
+// host-wide linker package. Set FPASOTERM_DISABLE_BUNDLED_LLD=1 to opt out.
+function localCargoBuildEnvironment() {
+  const env = { ...process.env };
+  if (process.platform !== 'linux' || env.FPASOTERM_DISABLE_BUNDLED_LLD === '1') {
+    return env;
+  }
+  const rustc = env.RUSTC || 'rustc';
+  const sysroot = childProcess.spawnSync(rustc, ['--print', 'sysroot'], { encoding: 'utf8' });
+  const verbose = childProcess.spawnSync(rustc, ['-vV'], { encoding: 'utf8' });
+  const target = verbose.status === 0 ? /^host: (.+)$/m.exec(verbose.stdout)?.[1]?.trim() : undefined;
+  if (sysroot.status !== 0 || !target) {
+    return env;
+  }
+  const linkerDirectory = path.join(sysroot.stdout.trim(), 'lib', 'rustlib', target, 'bin', 'gcc-ld');
+  if (!fs.existsSync(path.join(linkerDirectory, 'ld.lld'))) {
+    return env;
+  }
+  env.PATH = `${linkerDirectory}${path.delimiter}${env.PATH || ''}`;
+  const lldFlag = '-C link-arg=-fuse-ld=lld';
+  env.RUSTFLAGS = env.RUSTFLAGS ? `${env.RUSTFLAGS} ${lldFlag}` : lldFlag;
+  console.log(`using rustup-bundled LLD: ${linkerDirectory}`);
+  return env;
+}
+
 // Builds a current local Tauri binary so launcher icon starts do not fall back
 // to `tauri dev`, which runs Cargo watch and looks like a failed GUI launch.
 function buildLocalBinary() {
@@ -26,28 +52,13 @@ function buildLocalBinary() {
     return;
   }
 
-  // Tauri's frontend assets are embedded at compile time. Cleaning only this
-  // crate makes update:desktop rebuild renderer-only changes as well.
-  const cleanResult = childProcess.spawnSync(
-    'cargo',
-    ['clean', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml'), '-p', 'fpasoterm'],
-    { stdio: 'inherit' },
-  );
-  if (cleanResult.error && cleanResult.error.code === 'ENOENT') {
-    console.warn('cargo is not available; launcher may fall back to an older local binary');
-    return;
-  }
-  if (cleanResult.error) {
-    throw cleanResult.error;
-  }
-  if (cleanResult.status !== 0) {
-    throw new Error(`cargo clean failed with exit code ${cleanResult.status}`);
-  }
-
+  // build.rs watches the renderer assets, so Cargo rebuilds the embedded
+  // frontend when required. Preserve Cargo's incremental cache: this command
+  // is commonly run after a pull merely to refresh desktop integration.
   const result = childProcess.spawnSync(
     'cargo',
     ['build', '--manifest-path', path.join(root, 'src-tauri', 'Cargo.toml')],
-    { stdio: 'inherit' },
+    { stdio: 'inherit', env: localCargoBuildEnvironment() },
   );
   if (result.error && result.error.code === 'ENOENT') {
     console.warn('cargo is not available; launcher may fall back to Tauri dev until a binary is built');

@@ -13,6 +13,22 @@ target operating system before running the commands below.
 - Windows: Visual Studio Build Tools with **Desktop development with C++** and
   the Microsoft Edge WebView2 Runtime.
 
+On Debian, Ubuntu, or ChromeOS Linux, install the Linux prerequisites with:
+
+```sh
+sudo apt-get install -y build-essential pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
+```
+
+`libwebkit2gtk-4.1-dev` supplies the `libsoup-3.0` and
+`javascriptcoregtk-4.1` pkg-config metadata required by Tauri. If Cargo reports
+that `soup3-sys` or `javascriptcore-rs-sys` cannot find those libraries, install
+the package above; do not set `PKG_CONFIG_PATH` unless using a deliberately
+nonstandard library installation. Verify it with:
+
+```sh
+pkg-config --modversion libsoup-3.0 javascriptcoregtk-4.1
+```
+
 ```sh
 npm ci
 npm run check
