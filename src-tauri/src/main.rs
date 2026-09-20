@@ -25,7 +25,9 @@ use std::process::Child;
 use std::process::Output;
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc, Mutex};
+#[cfg(all(unix, not(target_os = "macos")))]
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
