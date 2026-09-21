@@ -15,8 +15,10 @@ const defaultTerminalFontFamily = `${cjkMonospaceFontFallback}, ${nerdFontFallba
 const legacyMacosTerminalFontFamily = `"SF Mono", Menlo, ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
 // Menlo's box and block glyph metrics match the macOS Terminal renderer more closely.
 const macosTerminalFontFamily = `Menlo, "SF Mono", ui-monospace, SFMono-Regular, ${nerdFontFallback}, ${broadCjkFontFallback}, monospace`;
-// Keep descenders such as g, q, and y visibly separate from the next row.
-const defaultTerminalLineHeight = 1;
+// Leave about one CSS pixel below descenders and underscores at the default
+// font size. This prevents glyphs such as g, q, y, and _ from being clipped
+// by Linux and Windows WebView canvas metrics.
+const defaultTerminalLineHeight = 1.08;
 // Prioritize readable descenders over compact TUI logo rows on macOS.
 const macosTerminalLineHeight = 1;
 const legacyTerminalFontFamily = `${nerdFontFallback}, "Noto Sans Mono CJK JP", "Noto Sans Mono CJK KR", "Noto Sans Mono CJK SC", "Noto Sans CJK JP", "Noto Sans CJK KR", "Noto Sans CJK SC", "Noto Sans CJK TC", "NanumGothicCoding", "BIZ UDGothic", "Hiragino Sans", "Hiragino Kaku Gothic ProN", "Apple SD Gothic Neo", "Malgun Gothic", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace`;
@@ -173,7 +175,9 @@ function migrateLegacyMacosFontFamily(config, platform = process.platform) {
 
 // Migrates previously shipped compact defaults while preserving custom values.
 function migrateLegacyTerminalLineHeight(config, platform = process.platform) {
-  const formerDefaults = platform === 'darwin' ? [0.8, 0.81, 0.82, 0.85, 0.9, 0.92, 1.12] : [0.92, 1.12];
+  const formerDefaults = platform === 'darwin'
+    ? [0.8, 0.81, 0.82, 0.85, 0.9, 0.92, 1.12]
+    : [0.92, 1, 1.12];
   if (formerDefaults.includes(config?.terminal?.lineHeight)) {
     return mergeConfig(config, {
       terminal: {

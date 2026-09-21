@@ -31,6 +31,7 @@ const {
   writeUserConfig,
 } = require(path.join(root, 'src', 'config'));
 const packageJson = require(path.join(root, 'package.json'));
+const releaseLatestUrl = 'https://github.com/oyoguhito/fpasoterm/releases/latest';
 const launcherStartedAt = Number(process.env.FPASOTERM_LAUNCH_STARTED_AT) || Date.now();
 const launcherLogPath = process.env.FPASOTERM_LAUNCHER_LOG || path.join(
   process.platform === 'win32'
@@ -132,6 +133,10 @@ Profile usage:
   List names: fpasoterm --profile-list
   Sample file: --config examples/config/profiles.toml --profile large-font
   Docs: docs/config.en.md#profiles and docs/config.ja.md#profile
+
+Updates:
+  Latest standalone downloads: ${releaseLatestUrl}
+  In fpasoterm, click the URL and confirm to open it in your browser.
 `;
 
 // Appends diagnostics for launcher/icon starts where stdout and stderr are hidden.

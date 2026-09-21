@@ -1,5 +1,9 @@
 # 現時点の既知課題
 
+## ChromeOS Linux での herdr clipboard の経路差
+
+最新の再検証で fpasoterm↔他 application を含む fpasoterm の clipboard bridge は成功したため、fpasoterm 側の一般的な clipboard 経路は既知課題ではありません。外部 application→herdr も成功しており、これは fpasoterm の Paste が OS clipboard を読み、herdr paneへ正しく入力できることを示します。残る失敗行は herdr copy mode→herdr paste で、herdr の値ではなく外部 application の既存値が貼り付いています。Crostiniではherdrと同じnative X11書込みである`xclip`がexit 0でもChromeOS/Chrome shared clipboardへ反映されないことを確認しており、fpasotermがX11書込みを妨げているのではなく、native clipboardからshared clipboardへの橋渡しが不足しています。herdr copy mode→fpasoterm/他 application は現行 build で未再検証です。確認済みの行と clipboard code を変更する前の必須手順は[Clipboard のフローと検証表](clipboard.ja.md)を参照してください。
+
 ## ChromeOS/Baguette のウィンドウ位置
 
 ChromeOS/Baguette では、fpasoterm から desktop runtime window の `x` / `y` 位置を指定しても、実表示には反映されないことを確認しています。調査中、runtime API は `set_position()` で指定位置が適用されたと報告しましたが、実際の画面では compositor/window manager 側で配置されました。

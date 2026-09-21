@@ -1,5 +1,20 @@
 # Known Issues
 
+## ChromeOS Linux Clipboard Divergence with herdr
+
+The latest re-test confirms that the general fpasoterm clipboard bridge,
+including fpasoterm↔another application, works. External application→herdr
+also works: fpasoterm reads the OS clipboard and correctly sends its paste input
+to the herdr pane. The remaining failing row is herdr copy mode→herdr paste: an
+existing external-application value is pasted instead of the herdr value. On
+Crostini, an `xclip` write—the same native X11 path used by herdr—can exit 0
+without updating the ChromeOS/Chrome shared clipboard. This shows that
+fpasoterm is not obstructing X11 writes; the missing bridge is from the native
+clipboard to the shared clipboard. herdr copy mode→fpasoterm/another application
+has not been re-tested in the current build.
+See [Clipboard Flow and Test Matrix](clipboard.en.md) for the current verified
+rows and the mandatory test procedure before changing clipboard code.
+
 ## ChromeOS/Baguette Window Position
 
 ChromeOS/Baguette currently ignores or remaps desktop runtime window `x` / `y` placement for fpasoterm. During testing, the runtime reported that `set_position()` applied the requested position, but the visible window was still placed by the compositor/window manager.

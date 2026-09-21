@@ -165,7 +165,7 @@ impl PluginTcpTarget {
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PluginVncBridgeRequest {
+struct PluginTcpBridgeRequest {
     target: String,
 }
 
@@ -570,6 +570,7 @@ impl Drop for InstanceMarker {
 }
 
 const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --plugin-search [query]   Search official public plugin ports, then exit.\n      --doctor                   Check updates and configuration health, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -l, --list                    List running fpasoterm windows, then exit.\n  -q, --close <pid|title|all>   Close windows by PID, exact title, or all.\n      --broadcast <text>        Send text plus Enter to running local terminal windows.\n      --broadcast-target <pid|title>\n                                Limit Broadcast targets (comma-separated/repeatable).\n      --broadcast-sync          Also send Broadcast through the trusted sync channel.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --plugin-uninstall <file> Remove comma-separated local plugin files, then exit.\n      --plugin-install <port>   Install from GitHub, or --plugin-ports-dir when supplied.\n      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout.\n      --plugin-install-file <path>\n                                Copy one trusted local .js/.ts plugin into User/plugins.\n      --force                   Replace an existing file during a plugin install.\n      --enable                  Enable a plugin installed by one --plugin-install command.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --sync-status              Report folder health, commands, and discovered channels.\n      --sync-clean               Remove expired or abandoned command files.\n      --sync-diagnostics         Print the Markdown sync health report.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -o, --cwd <path>              Start the terminal in this directory. Relative paths are allowed.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nExamples:\n  fpasoterm --cwd .\n  fpasoterm --cwd ~/work/project --title project\n  fpasoterm --broadcast \"git status\" --broadcast-target project\n\nCompletion:\n  fpasoterm --completion-install bash\n  fpasoterm --completion-uninstall bash\n\nProfiles:\n  [profiles.large-font.terminal]\n  fontSize = 18\n  fpasoterm --profile large-font\n";
+const RELEASES_LATEST_URL: &str = "https://github.com/oyoguhito/fpasoterm/releases/latest";
 
 const COMPLETION_BASH: &str = include_str!("../../completions/fpasoterm.bash");
 const COMPLETION_ZSH: &str = include_str!("../../completions/_fpasoterm");
@@ -578,13 +579,16 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 
 // The direct binary has the same core options as the Node launcher.
 fn cli_help_text() -> String {
-    HELP_TEXT.replace(
+    let text = HELP_TEXT.replace(
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
     )
     .replace(
         "Use this local fpasoterm-plugins checkout.",
         "Use this local fpasoterm-plugins checkout or its ports directory.",
+    );
+    format!(
+        "{text}\nUpdates:\n  Latest standalone downloads: {RELEASES_LATEST_URL}\n  In fpasoterm, click the URL and confirm to open it in your browser.\n"
     )
 }
 
@@ -837,6 +841,7 @@ fn main() {
             clipboard_write_osc52,
             plugin_web_panel_frame_url,
             plugin_vnc_bridge_open,
+            plugin_rdp_bridge_open,
             open_external_url,
             app_version,
             update_check,
@@ -3134,7 +3139,8 @@ fn default_terminal_font_size() -> u32 {
     terminal_font_size_for(env::consts::OS, env::consts::ARCH)
 }
 
-// Uses compact glyph rows so block-art logos do not show a visible gap.
+// Leaves a small lower glyph margin so underscores and descenders are not
+// clipped by the WebView canvas on Linux and Windows.
 fn default_terminal_line_height() -> f64 {
     terminal_line_height_for(env::consts::OS, env::consts::ARCH)
 }
@@ -3181,6 +3187,7 @@ fn migrate_legacy_terminal_line_height(runtime: &mut RuntimeConfig) {
         .get("lineHeight")
         .and_then(serde_json::Value::as_f64);
     let former_default = line_height == Some(1.12)
+        || (env::consts::OS != "macos" && line_height == Some(1.0))
         || (env::consts::OS == "macos" && line_height == Some(0.81))
         || (env::consts::OS == "macos" && line_height == Some(0.82))
         || (env::consts::OS == "macos" && line_height == Some(0.85))
@@ -3242,7 +3249,7 @@ fn terminal_line_height_for(platform: &str, _architecture: &str) -> f64 {
     if platform == "macos" {
         1.0
     } else {
-        1.0
+        1.08
     }
 }
 
@@ -7853,6 +7860,29 @@ fn read_clipboard_with_commands(commands: &[(&str, &[&str])]) -> Result<String, 
     Err(errors.join("; "))
 }
 
+// Lists the advertised Wayland clipboard MIME types.  Crostini commonly has
+// both X11 and Wayland clipboard owners, so whether `wl-copy` happens to be
+// installed is not enough to decide which selection holds the newest text.
+#[cfg(all(unix, not(target_os = "macos")))]
+fn wayland_clipboard_types() -> Vec<String> {
+    match clipboard_read_output("wl-paste", &["--list-types"]) {
+        Ok(output) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(str::trim)
+            .filter(|mime_type| !mime_type.is_empty())
+            .map(ToOwned::to_owned)
+            .collect(),
+        _ => Vec::new(),
+    }
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
+fn wayland_types_include_utf8_text(types: &[String]) -> bool {
+    types
+        .iter()
+        .any(|mime_type| mime_type.eq_ignore_ascii_case("text/plain;charset=utf-8"))
+}
+
 #[cfg(target_os = "windows")]
 // Opens the Windows clipboard for a short native read/write operation.
 fn open_windows_clipboard() -> Result<(), String> {
@@ -8150,11 +8180,37 @@ fn clipboard_read() -> Result<String, String> {
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        read_clipboard_with_commands(&[
-            ("wl-paste", &["--no-newline", "--type", "text/plain"]),
-            ("xclip", &["-selection", "clipboard", "-out"]),
-            ("xsel", &["--clipboard", "--output"]),
-        ])
+        // herdr writes its copied text as this exact MIME type via wl-copy.
+        // Read it before X11 only when it is genuinely offered; otherwise an
+        // old Wayland selection must not hide a newer X11 UTF8_STRING value.
+        let wayland_has_utf8_text = wayland_types_include_utf8_text(&wayland_clipboard_types());
+        if wayland_has_utf8_text {
+            read_clipboard_with_commands(&[
+                (
+                    "wl-paste",
+                    &["--no-newline", "--type", "text/plain;charset=utf-8"],
+                ),
+                ("wl-paste", &["--no-newline", "--type", "text/plain"]),
+                (
+                    "xclip",
+                    &["-selection", "clipboard", "-out", "-target", "UTF8_STRING"],
+                ),
+                ("xsel", &["--clipboard", "--output"]),
+            ])
+        } else {
+            read_clipboard_with_commands(&[
+                (
+                    "xclip",
+                    &["-selection", "clipboard", "-out", "-target", "UTF8_STRING"],
+                ),
+                ("xsel", &["--clipboard", "--output"]),
+                (
+                    "wl-paste",
+                    &["--no-newline", "--type", "text/plain;charset=utf-8"],
+                ),
+                ("wl-paste", &["--no-newline", "--type", "text/plain"]),
+            ])
+        }
     }
 }
 
@@ -8435,15 +8491,15 @@ fn plugin_web_panel_frame_url(state: State<AppState>, url: String) -> Result<Str
     ))
 }
 
-trait VncRemoteStream: AsyncRead + AsyncWrite + Unpin + Send {}
-impl<T: AsyncRead + AsyncWrite + Unpin + Send> VncRemoteStream for T {}
+trait PluginRemoteStream: AsyncRead + AsyncWrite + Unpin + Send {}
+impl<T: AsyncRead + AsyncWrite + Unpin + Send> PluginRemoteStream for T {}
 
 // Connects the declared remote endpoint. `tls://` always uses the operating
 // system trust store and rustls hostname verification; this bridge has no
 // insecure-certificate bypass.
 async fn connect_plugin_tcp_target(
     target: &PluginTcpTarget,
-) -> Result<Box<dyn VncRemoteStream>, String> {
+) -> Result<Box<dyn PluginRemoteStream>, String> {
     let address = format!("{}:{}", target.host, target.port);
     let stream = timeout(Duration::from_secs(10), TokioTcpStream::connect(&address))
         .await
@@ -8482,9 +8538,10 @@ async fn connect_plugin_tcp_target(
     Ok(Box::new(stream))
 }
 
-async fn relay_vnc_websocket(
+async fn relay_plugin_websocket(
     websocket: tokio_tungstenite::WebSocketStream<TokioTcpStream>,
-    remote: Box<dyn VncRemoteStream>,
+    remote: Box<dyn PluginRemoteStream>,
+    bridge_name: &str,
 ) -> Result<(), String> {
     let (mut websocket_writer, mut websocket_reader) = websocket.split();
     let (mut remote_reader, mut remote_writer) = tokio::io::split(remote);
@@ -8492,15 +8549,15 @@ async fn relay_vnc_websocket(
     loop {
         tokio::select! {
             message = websocket_reader.next() => match message {
-                Some(Ok(Message::Binary(bytes))) => remote_writer.write_all(&bytes).await.map_err(|error| format!("VNC write failed: {error}"))?,
+                Some(Ok(Message::Binary(bytes))) => remote_writer.write_all(&bytes).await.map_err(|error| format!("{bridge_name} write failed: {error}"))?,
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(Message::Ping(bytes))) => websocket_writer.send(Message::Pong(bytes)).await.map_err(|error| error.to_string())?,
                 Some(Ok(Message::Pong(_))) => {},
-                Some(Ok(_)) => return Err("VNC bridge accepts binary WebSocket messages only".to_string()),
+                Some(Ok(_)) => return Err(format!("{bridge_name} bridge accepts binary WebSocket messages only")),
                 Some(Err(error)) => return Err(format!("local WebSocket read failed: {error}")),
             },
             read = remote_reader.read(&mut buffer) => {
-                let read = read.map_err(|error| format!("VNC read failed: {error}"))?;
+                let read = read.map_err(|error| format!("{bridge_name} read failed: {error}"))?;
                 if read == 0 { break; }
                 websocket_writer.send(Message::Binary(buffer[..read].to_vec())).await.map_err(|error| format!("local WebSocket write failed: {error}"))?;
             }
@@ -8510,15 +8567,21 @@ async fn relay_vnc_websocket(
     Ok(())
 }
 
-async fn serve_plugin_vnc_bridge(listener: TcpListener, target: PluginTcpTarget, token: String) {
-    // `plugin_vnc_bridge_open` is invoked on the WebView IPC thread, which is
+async fn serve_plugin_tcp_websocket_bridge(
+    listener: TcpListener,
+    target: PluginTcpTarget,
+    token: String,
+    path_segment: &'static str,
+    bridge_name: &'static str,
+) {
+    // Plugin bridge commands are invoked on the WebView IPC thread, which is
     // not a Tokio context on Linux/WebKit. Convert the standard loopback
     // listener only after entering Tauri's async runtime; doing it earlier
     // panics with "there is no reactor running" and aborts the GUI process.
     let listener = match TokioTcpListener::from_std(listener) {
         Ok(listener) => listener,
         Err(error) => {
-            eprintln!("could not initialize plugin VNC bridge runtime: {error}");
+            eprintln!("could not initialize plugin {bridge_name} bridge runtime: {error}");
             return;
         }
     };
@@ -8542,7 +8605,7 @@ async fn serve_plugin_vnc_bridge(listener: TcpListener, target: PluginTcpTarget,
         return;
     };
     if requested_path.lock().ok().as_deref().map(String::as_str)
-        != Some(format!("/vnc/{token}").as_str())
+        != Some(format!("/{path_segment}/{token}").as_str())
     {
         let _ = websocket.close(None).await;
         return;
@@ -8550,21 +8613,29 @@ async fn serve_plugin_vnc_bridge(listener: TcpListener, target: PluginTcpTarget,
     let remote = match connect_plugin_tcp_target(&target).await {
         Ok(remote) => remote,
         Err(error) => {
-            eprintln!("plugin VNC bridge {}: {error}", target.canonical());
+            eprintln!(
+                "plugin {bridge_name} bridge {}: {error}",
+                target.canonical()
+            );
             let _ = websocket.close(None).await;
             return;
         }
     };
-    if let Err(error) = relay_vnc_websocket(websocket, remote).await {
-        eprintln!("plugin VNC bridge {}: {error}", target.canonical());
+    if let Err(error) = relay_plugin_websocket(websocket, remote, bridge_name).await {
+        eprintln!(
+            "plugin {bridge_name} bridge {}: {error}",
+            target.canonical()
+        );
     }
 }
 
-#[tauri::command]
-fn plugin_vnc_bridge_open(request: PluginVncBridgeRequest) -> Result<String, String> {
+fn plugin_tcp_websocket_bridge_open(
+    request: PluginTcpBridgeRequest,
+    bridge_name: &'static str,
+    path_segment: &'static str,
+) -> Result<String, String> {
     let target = parse_plugin_tcp_target(&request.target).ok_or_else(|| {
-        "VNC bridge target must be an exact tcp://host:port or tls://host:port declaration"
-            .to_string()
+        format!("{bridge_name} bridge target must be an exact tcp://host:port or tls://host:port declaration")
     })?;
     let target_text = target.canonical();
     if !runtime_config().plugin_urls.iter().any(|plugin| {
@@ -8574,11 +8645,11 @@ fn plugin_vnc_bridge_open(request: PluginVncBridgeRequest) -> Result<String, Str
             .any(|allowed| allowed == &target_text)
     }) {
         return Err(format!(
-            "VNC bridge target is not declared by an enabled plugin: {target_text}"
+            "{bridge_name} bridge target is not declared by an enabled plugin: {target_text}"
         ));
     }
     let listener = TcpListener::bind("127.0.0.1:0")
-        .map_err(|error| format!("could not bind local VNC bridge: {error}"))?;
+        .map_err(|error| format!("could not bind local {bridge_name} bridge: {error}"))?;
     listener
         .set_nonblocking(true)
         .map_err(|error| error.to_string())?;
@@ -8589,8 +8660,24 @@ fn plugin_vnc_bridge_open(request: PluginVncBridgeRequest) -> Result<String, Str
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
-    tauri::async_runtime::spawn(serve_plugin_vnc_bridge(listener, target, token.clone()));
-    Ok(format!("ws://{address}/vnc/{token}"))
+    tauri::async_runtime::spawn(serve_plugin_tcp_websocket_bridge(
+        listener,
+        target,
+        token.clone(),
+        path_segment,
+        bridge_name,
+    ));
+    Ok(format!("ws://{address}/{path_segment}/{token}"))
+}
+
+#[tauri::command]
+fn plugin_vnc_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, String> {
+    plugin_tcp_websocket_bridge_open(request, "VNC", "vnc")
+}
+
+#[tauri::command]
+fn plugin_rdp_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, String> {
+    plugin_tcp_websocket_bridge_open(request, "RDP", "rdp")
 }
 
 #[tauri::command]
@@ -8670,10 +8757,9 @@ fn npm_update_check_text(status: &NpmUpdateCheck) -> String {
     ];
     if status.update_available {
         lines.push("status: update available".to_string());
-        lines.push(
-            "update: download the latest standalone artifact from https://github.com/oyoguhito/fpasoterm/releases/latest"
-                .to_string(),
-        );
+        lines.push(format!(
+            "update: download the latest standalone artifact from {RELEASES_LATEST_URL}"
+        ));
     } else if status.local_build_newer {
         lines.push("status: local build is newer than npm latest".to_string());
     } else {
@@ -8701,7 +8787,7 @@ fn doctor_cli() {
     match npm_update_check() {
         Ok(status) if status.update_available => {
             print_cli_text(&format!(
-                "- npm latest: {}\n- update: available; download the latest standalone artifact from https://github.com/oyoguhito/fpasoterm/releases/latest\n",
+                "- npm latest: {}\n- update: available; download the latest standalone artifact from {RELEASES_LATEST_URL}\n",
                 status.latest
             ));
         }
@@ -9311,6 +9397,19 @@ fn window_set_bounds(app: AppHandle, bounds: WindowBoundsRequest) -> Result<(), 
 mod tests {
     use super::*;
 
+    #[cfg(all(unix, not(target_os = "macos")))]
+    #[test]
+    fn wayland_utf8_clipboard_type_is_detected_without_case_sensitivity() {
+        let types = vec![
+            "text/plain".to_string(),
+            "TEXT/PLAIN;CHARSET=UTF-8".to_string(),
+        ];
+        assert!(wayland_types_include_utf8_text(&types));
+        assert!(!wayland_types_include_utf8_text(&[
+            "UTF8_STRING".to_string()
+        ]));
+    }
+
     #[test]
     fn youtube_loopback_only_accepts_supported_embed_urls() {
         assert_eq!(
@@ -9730,7 +9829,7 @@ installPath = "appearance/other.ts"
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
         assert_eq!(terminal_font_size_for("windows", "x86_64"), 14);
         assert_eq!(terminal_line_height_for("macos", "aarch64"), 1.0);
-        assert_eq!(terminal_line_height_for("linux", "x86_64"), 1.0);
+        assert_eq!(terminal_line_height_for("linux", "x86_64"), 1.08);
     }
 
     #[test]

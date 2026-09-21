@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.8
+
+- Added the reviewed-plugin RDP WebAssembly bridge API. RDP and VNC now share
+  one constrained implementation that opens only a user-confirmed, one-time
+  loopback WebSocket for an exact `allowed-tcp-targets` declaration.
+- Documented the RDP bridge API and the local clipboard/OSC 52 behavior,
+  including an upstream-facing Herdr clipboard-mirroring proposal.
+- Made Help URLs open in the system browser, improved Diagnostics filtering,
+  terminal glyph visibility, and development-window controls.
+
 ## 1.6.7
 
 - Made terminal OSC 52 clipboard payloads available through the explicit

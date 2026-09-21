@@ -75,17 +75,20 @@ Plugins that use `openWebPanel` must also declare their HTTPS frame origins:
 // @fpasoterm-plugin allowed-origins: https://www.youtube-nocookie.com
 ```
 
-Plugins that use the local VNC bridge must declare every exact TCP endpoint in
+Plugins that use a local VNC or RDP bridge must declare every exact TCP endpoint in
 their source. Wildcards, paths, credentials, and port ranges are not accepted.
 
 ```ts
 // @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900, tls://vnc.example.test:5901
 ```
 
-`openVncBridge({ target })` asks the user for every connection and returns one
+`openVncBridge({ target })` and `openRdpBridge({ target })` ask the user for every
+connection and return one
 short-lived `ws://127.0.0.1/...` URL. The native bridge accepts that URL once,
 then relays binary WebSocket frames to the exact declared endpoint. It is not a
-general TCP proxy. `tls://` performs system-root certificate and server-name
+general TCP proxy. The two API names use the same constrained transport but
+separate one-time URL paths, so an RDP WebAssembly client cannot consume a VNC
+URL (or the reverse). `tls://` performs system-root certificate and server-name
 validation with no insecure override. `tcp://` is deliberately supported for
 normal local VNC/RFB, but is unencrypted and should be limited to localhost or
 a trusted network. Credentials are requested through `promptSecret()` and are
@@ -291,6 +294,8 @@ provides:
   the returned release function when the claim is no longer needed.
 - `openVncBridge({ target })`: after an explicit user action and confirmation,
   open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
+- `openRdpBridge({ target })`: the same declared-target, confirmed one-time
+  loopback transport for a reviewed RDP WebAssembly client.
 - `promptSecret({ title, message, approve })`: request a secret in memory only;
   cancellation returns `null`.
 - `promptText({ title, message, approve })`: request non-secret connection text
