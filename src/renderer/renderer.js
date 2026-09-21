@@ -5310,6 +5310,27 @@ for (const handle of document.querySelectorAll('[data-resize-direction]')) {
   });
 }
 
+// Reports a bootstrap failure even when the regular backend adapter was not
+// installed yet. Without this, a failure before loadRuntimeConfig() leaves a
+// transparent native window that appears to contain no terminal at all.
+function reportRendererBootstrapFailure(error) {
+  const detail = error?.stack || error?.message || String(error);
+  const message = `renderer startup failed: ${detail}`;
+  console.error(message);
+
+  // The adapter may be the failing step, so use Tauri's injected invoke
+  // function directly as a best-effort fallback instead of window.fpasoterm.
+  const invoke = window.__TAURI__?.core?.invoke;
+  if (typeof invoke === 'function') {
+    invoke('diagnostics_log', { message }).catch(() => {});
+  }
+
+  if (terminalElement) {
+    terminalElement.textContent = message;
+    terminalElement.classList.add('terminal-error');
+  }
+}
+
 // Initializes config, terminal, plugin loading, IPC handlers, and first PTY startup.
 async function initialize() {
   installTauriApiAdapter();
@@ -5411,4 +5432,4 @@ Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   focusTerminalInput();
 }
 
-initialize();
+initialize().catch(reportRendererBootstrapFailure);
