@@ -2600,6 +2600,14 @@ function localCargoBuildEnvironment() {
 function buildLocalTauriBinary(options) {
   appendLaunchPhase('cargo-build-start');
   let logFd;
+  const closeLauncherLog = () => {
+    if (logFd === undefined) return;
+    try {
+      fs.closeSync(logFd);
+    } finally {
+      logFd = undefined;
+    }
+  };
   let stdio = options.foreground ? 'inherit' : 'ignore';
   if (!options.foreground) {
     try {
@@ -2751,6 +2759,29 @@ function applyWindowRuntimeOverrides(windowConfig, env) {
   }
 }
 
+// Keeps a detached desktop launch attached just long enough to distinguish a
+// successful spawn from a process that exits before its window can appear.
+// Without this check the launcher could print "startup complete" even when
+// Tauri had already failed during native/WebKit initialization.
+function waitForDesktopStartup(child, timeoutMs = 1000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      child.removeListener('exit', onExit);
+      child.removeListener('error', onError);
+      resolve(result);
+    };
+    const onExit = (code, signal) => finish({ exited: true, code, signal });
+    const onError = (error) => finish({ exited: true, error });
+    const timer = setTimeout(() => finish({ exited: false }), timeoutMs);
+    child.once('exit', onExit);
+    child.once('error', onError);
+  });
+}
+
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
   validateLaunchProfile(options);
@@ -2825,21 +2856,29 @@ async function launch(options) {
   appendLaunchPhase('desktop-spawned');
   child.on('error', (error) => {
     appendLauncherLog(`launcher child error=${error.message}`);
-    if (logFd !== undefined) {
-      fs.closeSync(logFd);
-    }
+    closeLauncherLog();
+  });
+  child.on('exit', (code, signal) => {
+    appendLauncherLog(`launcher child exit code=${code ?? ''} signal=${signal ?? ''}`);
+    closeLauncherLog();
   });
 
   if (!options.foreground) {
+    const startup = await waitForDesktopStartup(child);
+    if (startup.exited) {
+      const detail = startup.error
+        ? startup.error.message
+        : startup.signal
+          ? `signal ${startup.signal}`
+          : `exit code ${startup.code ?? ''}`;
+      appendLauncherLog(`launcher child exited during startup ${detail}`);
+      console.error(`fpasoterm: native window exited during startup (${detail}).`);
+      console.error('fpasoterm: retry with --foreground --console-diagnostics for the native error.');
+      return;
+    }
     if (preparedBinary && process.stdout.isTTY) {
       process.stdout.write(`fpasoterm: startup complete; window process pid ${child.pid ?? 'unknown'}.\n`);
     }
-    child.on('exit', (code, signal) => {
-      appendLauncherLog(`launcher child exit code=${code ?? ''} signal=${signal ?? ''}`);
-      if (logFd !== undefined) {
-        fs.closeSync(logFd);
-      }
-    });
     child.unref();
     return;
   }
