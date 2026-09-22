@@ -21,7 +21,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{IpAddr, TcpListener, TcpStream};
+use std::net::{IpAddr, SocketAddr, TcpListener, TcpStream, ToSocketAddrs};
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Child;
@@ -8877,6 +8877,35 @@ fn rdp_tls_server_name(target: &PluginTcpTarget) -> Result<ServerName<'static>, 
         .map_err(|_| format!("RDP target has an invalid server name: {}", target.host))
 }
 
+// Tauri owns the Tokio runtime used by command handlers.  Establish the
+// initial remote RDP socket with the platform socket API on a blocking worker,
+// then hand its nonblocking descriptor to Tokio for TLS and relaying.  This
+// keeps RDP's explicit 10-second connection timeout independent of any
+// WebView/Tauri runtime driver state.
+fn connect_rdp_socket_blocking(host: String, port: u16) -> Result<TcpStream, String> {
+    let addresses = if let Ok(address) = host.parse::<IpAddr>() {
+        vec![SocketAddr::new(address, port)]
+    } else {
+        (host.as_str(), port)
+            .to_socket_addrs()
+            .map_err(|error| format!("could not resolve RDP target {host}: {error}"))?
+            .collect()
+    };
+    let mut last_error = None;
+    for address in addresses {
+        match TcpStream::connect_timeout(&address, Duration::from_secs(10)) {
+            Ok(stream) => return Ok(stream),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err(format!(
+        "could not connect to RDP target {host}:{port}: {}",
+        last_error
+            .map(|error| error.to_string())
+            .unwrap_or_else(|| "no socket address was resolved".to_string())
+    ))
+}
+
 async fn connect_rdp_clean_path_target(
     target: &PluginTcpTarget,
     x224_request: &[u8],
@@ -8891,11 +8920,20 @@ async fn connect_rdp_clean_path_target(
     if target.protocol != "tcp" {
         return Err("the RDP local bridge currently requires a tcp:// target".to_string());
     }
-    let address = format!("{}:{}", target.host, target.port);
-    let mut stream = timeout(Duration::from_secs(10), TokioTcpStream::connect(&address))
-        .await
-        .map_err(|_| format!("connection timed out: {}", target.canonical()))?
-        .map_err(|error| format!("could not connect to {}: {error}", target.canonical()))?;
+    let host = target.host.clone();
+    let port = target.port;
+    let stream = timeout(
+        Duration::from_secs(12),
+        tokio::task::spawn_blocking(move || connect_rdp_socket_blocking(host, port)),
+    )
+    .await
+    .map_err(|_| format!("connection timed out: {}", target.canonical()))?
+    .map_err(|error| format!("RDP connection worker failed: {error}"))??;
+    stream
+        .set_nonblocking(true)
+        .map_err(|error| format!("could not configure RDP socket: {error}"))?;
+    let mut stream = TokioTcpStream::from_std(stream)
+        .map_err(|error| format!("could not adopt RDP socket into the relay: {error}"))?;
     timeout(Duration::from_secs(10), stream.write_all(x224_request))
         .await
         .map_err(|_| "timed out sending RDP X.224 request".to_string())?
