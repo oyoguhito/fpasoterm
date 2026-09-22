@@ -176,6 +176,8 @@ struct DiagnosticsConfig {
     debug_keys: bool,
     plugin_activity: bool,
     console_diagnostics: bool,
+    #[serde(default)]
+    opaque_terminal: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -569,7 +571,7 @@ impl Drop for InstanceMarker {
     }
 }
 
-const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --plugin-search [query]   Search official public plugin ports, then exit.\n      --doctor                   Check updates and configuration health, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -l, --list                    List running fpasoterm windows, then exit.\n  -q, --close <pid|title|all>   Close windows by PID, exact title, or all.\n      --broadcast <text>        Send text plus Enter to running local terminal windows.\n      --broadcast-target <pid|title>\n                                Limit Broadcast targets (comma-separated/repeatable).\n      --broadcast-sync          Also send Broadcast through the trusted sync channel.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --plugin-uninstall <file> Remove comma-separated local plugin files, then exit.\n      --plugin-install <port>   Install from GitHub, or --plugin-ports-dir when supplied.\n      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout.\n      --plugin-install-file <path>\n                                Copy one trusted local .js/.ts plugin into User/plugins.\n      --force                   Replace an existing file during a plugin install.\n      --enable                  Enable a plugin installed by one --plugin-install command.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --sync-status              Report folder health, commands, and discovered channels.\n      --sync-clean               Remove expired or abandoned command files.\n      --sync-diagnostics         Print the Markdown sync health report.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -o, --cwd <path>              Start the terminal in this directory. Relative paths are allowed.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nExamples:\n  fpasoterm --cwd .\n  fpasoterm --cwd ~/work/project --title project\n  fpasoterm --broadcast \"git status\" --broadcast-target project\n\nCompletion:\n  fpasoterm --completion-install bash\n  fpasoterm --completion-uninstall bash\n\nProfiles:\n  [profiles.large-font.terminal]\n  fontSize = 18\n  fpasoterm --profile large-font\n";
+const HELP_TEXT: &str = "Usage: fpasoterm [options]\n\nOptions:\n  -h, --help                    Show this help.\n  -v, --version                 Show the version and build commit.\n      --update-check             Compare the installed version with npm latest, then exit.\n      --plugin-search [query]   Search official public plugin ports, then exit.\n      --doctor                   Check updates and configuration health, then exit.\n      --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.\n      --completion-install <shell>\n                                Install persistent command completion for a shell.\n      --completion-uninstall <shell>\n                                Remove fpasoterm's persistent command completion.\n  -l, --list                    List running fpasoterm windows, then exit.\n  -q, --close <pid|title|all>   Close windows by PID, exact title, or all.\n      --broadcast <text>        Send text plus Enter to running local terminal windows.\n      --broadcast-target <pid|title>\n                                Limit Broadcast targets (comma-separated/repeatable).\n      --broadcast-sync          Also send Broadcast through the trusted sync channel.\n  -d, --dev                     Force a local debug-binary rebuild when using the Node launcher.\n  -F, --foreground              Keep the launcher attached to the current console.\n  -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.\n      --opaque-terminal         Force an opaque WebView background for rendering diagnostics.\n  -c, --config <path>           Use a specific config.toml for this launch.\n  -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.\n      --profile-list            List available named profiles, then exit.\n      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugin-path             Print the active User/plugins directory, then exit.\n      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n      --plugin-uninstall <file> Remove comma-separated local plugin files, then exit.\n      --plugin-install <port>   Install from GitHub, or --plugin-ports-dir when supplied.\n      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout.\n      --plugin-install-file <path>\n                                Copy one trusted local .js/.ts plugin into User/plugins.\n      --force                   Replace an existing file during a plugin install.\n      --enable                  Enable a plugin installed by one --plugin-install command.\n      --enable-plugin <names>   Enable comma-separated/repeatable plugin names, then exit.\n      --disable-plugin <names>  Disable comma-separated/repeatable plugin names, then exit.\n      --plugin-enable-all       Enable every discovered User/plugins .js/.ts file, then exit.\n      --plugin-disable-all      Disable every plugin without deleting plugin files, then exit.\n      --plugin-enable <names>   Alias for --enable-plugin.\n      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config             Print resolved settings and plugin load status, then exit.\n      --config-check             Validate config.toml and report warnings, then exit.\n      --config-path              Print the active config.toml path, then exit.\n      --config-example           Print the active config.toml.example contents, then exit.\n      --diagnostics              Print a Markdown diagnostics report, then exit.\n      --open-log-dir             Open the configured terminal log directory, then exit.\n      --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.\n      --update-config           Add missing default settings and back up config.toml, then exit.\n      --prune-config            Remove unsupported settings and back up config.toml, then exit.\n      --sync-status              Report folder health, commands, and discovered channels.\n      --sync-clean               Remove expired or abandoned command files.\n      --sync-diagnostics         Print the Markdown sync health report.\n  -s, --shell <command>         Override the configured shell for this launch.\n  -o, --cwd <path>              Start the terminal in this directory. Relative paths are allowed.\n  -e, --command <command>       Send a command to the shell after launch.\n  -t, --title <text>            Override the titlebar title for this launch.\n  -b, --titlebar-color <color>  Override the custom titlebar color for this launch.\n  -r, --reset-window-state      Delete saved window size, then exit.\n  -R, --reset-config            Rename config.toml, restore defaults and default size, then exit.\n  -W, --width <px>              Override the configured window width for this launch.\n  -H, --height <px>             Override the configured window height for this launch.\n  -z, --size <width>x<height>   Override both window dimensions for this launch.\n  -k, --debug-keys              Enable key/composition diagnostics.\n      --disable-dmabuf          Set WEBKIT_DISABLE_DMABUF_RENDERER=1 for Linux WebKitGTK diagnostics.\n\nExamples:\n  fpasoterm --cwd .\n  fpasoterm --cwd ~/work/project --title project\n  fpasoterm --broadcast \"git status\" --broadcast-target project\n\nCompletion:\n  fpasoterm --completion-install bash\n  fpasoterm --completion-uninstall bash\n\nProfiles:\n  [profiles.large-font.terminal]\n  fontSize = 18\n  fpasoterm --profile large-font\n";
 const RELEASES_LATEST_URL: &str = "https://github.com/oyoguhito/fpasoterm/releases/latest";
 
 const COMPLETION_BASH: &str = include_str!("../../completions/fpasoterm.bash");
@@ -787,6 +789,14 @@ fn main() {
                     config.config.window.min_width,
                     config.config.window.min_height,
                 )));
+                if config
+                    .diagnostics
+                    .as_ref()
+                    .map(|diagnostics| diagnostics.opaque_terminal)
+                    .unwrap_or(false)
+                {
+                    force_opaque_webview_surface(app.handle(), &window);
+                }
                 schedule_startup_size_restore(
                     app.handle().clone(),
                     window,
@@ -917,6 +927,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--prune-config",
         "--debug-keys",
         "-k",
+        "--opaque-terminal",
         "--disable-dmabuf",
     ];
     const VALUE_OPTIONS: &[&str] = &[
@@ -1240,6 +1251,9 @@ fn apply_direct_cli_env_overrides() {
     if cli_has_flag(&["--plugin-activity"]) {
         env::set_var("FPASOTERM_PLUGIN_ACTIVITY", "1");
     }
+    if cli_has_flag(&["--opaque-terminal"]) {
+        env::set_var("FPASOTERM_DEBUG_OPAQUE_TERMINAL", "1");
+    }
     if cli_has_flag(&["--disable-dmabuf"]) {
         env::set_var("FPASOTERM_DISABLE_DMABUF", "1");
     }
@@ -1313,6 +1327,40 @@ fn schedule_startup_size_restore(
             install_window_state_persistence(event_app, window, state_path, remember);
         });
     });
+}
+
+// Applies a temporary, native-injected background so a transparent WebView can
+// be diagnosed without editing the user's persistent terminal appearance.
+fn force_opaque_webview_surface(app: &AppHandle, window: &WebviewWindow) {
+    const SCRIPT: &str = r#"(() => {
+  const apply = () => {
+    const id = 'fpasoterm-opaque-terminal-diagnostic';
+    let style = document.getElementById(id);
+    if (!style) {
+      style = document.createElement('style');
+      style.id = id;
+      style.textContent = 'html, body, #terminal { background: #101317 !important; }';
+      (document.head || document.documentElement).appendChild(style);
+    }
+    document.documentElement.style.setProperty('background', '#101317', 'important');
+    if (document.body) {
+      document.body.style.setProperty('background', '#101317', 'important');
+    }
+  };
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', apply, { once: true });
+  } else {
+    apply();
+  }
+})();"#;
+
+    match window.eval(SCRIPT) {
+        Ok(()) => append_diagnostic(app, "opaque terminal diagnostic CSS requested"),
+        Err(error) => append_diagnostic(
+            app,
+            &format!("opaque terminal diagnostic CSS request failed: {error}"),
+        ),
+    }
 }
 
 // Reads the timestamp of the latest cross-process Tile request.
@@ -3597,6 +3645,8 @@ fn default_runtime_config() -> RuntimeConfig {
                 || cli_has_flag(&["--plugin-activity"]),
             console_diagnostics: env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
                 || cli_has_flag(&["--console-diagnostics", "-C"]),
+            opaque_terminal: env::var("FPASOTERM_DEBUG_OPAQUE_TERMINAL").as_deref() == Ok("1")
+                || cli_has_flag(&["--opaque-terminal"]),
         }),
         plugin_command: direct_plugin_command_request(),
     }

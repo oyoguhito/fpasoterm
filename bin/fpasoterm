@@ -61,6 +61,7 @@ Options:
   -d, --dev                     Force an incremental local debug-binary rebuild and launch.
   -F, --foreground              Keep the launcher attached to the current console.
   -C, --console-diagnostics     Print diagnostics to stderr as well as the log file.
+      --opaque-terminal         Force an opaque WebView background for rendering diagnostics.
   -c, --config <path>           Use a specific config.toml for this launch.
   -p, --profile <name>          Apply a named [profiles.<name>] overlay for this launch.
       --profile-list            List available named profiles, then exit.
@@ -537,6 +538,11 @@ function parseArgs(argv) {
       continue;
     }
 
+    if (arg === '--opaque-terminal') {
+      env.FPASOTERM_DEBUG_OPAQUE_TERMINAL = '1';
+      continue;
+    }
+
     if (arg === '--disable-dmabuf') {
       env.FPASOTERM_DISABLE_DMABUF = '1';
       env.WEBKIT_DISABLE_DMABUF_RENDERER = '1';
@@ -685,7 +691,7 @@ function validateArgs(argv) {
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--force', '--enable',
-    '--debug-keys', '-k', '--plugin-activity', '--disable-dmabuf', '--broadcast-sync',
+    '--debug-keys', '-k', '--plugin-activity', '--opaque-terminal', '--disable-dmabuf', '--broadcast-sync',
   ]);
   const valueOptions = new Set([
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--cwd', '-o', '--command', '-e', '--title', '-t',
