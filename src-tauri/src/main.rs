@@ -4412,6 +4412,10 @@ const PUBLIC_PLUGIN_PORTS_RAW_URL: &str =
     "https://raw.githubusercontent.com/oyoguhito/fpasoterm-plugins/main";
 const PUBLIC_PLUGIN_MANIFEST_LIMIT: u64 = 64 * 1024;
 const PUBLIC_PLUGIN_SOURCE_LIMIT: u64 = 1024 * 1024;
+// A reviewed port may opt into a larger bundled source, for example a WebAssembly
+// client. Keeping this separate preserves the conservative limit for arbitrary
+// local plugin files and for ports that do not explicitly need an exception.
+const PUBLIC_PLUGIN_MAX_DECLARED_SOURCE_LIMIT: u64 = 8 * 1024 * 1024;
 
 // Holds the narrow manifest fields accepted from the official public ports tree.
 struct PublicPluginPort {
@@ -4420,6 +4424,7 @@ struct PublicPluginPort {
     min_fpasoterm_version: String,
     source: String,
     install_path: String,
+    source_limit: u64,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -4618,12 +4623,29 @@ fn parse_public_plugin_manifest(
     {
         return Err("public port manifest has an invalid installPath".to_string());
     }
+    let source_limit = match port.get("maxSourceBytes") {
+        None => PUBLIC_PLUGIN_SOURCE_LIMIT,
+        Some(value) => value
+            .as_integer()
+            .and_then(|value| u64::try_from(value).ok())
+            .filter(|value| {
+                (*value >= PUBLIC_PLUGIN_SOURCE_LIMIT)
+                    && (*value <= PUBLIC_PLUGIN_MAX_DECLARED_SOURCE_LIMIT)
+            })
+            .ok_or_else(|| {
+                format!(
+                    "public port manifest port.maxSourceBytes must be an integer from {} to {}",
+                    PUBLIC_PLUGIN_SOURCE_LIMIT, PUBLIC_PLUGIN_MAX_DECLARED_SOURCE_LIMIT
+                )
+            })?,
+    };
     Ok(PublicPluginPort {
         id,
         version: required("version")?,
         min_fpasoterm_version: required("minFpasotermVersion")?,
         source: source_name,
         install_path,
+        source_limit,
     })
 }
 
@@ -4728,7 +4750,7 @@ fn install_public_plugin_port(
     }
     let source = download_public_plugin_file(
         &format!("ports/{}/{}", port.id, port.source),
-        PUBLIC_PLUGIN_SOURCE_LIMIT,
+        port.source_limit,
     )?;
     install_plugin_source(config_path, &port, source, force)
 }
@@ -4795,7 +4817,7 @@ fn install_local_plugin_port(
     }
     let source = read_local_plugin_file(
         &port_directory.join(&port.source),
-        PUBLIC_PLUGIN_SOURCE_LIMIT,
+        port.source_limit,
         "local plugin source",
     )?;
     install_plugin_source(config_path, &port, source, force)
@@ -4831,6 +4853,7 @@ fn install_local_plugin_file(
         min_fpasoterm_version: env!("CARGO_PKG_VERSION").to_string(),
         source: file_name.to_string(),
         install_path: file_name.to_string(),
+        source_limit: PUBLIC_PLUGIN_SOURCE_LIMIT,
     };
     install_plugin_source(config_path, &port, source, force)
 }
@@ -9775,6 +9798,35 @@ source = "plugin.ts"
 installPath = "appearance/other.ts"
 "#;
         assert!(parse_public_plugin_manifest("appearance/teal", manifest).is_err());
+    }
+
+    #[test]
+    fn public_plugin_manifest_allows_only_bounded_declared_source_limits() {
+        let manifest = r#"
+[port]
+id = "integration/wasm-client"
+version = "1.0.0"
+minFpasotermVersion = "1.6.8"
+source = "plugin.js"
+installPath = "integration/wasm-client.js"
+maxSourceBytes = 8388608
+"#;
+        assert_eq!(
+            parse_public_plugin_manifest("integration/wasm-client", manifest)
+                .unwrap()
+                .source_limit,
+            PUBLIC_PLUGIN_MAX_DECLARED_SOURCE_LIMIT
+        );
+        assert!(parse_public_plugin_manifest(
+            "integration/wasm-client",
+            &manifest.replace("8388608", "8388609")
+        )
+        .is_err());
+        assert!(parse_public_plugin_manifest(
+            "integration/wasm-client",
+            &manifest.replace("8388608", "1023")
+        )
+        .is_err());
     }
 
     #[test]
