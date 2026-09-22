@@ -82,17 +82,26 @@ their source. Wildcards, paths, credentials, and port ranges are not accepted.
 // @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900, tls://vnc.example.test:5901
 ```
 
-`openVncBridge({ target })` and `openRdpBridge({ target })` ask the user for every
-connection and return one
-short-lived `ws://127.0.0.1/...` URL. The native bridge accepts that URL once,
-then relays binary WebSocket frames to the exact declared endpoint. It is not a
-general TCP proxy. The two API names use the same constrained transport but
-separate one-time URL paths, so an RDP WebAssembly client cannot consume a VNC
-URL (or the reverse). `tls://` performs system-root certificate and server-name
-validation with no insecure override. `tcp://` is deliberately supported for
-normal local VNC/RFB, but is unencrypted and should be limited to localhost or
-a trusted network. Credentials are requested through `promptSecret()` and are
-not persisted or written to Diagnostics.
+`openVncBridge({ target })` and `openRdpBridge({ target })` ask the user for
+every connection and return a short-lived `ws://127.0.0.1/...` URL. Each URL is
+accepted once and is bound to the exact declared endpoint; neither API is a
+general TCP proxy. The URL paths are separate, so an RDP WebAssembly client
+cannot consume a VNC URL (or the reverse).
+
+`openVncBridge()` relays binary WebSocket frames to its declared endpoint.
+`tls://` performs system-root certificate and server-name validation with no
+insecure override. `tcp://` is deliberately supported for normal local
+VNC/RFB, but is unencrypted and should be limited to localhost or a trusted
+network.
+
+`openRdpBridge()` currently accepts `tcp://host:port` and implements the
+RDCleanPath exchange required by IronRDP: it validates the DER destination,
+forwards X.224 negotiation, performs the RDP TLS hop, and returns the server
+certificate chain to IronRDP before relaying the TLS plaintext stream. It does
+not add or retain a certificate in the system trust store. Use only a host and
+network whose identity you trust; certificate pinning and interactive
+certificate approval are future work. Credentials are requested through
+`promptSecret()` and are not persisted or written to Diagnostics.
 
 The declaration is a capability request, not an unrestricted permission.
 fpasoterm grants it only when the origin is in its reviewed application
@@ -294,8 +303,9 @@ provides:
   the returned release function when the claim is no longer needed.
 - `openVncBridge({ target })`: after an explicit user action and confirmation,
   open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
-- `openRdpBridge({ target })`: the same declared-target, confirmed one-time
-  loopback transport for a reviewed RDP WebAssembly client.
+- `openRdpBridge({ target })`: a declared-target, confirmed one-time
+  RDCleanPath loopback transport for a reviewed RDP WebAssembly client; it
+  currently requires `tcp://host:port`.
 - `promptSecret({ title, message, approve })`: request a secret in memory only;
   cancellation returns `null`.
 - `promptText({ title, message, approve })`: request non-secret connection text

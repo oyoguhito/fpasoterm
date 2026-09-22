@@ -2,9 +2,10 @@
 
 ## 1.6.8
 
-- Added the reviewed-plugin RDP WebAssembly bridge API. RDP and VNC now share
-  one constrained implementation that opens only a user-confirmed, one-time
-  loopback WebSocket for an exact `allowed-tcp-targets` declaration.
+- Added the reviewed-plugin RDP WebAssembly bridge API. VNC uses a constrained
+  raw relay, while RDP uses a separate RDCleanPath/X.224/TLS bridge; both open
+  only a user-confirmed, one-time loopback WebSocket for an exact
+  `allowed-tcp-targets` declaration.
 - Documented the RDP bridge API and the local clipboard/OSC 52 behavior,
   including an upstream-facing Herdr clipboard-mirroring proposal.
 - Made Help URLs open in the system browser, improved Diagnostics filtering,

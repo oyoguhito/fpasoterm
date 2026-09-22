@@ -57,13 +57,23 @@ wildcard、path、credential、port rangeは許可されません。
 ```
 
 `openVncBridge({ target })` と `openRdpBridge({ target })` は接続のたび確認を表示し、
-一度だけ使える `ws://127.0.0.1/...` を返します。native bridgeはbinary WebSocketを
-宣言済みの接続先へrelayするだけで、汎用TCP proxyではありません。二つのAPIは同じ
-制限付きtransportを使いますが、一回限りのURL pathは別のため、RDP WebAssembly clientが
-VNC用URLを使うこと（またはその逆）はできません。`tls://` はOS trust store
-で証明書と接続先名を検証し、無効化するoptionはありません。`tcp://` は通常のlocal
-VNC/RFB用に対応しますが暗号化されないため、localhostまたは信頼できるnetworkに限ります。
-credentialは`promptSecret()`でmemory上だけに保持し、設定・Diagnosticsへ保存しません。
+一度だけ使える `ws://127.0.0.1/...` を返します。各URLは一度だけ受け付けられ、
+宣言済みの接続先へ完全一致で束縛されます。どちらも汎用TCP proxyではありません。
+URL pathは別のため、RDP WebAssembly clientがVNC用URLを使うこと（またはその逆）は
+できません。
+
+`openVncBridge()` は宣言済み接続先へbinary WebSocketをrelayします。`tls://` はOS
+trust storeで証明書と接続先名を検証し、無効化するoptionはありません。`tcp://` は
+通常のlocal VNC/RFB用に対応しますが暗号化されないため、localhostまたは信頼できる
+networkに限ります。
+
+`openRdpBridge()` は現在 `tcp://host:port` を受け付け、IronRDPに必要な
+RDCleanPath exchangeを実装します。DER destinationを検証し、X.224 negotiationを転送し、
+RDP TLS hopを実行してから、TLS plaintext streamをrelayする前にserver certificate chainを
+IronRDPへ返します。system trust storeへの証明書追加・保存は行いません。identityとnetworkを
+信頼できるhostだけへ接続してください。certificate pinningとinteractive certificate approval
+は今後の課題です。credentialは`promptSecret()`でmemory上だけに保持し、設定・Diagnosticsへ
+保存しません。
 
 これは無制限の許可ではありません。fpasotermがreview済みのapplication allowlistとCSPに含むoriginだけを許可し、不正なoriginの宣言には権限を与えません。
 
@@ -201,8 +211,8 @@ install 後の plugin では declaration file をローカルへコピーし、r
   戻り値のrelease functionを呼ぶ。
 - `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
   `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
-- `openRdpBridge({ target })`: review済みRDP WebAssembly client用に、同じく
-  宣言済み接続先へ確認付きで一度だけloopback WebSocketを開く。
+- `openRdpBridge({ target })`: review済みRDP WebAssembly client用に、宣言済み接続先へ
+  確認付きで一度だけRDCleanPath loopback WebSocketを開く。現在は`tcp://host:port`が必要。
 - `promptSecret({ title, message, approve })`: secretをmemory上だけで入力する。
   cancel時は`null`を返す。
 - `promptText({ title, message, approve })`: secretではない接続用textをmemory上だけで
