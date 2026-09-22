@@ -9,15 +9,19 @@ use gtk::{gdk, Clipboard};
 use hmac::{Hmac, Mac};
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use rand::RngCore;
-use rustls::pki_types::ServerName;
-use rustls::{ClientConfig, RootCertStore};
+use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
+use rustls::crypto::{verify_tls12_signature, verify_tls13_signature, WebPkiSupportedAlgorithms};
+use rustls::pki_types::{CertificateDer, ServerName, UnixTime};
+use rustls::{
+    ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
+};
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::{Component, Path, PathBuf};
 #[cfg(target_os = "macos")]
 use std::process::Child;
@@ -8611,6 +8615,311 @@ async fn connect_plugin_tcp_target(
     Ok(Box::new(stream))
 }
 
+const RDP_CLEAN_PATH_MAX_MESSAGE_BYTES: usize = 128 * 1024;
+const RDP_X224_MAX_RESPONSE_BYTES: usize = 16 * 1024;
+
+// IronRDP's WebAssembly client uses the RDCleanPath WebSocket protocol rather
+// than a raw WebSocket-to-RDP-TCP relay.  The native bridge establishes TLS to
+// the declared RDP server after forwarding its X.224 request, then forwards
+// the server certificate chain to IronRDP in the RDCleanPath response.
+//
+// Windows RDP servers commonly present a self-signed certificate.  The
+// CleanPath protocol transports that certificate to IronRDP, which uses it for
+// its RDP security negotiation.  Rustls still verifies TLS handshake
+// signatures below, but the chain itself is deliberately not accepted as a
+// system-trusted HTTPS identity here: fpasoterm has no stored certificate
+// decision or pin for the RDP target.  The bridge remains restricted to the
+// exact target declared by the reviewed plugin.
+#[derive(Debug)]
+struct RdpCleanPathCertificateVerifier {
+    supported: WebPkiSupportedAlgorithms,
+}
+
+impl ServerCertVerifier for RdpCleanPathCertificateVerifier {
+    fn verify_server_cert(
+        &self,
+        _end_entity: &CertificateDer<'_>,
+        _intermediates: &[CertificateDer<'_>],
+        _server_name: &ServerName<'_>,
+        _ocsp_response: &[u8],
+        _now: UnixTime,
+    ) -> Result<ServerCertVerified, RustlsError> {
+        Ok(ServerCertVerified::assertion())
+    }
+
+    fn verify_tls12_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        verify_tls12_signature(message, cert, dss, &self.supported)
+    }
+
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, RustlsError> {
+        verify_tls13_signature(message, cert, dss, &self.supported)
+    }
+
+    fn supported_verify_schemes(&self) -> Vec<SignatureScheme> {
+        self.supported.supported_schemes()
+    }
+}
+
+fn der_read_length(input: &[u8], cursor: &mut usize) -> Result<usize, String> {
+    let first = *input
+        .get(*cursor)
+        .ok_or_else(|| "truncated DER length".to_string())?;
+    *cursor += 1;
+    if first & 0x80 == 0 {
+        return Ok(first as usize);
+    }
+    let bytes = (first & 0x7f) as usize;
+    if bytes == 0 || bytes > std::mem::size_of::<usize>() || *cursor + bytes > input.len() {
+        return Err("invalid DER length".to_string());
+    }
+    let mut length = 0_usize;
+    for byte in &input[*cursor..*cursor + bytes] {
+        length = length
+            .checked_mul(256)
+            .and_then(|value| value.checked_add(*byte as usize))
+            .ok_or_else(|| "DER length overflow".to_string())?;
+    }
+    *cursor += bytes;
+    Ok(length)
+}
+
+fn der_read_tlv<'a>(input: &'a [u8], cursor: &mut usize) -> Result<(u8, &'a [u8]), String> {
+    let tag = *input
+        .get(*cursor)
+        .ok_or_else(|| "truncated DER tag".to_string())?;
+    *cursor += 1;
+    let length = der_read_length(input, cursor)?;
+    let end = cursor
+        .checked_add(length)
+        .filter(|end| *end <= input.len())
+        .ok_or_else(|| "truncated DER value".to_string())?;
+    let value = &input[*cursor..end];
+    *cursor = end;
+    Ok((tag, value))
+}
+
+fn der_single_value(input: &[u8], expected_tag: u8) -> Result<&[u8], String> {
+    let mut cursor = 0;
+    let (tag, value) = der_read_tlv(input, &mut cursor)?;
+    if tag != expected_tag || cursor != input.len() {
+        return Err("unexpected RDCleanPath DER value".to_string());
+    }
+    Ok(value)
+}
+
+fn der_encode_length(length: usize, output: &mut Vec<u8>) {
+    if length < 128 {
+        output.push(length as u8);
+        return;
+    }
+    let bytes = length.to_be_bytes();
+    let first = bytes
+        .iter()
+        .position(|byte| *byte != 0)
+        .unwrap_or(bytes.len() - 1);
+    let bytes = &bytes[first..];
+    output.push(0x80 | bytes.len() as u8);
+    output.extend_from_slice(bytes);
+}
+
+fn der_encode_tlv(tag: u8, value: &[u8]) -> Vec<u8> {
+    let mut encoded = Vec::with_capacity(value.len() + 6);
+    encoded.push(tag);
+    der_encode_length(value.len(), &mut encoded);
+    encoded.extend_from_slice(value);
+    encoded
+}
+
+fn rdp_clean_path_destination(target: &PluginTcpTarget) -> String {
+    if target.host.contains(':') {
+        format!("[{}]:{}", target.host, target.port)
+    } else {
+        format!("{}:{}", target.host, target.port)
+    }
+}
+
+struct RdpCleanPathRequest {
+    x224_request: Vec<u8>,
+}
+
+fn parse_rdp_clean_path_request(
+    message: &[u8],
+    target: &PluginTcpTarget,
+) -> Result<RdpCleanPathRequest, String> {
+    if message.is_empty() || message.len() > RDP_CLEAN_PATH_MAX_MESSAGE_BYTES {
+        return Err("RDCleanPath request is empty or too large".to_string());
+    }
+    let sequence = der_single_value(message, 0x30)?;
+    let mut cursor = 0;
+    let mut version = None;
+    let mut destination = None;
+    let mut x224_request = None;
+    while cursor < sequence.len() {
+        let (tag, value) = der_read_tlv(sequence, &mut cursor)?;
+        match tag {
+            0xa0 => {
+                let value = der_single_value(value, 0x02)?;
+                let parsed = value.iter().fold(0_u64, |number, byte| {
+                    number.saturating_mul(256).saturating_add(*byte as u64)
+                });
+                version = Some(parsed);
+            }
+            0xa2 => {
+                let value = der_single_value(value, 0x0c)?;
+                destination = Some(
+                    std::str::from_utf8(value)
+                        .map_err(|_| "RDCleanPath destination is not UTF-8".to_string())?
+                        .to_string(),
+                );
+            }
+            0xa6 => {
+                let value = der_single_value(value, 0x04)?;
+                x224_request = Some(value.to_vec());
+            }
+            _ => {}
+        }
+    }
+    if version != Some(3390) {
+        return Err("unsupported RDCleanPath protocol version".to_string());
+    }
+    let expected_destination = rdp_clean_path_destination(target);
+    if destination.as_deref() != Some(expected_destination.as_str()) {
+        return Err("RDCleanPath destination does not match the declared RDP target".to_string());
+    }
+    let x224_request =
+        x224_request.ok_or_else(|| "RDCleanPath request has no X.224 payload".to_string())?;
+    if x224_request.len() < 4 || x224_request.len() > RDP_X224_MAX_RESPONSE_BYTES {
+        return Err("RDCleanPath X.224 payload has an invalid size".to_string());
+    }
+    Ok(RdpCleanPathRequest { x224_request })
+}
+
+fn build_rdp_clean_path_response(
+    target: &PluginTcpTarget,
+    x224_response: &[u8],
+    certificates: &[CertificateDer<'_>],
+) -> Result<Vec<u8>, String> {
+    if x224_response.is_empty() || x224_response.len() > RDP_X224_MAX_RESPONSE_BYTES {
+        return Err("RDP server returned an invalid X.224 response".to_string());
+    }
+    if certificates.is_empty() {
+        return Err("RDP server did not provide a TLS certificate".to_string());
+    }
+    let version = der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[0x0d, 0x3e]));
+    let x224 = der_encode_tlv(0xa6, &der_encode_tlv(0x04, x224_response));
+    let mut certificate_sequence = Vec::new();
+    for certificate in certificates {
+        certificate_sequence.extend_from_slice(&der_encode_tlv(0x04, certificate.as_ref()));
+    }
+    let certificates = der_encode_tlv(0xa7, &der_encode_tlv(0x30, &certificate_sequence));
+    let destination = der_encode_tlv(
+        0xa9,
+        &der_encode_tlv(0x0c, rdp_clean_path_destination(target).as_bytes()),
+    );
+    let mut body = Vec::new();
+    body.extend_from_slice(&version);
+    body.extend_from_slice(&x224);
+    body.extend_from_slice(&certificates);
+    body.extend_from_slice(&destination);
+    Ok(der_encode_tlv(0x30, &body))
+}
+
+async fn read_rdp_x224_response(stream: &mut TokioTcpStream) -> Result<Vec<u8>, String> {
+    let mut header = [0_u8; 4];
+    timeout(Duration::from_secs(10), stream.read_exact(&mut header))
+        .await
+        .map_err(|_| "timed out waiting for RDP X.224 response".to_string())?
+        .map_err(|error| format!("could not read RDP X.224 response: {error}"))?;
+    if header[..2] != [3, 0] {
+        return Err("RDP server returned an invalid TPKT X.224 response".to_string());
+    }
+    let length = u16::from_be_bytes([header[2], header[3]]) as usize;
+    if !(4..=RDP_X224_MAX_RESPONSE_BYTES).contains(&length) {
+        return Err("RDP server returned an oversized X.224 response".to_string());
+    }
+    let mut response = vec![0_u8; length];
+    response[..4].copy_from_slice(&header);
+    timeout(
+        Duration::from_secs(10),
+        stream.read_exact(&mut response[4..]),
+    )
+    .await
+    .map_err(|_| "timed out reading RDP X.224 response".to_string())?
+    .map_err(|error| format!("could not finish reading RDP X.224 response: {error}"))?;
+    Ok(response)
+}
+
+fn rdp_tls_server_name(target: &PluginTcpTarget) -> Result<ServerName<'static>, String> {
+    if let Ok(address) = target.host.parse::<IpAddr>() {
+        return Ok(ServerName::IpAddress(address.into()));
+    }
+    ServerName::try_from(target.host.clone())
+        .map_err(|_| format!("RDP target has an invalid server name: {}", target.host))
+}
+
+async fn connect_rdp_clean_path_target(
+    target: &PluginTcpTarget,
+    x224_request: &[u8],
+) -> Result<
+    (
+        tokio_rustls::client::TlsStream<TokioTcpStream>,
+        Vec<u8>,
+        Vec<CertificateDer<'static>>,
+    ),
+    String,
+> {
+    if target.protocol != "tcp" {
+        return Err("the RDP local bridge currently requires a tcp:// target".to_string());
+    }
+    let address = format!("{}:{}", target.host, target.port);
+    let mut stream = timeout(Duration::from_secs(10), TokioTcpStream::connect(&address))
+        .await
+        .map_err(|_| format!("connection timed out: {}", target.canonical()))?
+        .map_err(|error| format!("could not connect to {}: {error}", target.canonical()))?;
+    timeout(Duration::from_secs(10), stream.write_all(x224_request))
+        .await
+        .map_err(|_| "timed out sending RDP X.224 request".to_string())?
+        .map_err(|error| format!("could not send RDP X.224 request: {error}"))?;
+    let x224_response = read_rdp_x224_response(&mut stream).await?;
+    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    let verifier = RdpCleanPathCertificateVerifier {
+        supported: provider.signature_verification_algorithms,
+    };
+    let config = ClientConfig::builder()
+        .dangerous()
+        .with_custom_certificate_verifier(Arc::new(verifier))
+        .with_no_client_auth();
+    let tls_stream = timeout(
+        Duration::from_secs(10),
+        TlsConnector::from(Arc::new(config)).connect(rdp_tls_server_name(target)?, stream),
+    )
+    .await
+    .map_err(|_| format!("RDP TLS handshake timed out: {}", target.canonical()))?
+    .map_err(|error| {
+        format!(
+            "RDP TLS handshake failed for {}: {error}",
+            target.canonical()
+        )
+    })?;
+    let certificates = tls_stream
+        .get_ref()
+        .1
+        .peer_certificates()
+        .ok_or_else(|| "RDP server did not provide a TLS certificate".to_string())?
+        .to_vec();
+    Ok((tls_stream, x224_response, certificates))
+}
+
 async fn relay_plugin_websocket(
     websocket: tokio_tungstenite::WebSocketStream<TokioTcpStream>,
     remote: Box<dyn PluginRemoteStream>,
@@ -8702,6 +9011,109 @@ async fn serve_plugin_tcp_websocket_bridge(
     }
 }
 
+async fn receive_rdp_clean_path_request(
+    websocket: &mut tokio_tungstenite::WebSocketStream<TokioTcpStream>,
+    target: &PluginTcpTarget,
+) -> Result<RdpCleanPathRequest, String> {
+    let receive = async {
+        loop {
+            match websocket.next().await {
+                Some(Ok(Message::Binary(bytes))) => {
+                    return parse_rdp_clean_path_request(&bytes, target)
+                }
+                Some(Ok(Message::Ping(bytes))) => websocket
+                    .send(Message::Pong(bytes))
+                    .await
+                    .map_err(|error| format!("local WebSocket write failed: {error}"))?,
+                Some(Ok(Message::Close(_))) | None => {
+                    return Err("RDCleanPath WebSocket closed before its request".to_string())
+                }
+                Some(Ok(_)) => {
+                    return Err("RDCleanPath requires a binary WebSocket request".to_string())
+                }
+                Some(Err(error)) => return Err(format!("local WebSocket read failed: {error}")),
+            }
+        }
+    };
+    timeout(Duration::from_secs(15), receive)
+        .await
+        .map_err(|_| "timed out waiting for the RDCleanPath request".to_string())?
+}
+
+async fn serve_plugin_rdp_clean_path_bridge(
+    listener: TcpListener,
+    target: PluginTcpTarget,
+    token: String,
+) {
+    let listener = match TokioTcpListener::from_std(listener) {
+        Ok(listener) => listener,
+        Err(error) => {
+            eprintln!("could not initialize plugin RDP bridge runtime: {error}");
+            return;
+        }
+    };
+    let accepted = timeout(Duration::from_secs(30), listener.accept()).await;
+    let Ok(Ok((stream, _))) = accepted else {
+        return;
+    };
+    let requested_path = Arc::new(Mutex::new(String::new()));
+    let path_for_callback = requested_path.clone();
+    let websocket = tokio_tungstenite::accept_hdr_async(
+        stream,
+        move |request: &WebSocketRequest, response: WebSocketResponse| {
+            if let Ok(mut path) = path_for_callback.lock() {
+                *path = request.uri().path().to_string();
+            }
+            Ok(response)
+        },
+    )
+    .await;
+    let Ok(mut websocket) = websocket else {
+        return;
+    };
+    if requested_path.lock().ok().as_deref().map(String::as_str)
+        != Some(format!("/rdp/{token}").as_str())
+    {
+        let _ = websocket.close(None).await;
+        return;
+    }
+    let request = match receive_rdp_clean_path_request(&mut websocket, &target).await {
+        Ok(request) => request,
+        Err(error) => {
+            eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket.close(None).await;
+            return;
+        }
+    };
+    let (remote, x224_response, certificates) =
+        match connect_rdp_clean_path_target(&target, &request.x224_request).await {
+            Ok(connection) => connection,
+            Err(error) => {
+                eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+                let _ = websocket.close(None).await;
+                return;
+            }
+        };
+    let response = match build_rdp_clean_path_response(&target, &x224_response, &certificates) {
+        Ok(response) => response,
+        Err(error) => {
+            eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket.close(None).await;
+            return;
+        }
+    };
+    if let Err(error) = websocket.send(Message::Binary(response)).await {
+        eprintln!(
+            "plugin RDP bridge {}: local WebSocket write failed: {error}",
+            target.canonical()
+        );
+        return;
+    }
+    if let Err(error) = relay_plugin_websocket(websocket, Box::new(remote), "RDP").await {
+        eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+    }
+}
+
 fn plugin_tcp_websocket_bridge_open(
     request: PluginTcpBridgeRequest,
     bridge_name: &'static str,
@@ -8750,7 +9162,41 @@ fn plugin_vnc_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, Str
 
 #[tauri::command]
 fn plugin_rdp_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, String> {
-    plugin_tcp_websocket_bridge_open(request, "RDP", "rdp")
+    let target = parse_plugin_tcp_target(&request.target).ok_or_else(|| {
+        "RDP bridge target must be an exact tcp://host:port declaration".to_string()
+    })?;
+    if target.protocol != "tcp" {
+        return Err("RDP bridge currently supports tcp://host:port targets only".to_string());
+    }
+    let target_text = target.canonical();
+    if !runtime_config().plugin_urls.iter().any(|plugin| {
+        plugin
+            .allowed_tcp_targets
+            .iter()
+            .any(|allowed| allowed == &target_text)
+    }) {
+        return Err(format!(
+            "RDP bridge target is not declared by an enabled plugin: {target_text}"
+        ));
+    }
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("could not bind local RDP bridge: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| error.to_string())?;
+    let address = listener.local_addr().map_err(|error| error.to_string())?;
+    let mut token_bytes = [0_u8; 32];
+    rand::rngs::OsRng.fill_bytes(&mut token_bytes);
+    let token = token_bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    tauri::async_runtime::spawn(serve_plugin_rdp_clean_path_bridge(
+        listener,
+        target,
+        token.clone(),
+    ));
+    Ok(format!("ws://{address}/rdp/{token}"))
 }
 
 #[tauri::command]
@@ -10002,6 +10448,36 @@ maxSourceBytes = 8388608
             ),
             vec!["tcp://localhost:5900".to_string(), "tls://[::1]:5901".to_string()]
         );
+    }
+
+    #[test]
+    fn rdp_clean_path_request_requires_the_declared_destination() {
+        let target = parse_plugin_tcp_target("tcp://192.0.2.25:3389").expect("target");
+        let mut body = Vec::new();
+        body.extend_from_slice(&der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[0x0d, 0x3e])));
+        body.extend_from_slice(&der_encode_tlv(
+            0xa2,
+            &der_encode_tlv(0x0c, b"192.0.2.25:3389"),
+        ));
+        body.extend_from_slice(&der_encode_tlv(
+            0xa6,
+            &der_encode_tlv(0x04, &[3, 0, 0, 8, 0xe0, 0, 0, 0]),
+        ));
+        let request = der_encode_tlv(0x30, &body);
+        assert_eq!(
+            parse_rdp_clean_path_request(&request, &target)
+                .expect("declared destination")
+                .x224_request,
+            vec![3, 0, 0, 8, 0xe0, 0, 0, 0]
+        );
+
+        let mismatched = request
+            .windows(b"192.0.2.25".len())
+            .position(|window| window == b"192.0.2.25")
+            .expect("destination offset");
+        let mut wrong_request = request.clone();
+        wrong_request[mismatched..mismatched + b"192.0.2.25".len()].copy_from_slice(b"192.0.2.26");
+        assert!(parse_rdp_clean_path_request(&wrong_request, &target).is_err());
     }
 
     #[test]
