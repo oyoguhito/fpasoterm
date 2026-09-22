@@ -600,6 +600,7 @@ fn cli_help_text() -> String {
 
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
+    install_default_rustls_crypto_provider();
     if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
         print_cli_error(&format!("fpasoterm: {error}\n"));
         std::process::exit(2);
@@ -887,6 +888,15 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("failed to run fpasoterm");
+}
+
+// Both the direct rustls dependency and a transitive dependency enable a
+// crypto provider.  Select aws-lc-rs once, before any ClientConfig builder is
+// used, so RDP bridge tasks cannot panic when rustls sees both features.
+fn install_default_rustls_crypto_provider() {
+    if rustls::crypto::CryptoProvider::get_default().is_none() {
+        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+    }
 }
 
 // Validates direct binary arguments before Tauri creates an application window.
