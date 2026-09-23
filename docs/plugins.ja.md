@@ -165,6 +165,8 @@ fpasoterm --plugin-install-file ~/work/my-plugins/team-banner.ts --enable
 
 どちらのlocal commandもfpasoterm plugin headerとrenderer API markerを持つ通常の`.js`または`.ts` fileだけを受け付けます。既存fileは`--force`を指定しない限り置き換えません。
 
+localでbuildしたreview済みRDP portを検証する場合は、windowを起動するものと同じnative fpasoterm executableでinstall commandを実行します。たとえばrelease binaryが`src-tauri/release/target/fpasoterm`のcheckoutでは、このbinaryを直接使います。`bin/fpasoterm --dev`はNode.jsのdevelopment launcherであり、異なるdebug runtimeをbuild・起動する可能性があるため、このinstall用途には使いません。
+
 subdirectory に同名 file がある場合は、`team/status-banner.ts` のように `plugins` からの相対 path を指定してください。
 
 ### Windows packaged binary

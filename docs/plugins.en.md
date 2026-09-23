@@ -238,6 +238,13 @@ Both local commands require a regular `.js` or `.ts` file with the fpasoterm
 plugin header and renderer API marker. They preserve an existing destination
 unless `--force` is supplied.
 
+When testing a locally built, reviewed RDP port, invoke these install commands
+with the same native fpasoterm executable that will open the window. For
+example, a checkout whose release binary is
+`src-tauri/release/target/fpasoterm` should use that binary directly rather
+than `bin/fpasoterm --dev`; the latter is a Node.js development launcher and
+may build or run a different debug runtime.
+
 When duplicate filenames exist in different subdirectories, use a path
 relative to `plugins`, such as `team/status-banner.ts`.
 
