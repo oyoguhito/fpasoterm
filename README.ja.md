@@ -14,6 +14,8 @@ fpasoterm は `かな` / `英数` キーを横取りしません。日本語入�
 
 IME、描画、clipboard、window問題を再現して確認する手順は
 [デバッグガイド](docs/debugging.ja.md)を参照してください。
+ChromeOS Linux で確認済みの clipboard flow、OK/NG の検証表、clipboard code を変更する前の手順は
+[Clipboard のフローと検証表](docs/clipboard.ja.md)を参照してください。
 
 window menu の `Font / Glyph Test` では、使用中のterminal font設定とCJK、半角カナ、罫線、記号、Nerd Font glyphを確認できます。詳細は[Font / Glyph Diagnostics](docs/font-diagnostics.ja.md)を参照してください。
 

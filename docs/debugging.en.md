@@ -58,6 +58,18 @@ Use this command for WebKitGTK rendering symptoms on ChromeOS/Baguette:
 fpasoterm --disable-dmabuf --foreground --console-diagnostics
 ```
 
+If the window opens but its terminal area is invisible, run this one-time
+diagnostic instead. It injects an opaque dark background into the WebView for
+that launch only; it does not change `config.toml`.
+
+```sh
+fpasoterm --opaque-terminal --foreground --console-diagnostics
+```
+
+The console should include `opaque terminal diagnostic CSS requested`. If the
+background is then visible, retain that line together with the first renderer
+diagnostic when reporting the problem.
+
 Use the titlebar menu's **Diagnostics > Font / Glyph Test** and
 **Diagnostics > Capability Test** before reporting glyph, terminfo, truecolor,
 OSC, bracketed-paste, or bell issues. See [Configuration and Diagnostics](diagnostics.en.md),

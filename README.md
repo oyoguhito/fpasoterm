@@ -20,10 +20,13 @@ Japanese IME composition and keyboard layout switching are handled by the OS web
 
 Set `FPASOTERM_DEBUG_KEYS=1` to print runtime key names to stderr and show the latest key/composition event in the window while testing Japanese keyboard keys.
 
-Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`. The debug panel has a Copy button because xterm.js can capture normal terminal copy shortcuts.
+Debug logs are also written to `~/.config/fpasoterm/User/logs/fpasoterm-debug.log`.
 
 For reproducible IME, rendering, clipboard, and window diagnostics, see the
 [Debugging Guide](docs/debugging.en.md).
+The current ChromeOS Linux clipboard flow, verified OK/NG matrix, and required
+procedure before changing clipboard code are in
+[Clipboard Flow and Test Matrix](docs/clipboard.en.md).
 
 Use `Font / Glyph Test` in the window menu to inspect the active terminal font
 settings and representative CJK, half-width kana, box drawing, symbol, and
@@ -427,7 +430,7 @@ rememberBounds = true
 frame = false
 [terminal]
 fontSize = 15
-lineHeight = 1
+lineHeight = 1.08
 fontFamily = "Noto Sans Mono CJK JP, monospace"
 
 [terminal.theme]

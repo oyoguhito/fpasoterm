@@ -830,7 +830,8 @@ body {
   font: inherit;
 }
 
-#terminal-log-search {
+#terminal-log-search,
+#diagnostics-filter {
   width: min(170px, 20vw);
   height: 22px;
   min-width: 86px;
@@ -842,7 +843,8 @@ body {
   font: inherit;
 }
 
-#terminal-log-search-status {
+#terminal-log-search-status,
+#diagnostics-filter-status {
   min-width: 34px;
   color: #f5d76e;
   text-align: right;
@@ -850,6 +852,7 @@ body {
 
 #terminal-log-show-selected,
 #terminal-log-search-next,
+#diagnostics-filter-apply,
 #terminal-log-delete-selected,
 #terminal-log-delete-all,
 #terminal-encoding-apply,
@@ -862,13 +865,26 @@ body {
   font: inherit;
 }
 
+#updates-download-link {
+  color: #8fc8ff;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+#updates-download-link:hover {
+  color: #d5ecff;
+}
+
 #diagnostics-panel select:focus,
 #diagnostics-panel input:focus,
 #diagnostics-panel button:focus,
+#diagnostics-panel a:focus,
 #diagnostics-panel textarea:focus,
 #diagnostics-panel select:focus-visible,
 #diagnostics-panel input:focus-visible,
 #diagnostics-panel button:focus-visible,
+#diagnostics-panel a:focus-visible,
 #diagnostics-panel textarea:focus-visible {
   outline: 3px solid #f5d76e;
   outline-offset: 2px;

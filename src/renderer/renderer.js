@@ -11,12 +11,16 @@ const terminalLogSelectElement = document.getElementById('terminal-log-select');
 const terminalLogSearchElement = document.getElementById('terminal-log-search');
 const terminalLogSearchNextButton = document.getElementById('terminal-log-search-next');
 const terminalLogSearchStatusElement = document.getElementById('terminal-log-search-status');
+const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
+const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
+const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
 const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
 const checkForUpdatesButton = document.getElementById('check-for-updates');
+const updatesDownloadLink = document.getElementById('updates-download-link');
 const terminalEncodingSelectElement = document.getElementById('terminal-encoding-select');
 const terminalEncodingApplyButton = document.getElementById('terminal-encoding-apply');
 const terminalLogConfirmElement = document.getElementById('terminal-log-confirm');
@@ -112,6 +116,10 @@ const pluginCommandStatusCopyButton = document.getElementById('plugin-command-st
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 let pluginActivity = false;
 const diagnosticLines = [];
+const MAX_DIAGNOSTIC_LINES = 1000;
+let diagnosticsFilterQuery = '';
+let diagnosticRenderPending = false;
+let diagnosticRenderScrollToEnd = false;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -455,6 +463,7 @@ function installTauriApiAdapter() {
     writeOsc52Clipboard: (text) => invoke('clipboard_write_osc52', { text }),
     pluginWebPanelFrameUrl: (url) => invoke('plugin_web_panel_frame_url', { url }),
     pluginVncBridgeOpen: (target) => invoke('plugin_vnc_bridge_open', { request: { target } }),
+    pluginRdpBridgeOpen: (target) => invoke('plugin_rdp_bridge_open', { request: { target } }),
     openExternalUrl: (url) => invoke('open_external_url', { url }),
     getAppVersion: () => invoke('app_version'),
     checkForUpdate: () => invoke('update_check'),
@@ -796,6 +805,53 @@ function installCompositionObserver() {
   }, true);
 }
 
+// Renders the diagnostics history, optionally narrowed by a literal
+// case-insensitive substring. This deliberately behaves like a lightweight
+// grep: punctuation in a query has no special meaning.
+function renderDiagnosticLines({ scrollToEnd = false } = {}) {
+  const lines = diagnosticsFilterQuery
+    ? diagnosticLines.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
+    : diagnosticLines;
+  diagnosticsElement.value = lines.length > 0
+    ? lines.join('\n')
+    : diagnosticsFilterQuery
+      ? '(No diagnostics match this filter.)'
+      : '';
+  if (diagnosticsFilterStatusElement) {
+    diagnosticsFilterStatusElement.textContent = diagnosticsFilterQuery
+      ? `${lines.length}/${diagnosticLines.length}`
+      : `${diagnosticLines.length}`;
+  }
+  if (scrollToEnd) {
+    diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+  }
+}
+
+// Terminal output and key diagnostics can arrive much faster than the UI can
+// repaint a 1,000-line textarea. Coalesce display work to one repaint per
+// frame so diagnostics never delay terminal input handling.
+function scheduleDiagnosticRender({ scrollToEnd = false } = {}) {
+  diagnosticRenderScrollToEnd = diagnosticRenderScrollToEnd || scrollToEnd;
+  if (diagnosticRenderPending) {
+    return;
+  }
+  diagnosticRenderPending = true;
+  requestAnimationFrame(() => {
+    diagnosticRenderPending = false;
+    const follow = diagnosticRenderScrollToEnd;
+    diagnosticRenderScrollToEnd = false;
+    renderDiagnosticLines({ scrollToEnd: follow });
+  });
+}
+
+// Filtering a large live diagnostic history is deliberately explicit. Typing
+// changes only the pending query; click Filter or press Enter to scan lines.
+function applyDiagnosticsFilter() {
+  diagnosticsFilterQuery = String(diagnosticsFilterElement?.value || '').trim().toLocaleLowerCase();
+  renderDiagnosticLines();
+  diagnosticsElement.scrollTop = 0;
+}
+
 // Writes a diagnostic line to the optional in-window diagnostics panel.
 function appendDiagnosticLine(message) {
   if (!debugKeys) {
@@ -803,19 +859,21 @@ function appendDiagnosticLine(message) {
   }
 
   diagnosticLines.push(message);
-  if (diagnosticLines.length > 80) {
+  if (diagnosticLines.length > MAX_DIAGNOSTIC_LINES) {
     diagnosticLines.shift();
   }
   if (diagnosticsPanelMode !== 'terminal-log') {
-    diagnosticsPanelMode = 'diagnostics';
-    setTerminalLogPickerVisible(false);
+    if (diagnosticsPanelMode !== 'diagnostics') {
+      diagnosticsPanelMode = 'diagnostics';
+      setTerminalLogPickerVisible(false);
+    }
+    showDiagnosticsTextArea();
+    setDiagnosticsFilterVisible(true);
+    if (diagnosticsTitleElement) {
+      diagnosticsTitleElement.textContent = 'Diagnostics';
+    }
   }
-  showDiagnosticsTextArea();
-  if (diagnosticsTitleElement) {
-    diagnosticsTitleElement.textContent = 'Diagnostics';
-  }
-  diagnosticsElement.value = diagnosticLines.join('\n');
-  diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
+  scheduleDiagnosticRender({ scrollToEnd: true });
   if (!diagnosticsPanelDismissed) {
     diagnosticsPanel.hidden = false;
   }
@@ -838,10 +896,14 @@ function closeDiagnosticsPanel() {
 // Restores the shared panel's regular text body after another diagnostics view.
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
+  setDiagnosticsFilterVisible(false);
   setPluginCatalogSearchVisible(false);
   setTerminalEncodingControlsVisible(false);
   if (checkForUpdatesButton) {
     checkForUpdatesButton.hidden = true;
+  }
+  if (updatesDownloadLink) {
+    updatesDownloadLink.hidden = true;
   }
   if (fontGlyphPreviewElement) {
     fontGlyphPreviewElement.hidden = true;
@@ -849,6 +911,14 @@ function showDiagnosticsTextArea() {
   if (terminalCapabilityPreviewElement) {
     terminalCapabilityPreviewElement.hidden = true;
   }
+}
+
+// Diagnostics are intentionally retained for the current launch; the filter
+// is visible only for the live diagnostics view, not unrelated panel modes.
+function setDiagnosticsFilterVisible(visible) {
+  if (diagnosticsFilterElement) diagnosticsFilterElement.hidden = !visible;
+  if (diagnosticsFilterApplyButton) diagnosticsFilterApplyButton.hidden = !visible;
+  if (diagnosticsFilterStatusElement) diagnosticsFilterStatusElement.hidden = !visible;
 }
 
 // Keeps public port filtering separate from terminal-log search controls.
@@ -1053,29 +1123,34 @@ function isMacPlatform() {
 }
 
 // Reads the OS clipboard in a user-triggered event and sends it to the shell.
-// WebKitGTK owns the ChromeOS clipboard integration, so prefer its API before
-// shell helpers such as wl-paste. A successful helper with an empty selection
-// must not hide text that the WebView can read.
+// On Linux/ChromeOS, use the shared WebView clipboard first and fall back to
+// the native X11/Wayland reader only if the WebView clipboard is unavailable.
+// The known-issues clipboard matrix documents the currently unresolved herdr
+// native-copy case; do not change this order without updating that matrix.
 async function pasteClipboardToTerminal() {
-  let text = '';
   const errors = [];
+  let text = '';
+  let source = '';
   const readers = isMacPlatform()
     ? [
-      async () => window.fpasoterm.readClipboard(),
-      async () => navigator.clipboard?.readText?.() || '',
+      ['native macOS clipboard', async () => window.fpasoterm.readClipboard()],
+      ['WebView clipboard fallback', async () => navigator.clipboard?.readText?.() || ''],
     ]
     : [
-      async () => navigator.clipboard?.readText?.() || '',
-      async () => window.fpasoterm.readClipboard(),
+      ['shared WebView clipboard', async () => navigator.clipboard?.readText?.() || ''],
+      ['native X11/Wayland clipboard fallback', async () => window.fpasoterm.readClipboard()],
     ];
-  for (const read of readers) {
+  for (const [readerSource, read] of readers) {
     if (text) {
       break;
     }
     try {
       text = await read();
+      if (text) {
+        source = readerSource;
+      }
     } catch (error) {
-      errors.push(String(error));
+      errors.push(`${readerSource}: ${error}`);
     }
   }
 
@@ -1086,6 +1161,9 @@ async function pasteClipboardToTerminal() {
     showDiagnostic('terminal paste skipped: clipboard is empty');
     return;
   }
+  // Do not log clipboard content. The source and byte count are sufficient to
+  // distinguish stale local selections from the shared desktop clipboard.
+  showDiagnostic(`terminal paste source=${source} bytes=${text.length}`);
   sendTerminalInput(normalizePasteText(text), 'paste');
 }
 
@@ -1405,9 +1483,10 @@ function installTerminalPasteHandlers() {
     setTimeout(focusTerminalInput, 0);
   }, true);
 
-  // Let the native WebView create a paste event first. Its clipboardData is the
-  // only reliable ChromeOS shared-clipboard path. Some WebKitGTK builds do not
-  // dispatch it for Ctrl+Shift+V, so use the API fallback only after a short wait.
+  // Let the native WebView create a paste event first. Some WebKitGTK builds do
+  // not dispatch it for Ctrl+Shift+V, so use the API fallback only after a short
+  // wait. The paste handler below validates through the native selection before
+  // accepting clipboardData because an X11 owner can be newer than WebKitGTK.
   window.addEventListener('keydown', (event) => {
     const isPaste = matchesKeybinding(event, 'paste');
     if (!isPaste) {
@@ -1438,22 +1517,14 @@ function installTerminalPasteHandlers() {
     if (isNonTerminalEditableControl(activeElement)) {
       return;
     }
-    const text = event.clipboardData?.getData('text/plain') || '';
-    if (!text) {
-      // Some WebKitGTK clipboard events intentionally omit clipboardData.
-      // Read through the same browser-first fallback path as the keyboard shortcut.
-      event.preventDefault();
-      event.stopImmediatePropagation();
-      pasteClipboardToTerminal().catch((error) => {
-        showDiagnostic(`terminal paste failed: ${error}`);
-      });
-      return;
-    }
     event.preventDefault();
-    // xterm.js also listens for paste below this capture listener. The terminal
-    // must receive the native payload exactly once through sendTerminalInput().
+    // Do not trust an already-created WebView paste payload here: after a local
+    // terminal copy it can contain the previous host clipboard value. The native
+    // reader checks X11 UTF8_STRING first and falls back to WebView clipboard.
     event.stopImmediatePropagation();
-    sendTerminalInput(normalizePasteText(text), 'paste');
+    pasteClipboardToTerminal().catch((error) => {
+      showDiagnostic(`terminal paste failed: ${error}`);
+    });
   };
   // Capture at the window so paste still works if a visual layer displaced focus.
   window.addEventListener('paste', handleTerminalPaste, true);
@@ -2596,22 +2667,32 @@ function dismissPluginPrompts(scope) {
   document.dispatchEvent(new CustomEvent('fpasoterm:plugin-prompt-dismiss', { detail: { scope } }));
 }
 
-async function openPluginVncBridge(options = {}, declaredTargets = []) {
-  showPluginCommandStatus('VNC bridge: checking user action and target policy');
-  requirePluginUserActivation('openVncBridge');
+async function openPluginTcpBridge(options, declaredTargets, bridgeName, actionName, openBridge) {
+  showPluginCommandStatus(`${bridgeName} bridge: checking user action and target policy`);
+  requirePluginUserActivation(actionName);
   const target = String(options?.target || '').trim();
   if (!Array.isArray(declaredTargets) || !declaredTargets.includes(target)) {
-    throw new Error(`VNC bridge target is not permitted: ${target || '(empty)'}`);
+    throw new Error(`${bridgeName} bridge target is not permitted: ${target || '(empty)'}`);
   }
   const protocol = target.split('://', 1)[0];
   const warning = protocol === 'tcp'
-    ? 'This opens an unencrypted VNC connection. Continue only on a trusted network.'
+    ? 'This opens a raw TCP connection. Continue only on a trusted network.'
     : 'The TLS certificate and host name will be verified before connecting.';
-  const approved = await pluginModalPrompt({ title: 'Connect VNC', message: `${target}\n${warning}`, approve: 'Connect' });
-  if (!approved) throw new Error('VNC connection cancelled');
-  const url = await window.fpasoterm.pluginVncBridgeOpen(target);
-  showPluginCommandStatus(`VNC bridge: loopback WebSocket opened for ${target}`);
+  const approved = await pluginModalPrompt({ title: `Connect ${bridgeName}`, message: `${target}\n${warning}`, approve: 'Connect' });
+  if (!approved) throw new Error(`${bridgeName} connection cancelled`);
+  const url = await openBridge(target);
+  showPluginCommandStatus(`${bridgeName} bridge: loopback WebSocket opened for ${target}`);
   return url;
+}
+
+function openPluginVncBridge(options = {}, declaredTargets = []) {
+  return openPluginTcpBridge(options, declaredTargets, 'VNC', 'openVncBridge',
+    (target) => window.fpasoterm.pluginVncBridgeOpen(target));
+}
+
+function openPluginRdpBridge(options = {}, declaredTargets = []) {
+  return openPluginTcpBridge(options, declaredTargets, 'RDP', 'openRdpBridge',
+    (target) => window.fpasoterm.pluginRdpBridgeOpen(target));
 }
 
 function openPluginWebPanel(options = {}, declaredOrigins = []) {
@@ -2775,6 +2856,7 @@ async function loadPlugins() {
     openElementOverlay: (options) => openPluginElementOverlay(options),
     openWebPanel: (options) => openPluginWebPanel(options, plugin?.allowedOrigins),
     openVncBridge: (options) => openPluginVncBridge(options, plugin?.allowedTcpTargets),
+    openRdpBridge: (options) => openPluginRdpBridge(options, plugin?.allowedTcpTargets),
     promptSecret: (options = {}) => pluginModalPrompt({
       title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Credential required',
       message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Enter the credential for this connection.',
@@ -3280,6 +3362,8 @@ function diagnosticsPanelFocusItems() {
     terminalLogSelectElement,
     terminalLogSearchElement,
     terminalLogSearchNextButton,
+    diagnosticsFilterElement,
+    diagnosticsFilterApplyButton,
     pluginCatalogSearchElement,
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
@@ -3889,6 +3973,7 @@ function showFontGlyphTest() {
     '',
     'CJK: 日本語 漢字 ひらがな カタカナ 中文 한국어',
     'Half-width kana: ｱｲｳｴｵ ｶｯﾁｮｲ ﾊﾝｶｸ ｶﾀｶﾅ ｰﾞﾟ',
+    'Baseline / underscore: _ _ _   g q y p j',
     'Box drawing: ┌─┬─┐ │ │ │ ├─┼─┤ │ │ │ └─┴─┘  ╔═╦═╗ ║ ║ ║ ╚═╩═╝',
     'Symbols: ← → ↑ ↓ ⇄ ✓ ✗ ★ ☆ ◆ ◇ ● ○ ± ≠ ≤ ≥',
     'Nerd Font (Powerline):   ',
@@ -3983,6 +4068,9 @@ async function showKeyboardShortcutsHelp() {
     checkForUpdatesButton.disabled = false;
     checkForUpdatesButton.textContent = 'Check for Updates';
     checkForUpdatesButton.focus({ preventScroll: true });
+    if (updatesDownloadLink) {
+      updatesDownloadLink.hidden = false;
+    }
   } else {
     closeDiagnosticsButton.focus({ preventScroll: true });
   }
@@ -4279,6 +4367,20 @@ terminalLogSearchElement.addEventListener('input', () => {
   }
 });
 
+diagnosticsFilterApplyButton?.addEventListener('click', () => {
+  if (diagnosticsPanelMode === 'diagnostics') {
+    applyDiagnosticsFilter();
+  }
+});
+
+diagnosticsFilterElement?.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter' || diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  event.preventDefault();
+  applyDiagnosticsFilter();
+});
+
 terminalLogDeleteSelectedButton.addEventListener('click', () => {
   deleteSelectedTerminalOutputLog().catch((error) => {
     showDiagnostic(`terminal log selected delete failed: ${error}`);
@@ -4352,9 +4454,24 @@ terminalPasteButton.addEventListener('click', () => {
 });
 
 terminalCopyLastOsc52Button?.addEventListener('click', () => {
-  copyLastOsc52ToHostClipboard().catch((error) => {
+  const originalLabel = terminalCopyLastOsc52Button.textContent;
+  terminalCopyLastOsc52Button.disabled = true;
+  copyLastOsc52ToHostClipboard().then(() => {
+    terminalCopyLastOsc52Button.textContent = 'Copied';
+    // Keep the menu open so the explicit clipboard action has visible feedback.
+    // A user can then either repeat the operation or close the menu themselves.
+    setTimeout(() => {
+      terminalCopyLastOsc52Button.textContent = originalLabel;
+      terminalCopyLastOsc52Button.disabled = false;
+    }, 1800);
+  }).catch((error) => {
+    terminalCopyLastOsc52Button.textContent = 'Copy failed';
+    terminalCopyLastOsc52Button.disabled = false;
     showDiagnostic(`host OSC 52 copy failed: ${error}`);
-  }).finally(() => setWindowMenuOpen(false));
+    setTimeout(() => {
+      terminalCopyLastOsc52Button.textContent = originalLabel;
+    }, 2400);
+  });
 });
 
 // Kills the active terminal command while preserving the interactive shell.
@@ -4605,7 +4722,9 @@ diagnosticsPanel.addEventListener('keydown', (event) => {
 
   if (
     event.target === terminalLogSelectElement ||
-    event.target === terminalLogSearchElement
+    event.target === terminalLogSearchElement ||
+    event.target === diagnosticsFilterElement ||
+    event.target === diagnosticsFilterApplyButton
   ) {
     return;
   }
@@ -4947,6 +5066,19 @@ checkForUpdatesButton?.addEventListener('click', async () => {
     showDiagnostic(`update check failed: ${error}`);
   } finally {
     checkForUpdatesButton.disabled = false;
+  }
+});
+
+// The release URL in the Help panel is a deliberate user click. Use Tauri's
+// external opener so the URL opens in the system browser instead of navigating
+// the application webview.
+updatesDownloadLink?.addEventListener('click', async (event) => {
+  event.preventDefault();
+  try {
+    await window.fpasoterm.openExternalUrl(updatesDownloadLink.href);
+    showDiagnostic(`opened latest downloads: ${updatesDownloadLink.href}`);
+  } catch (error) {
+    showDiagnostic(`could not open latest downloads: ${error}`);
   }
 });
 

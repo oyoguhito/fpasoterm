@@ -32,7 +32,7 @@ assert.equal(platformDefaultConfig('darwin', 'x64').terminal.fontSize, 12);
 assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('darwin', 'x64').terminal.lineHeight, 1);
 assert.equal(platformDefaultConfig('darwin', 'arm64').terminal.lineHeight, 1);
-assert.equal(platformDefaultConfig('linux', 'x64').terminal.lineHeight, 1);
+assert.equal(platformDefaultConfig('linux', 'x64').terminal.lineHeight, 1.08);
 assert.equal(
   migrateLegacyTerminalLineHeight({ terminal: { lineHeight: 0.92 } }, 'darwin').terminal.lineHeight,
   1,
@@ -40,6 +40,10 @@ assert.equal(
 assert.equal(
   migrateLegacyTerminalLineHeight({ terminal: { lineHeight: 0.75 } }, 'darwin').terminal.lineHeight,
   0.75,
+);
+assert.equal(
+  migrateLegacyTerminalLineHeight({ terminal: { lineHeight: 1 } }, 'linux').terminal.lineHeight,
+  1.08,
 );
 assert.equal(platformDefaultConfig('win32', 'x64').terminal.fontSize, 14);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.minimumContrastRatio, 1);
@@ -312,6 +316,8 @@ assert.match(bin, /--update-config/);
 assert.match(bin, /--prune-config/);
 assert.match(bin, /--self-update/);
 assert.match(bin, /--self-update-checkout/);
+assert.match(bin, /releaseLatestUrl/);
+assert.match(bin, /Latest standalone downloads/);
 assert.match(bin, /--update-desktop/);
 assert.match(bin, /--shell/);
 assert.match(bin, /--cwd/);
@@ -336,6 +342,7 @@ assert.match(bin, /FPASOTERM_TITLEBAR_COLOR/);
 assert.match(bin, /applyWindowRuntimeOverrides/);
 assert.match(bin, /applyTerminalRuntimeOverrides/);
 assert.match(bin, /--console-diagnostics/);
+assert.match(bin, /--opaque-terminal/);
 assert.doesNotMatch(bin, /--debug-opaque-terminal/);
 assert.doesNotMatch(bin, /--x11/);
 assert.match(bin, /--disable-dmabuf/);
@@ -361,6 +368,9 @@ assert.match(bin, /consoleDiagnostics/);
 assert.doesNotMatch(bin, /node_modules.*@tauri-apps.*tauri\.js/);
 assert.match(bin, /detached: !options\.foreground/);
 assert.match(bin, /child\.unref\(\)/);
+assert.match(bin, /function waitForDesktopStartup/);
+assert.match(bin, /native window exited during startup/);
+assert.match(bin, /--foreground --console-diagnostics/);
 assert.match(bin, /windowsHide: !options\.foreground/);
 assert.match(bin, /isBuiltBinaryCurrent/);
 assert.match(bin, /latestRuntimeSourceMtime/);
@@ -430,12 +440,19 @@ assert.deepEqual(prunedConfig.removed, ['retired']);
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-const sourceCommit = spawnSync(fs.existsSync(path.join(root, '.jj')) ? 'jj' : 'git', fs.existsSync(path.join(root, '.jj'))
+let sourceCommit = spawnSync(fs.existsSync(path.join(root, '.jj')) ? 'jj' : 'git', fs.existsSync(path.join(root, '.jj'))
   ? ['-R', root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id.short(12)']
   : ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
   encoding: 'utf8',
 });
-const expectedVersion = `fpasoterm ${packageJson.version} (commit ${sourceCommit.stdout.trim() || 'unknown'})`;
+// A checkout can retain .jj metadata while a minimal CI/runtime PATH exposes
+// only Git. Match the launcher's Git fallback in that case.
+if (sourceCommit.error) {
+  sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
+    encoding: 'utf8',
+  });
+}
+const expectedVersion = `fpasoterm ${packageJson.version} (commit ${(sourceCommit.stdout || '').trim() || 'unknown'})`;
 assert.equal(versionResult.stdout.trim(), expectedVersion);
 
 const shortVersionResult = runCli('-v');
@@ -793,7 +810,7 @@ assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(ele
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
 assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
-assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*pluginCatalogSearchElement,\s*terminalLogShowSelectedButton/);
+assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*pluginCatalogSearchElement,\s*terminalLogShowSelectedButton/);
 
 const localPortsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-ports-'));
 const localPortManifest = path.join(localPortsFixture, 'ports', 'productivity', 'clipboard-translate', 'port.toml');
@@ -952,6 +969,8 @@ assert.match(rustMain, /print_cli_text\(&cli_help_text\(\)\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--version", "-v"\]\)/);
 assert.match(rustMain, /fn npm_update_check/);
 assert.match(rustMain, /github\.com\/oyoguhito\/fpasoterm\/releases\/latest/);
+assert.match(rustMain, /RELEASES_LATEST_URL/);
+assert.match(rustMain, /Latest standalone downloads/);
 assert.match(rustMain, /fn public_plugin_search_text/);
 assert.match(rustMain, /fn public_plugin_catalog_entries/);
 assert.match(rustMain, /fn plugin_catalog/);
@@ -1050,6 +1069,7 @@ assert.match(rustMain, /cli_positive_u32_option_any\(&\["--height", "-H"\]\)/);
 assert.match(rustMain, /cli_size_option/);
 assert.match(rustMain, /cli_has_flag\(&\["--debug-keys", "-k"\]\)/);
 assert.match(rustMain, /cli_has_flag\(&\["--console-diagnostics", "-C"\]\)/);
+assert.match(rustMain, /cli_has_flag\(&\["--opaque-terminal"\]\)/);
 assert.doesNotMatch(rustMain, /--debug-opaque-terminal/);
 assert.doesNotMatch(rustMain, /--x11/);
 assert.match(rustMain, /cli_has_flag\(&\["--disable-dmabuf"\]\)/);
@@ -1352,6 +1372,9 @@ assert.match(indexHtml, /id="terminal-log-search"/);
 assert.match(indexHtml, /id="terminal-log-search-next"/);
 assert.match(indexHtml, /Use N for next and P for previous/);
 assert.match(indexHtml, /id="terminal-log-search-status"/);
+assert.match(indexHtml, /id="diagnostics-filter"/);
+assert.match(indexHtml, /id="diagnostics-filter-apply"/);
+assert.match(indexHtml, /id="diagnostics-filter-status"/);
 assert.match(indexHtml, /id="terminal-log-show-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-all"/);
@@ -1482,7 +1505,7 @@ assert.match(configDocsEn, /backgroundOpacity = 0\.65/);
 assert.match(configDocsEn, /termName = "xterm-256color"/);
 assert.match(configDocsEn, /encoding = "utf-8"/);
 assert.match(configDocsEn, /fontSize = 14/);
-assert.match(configDocsEn, /lineHeight = 1/);
+assert.match(configDocsEn, /lineHeight = 1\.08/);
 assert.match(configDocsEn, /terminal\.lineHeight/);
 assert.match(configDocsEn, /minimumContrastRatio = 1/);
 assert.match(configDocsEn, /selected ANSI and RGB colors/);
@@ -1556,7 +1579,7 @@ assert.match(configDocsJa, /frame = false/);
 assert.match(configDocsJa, /allowTransparency = true/);
 assert.match(configDocsJa, /backgroundOpacity = 0\.65/);
 assert.match(configDocsJa, /termName = "xterm-256color"/);
-assert.match(configDocsJa, /lineHeight = 1/);
+assert.match(configDocsJa, /lineHeight = 1\.08/);
 assert.match(configDocsJa, /terminal\.lineHeight/);
 assert.match(configDocsJa, /minimumContrastRatio = 1/);
 assert.match(configDocsJa, /ANSI\/RGB色/);
@@ -1982,6 +2005,7 @@ assert.match(pluginTypes, /getOfficialPluginIndex:/);
 assert.match(pluginTypes, /readClipboard:/);
 assert.match(pluginTypes, /writeClipboard:/);
 assert.match(pluginTypes, /openExternalUrl:/);
+assert.match(read('src/renderer/index.html'), /id="updates-download-link"/);
 assert.match(pluginTypes, /selectLocalAsset:/);
 assert.match(pluginTypes, /openCanvasOverlay:/);
 assert.match(pluginTypes, /openWebPanel:/);
@@ -2020,6 +2044,15 @@ assert.match(renderer, /readClipboard: \(\) => window\.fpasoterm\.readClipboard\
 assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClipboard\(text\)/);
 assert.match(renderer, /writeOsc52Clipboard: \(text\) => invoke\('clipboard_write_osc52', \{ text \}\)/);
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
+assert.match(renderer, /updatesDownloadLink\?\.addEventListener\('click'/);
+assert.match(renderer, /opened latest downloads/);
+assert.match(renderer, /Let the native WebView create a paste event first/);
+assert.match(renderer, /terminal paste fallback failed/);
+assert.match(renderer, /latest OSC 52 text copied to host clipboard/);
+assert.match(renderer, /terminalCopyLastOsc52Button\.textContent = 'Copied'/);
+assert.match(renderer, /Keep the menu open so the explicit clipboard action has visible feedback/);
+assert.match(renderer, /function scheduleDiagnosticRender/);
+assert.match(renderer, /requestAnimationFrame\(\(\) =>/);
 assert.match(renderer, /selectLocalAsset: \(options\) => selectPluginLocalAsset\(options\)/);
 assert.match(renderer, /openCanvasOverlay: \(options\) => openPluginCanvasOverlay\(options\)/);
 assert.match(renderer, /openWebPanel: \(options\) => openPluginWebPanel\(options, plugin\?\.allowedOrigins\)/);
@@ -2466,6 +2499,9 @@ assert.doesNotMatch(styles, /#log-menu/);
 assert.match(styles, /#terminal-log-search/);
 assert.match(styles, /#terminal-log-search-next/);
 assert.match(styles, /#terminal-log-search-status/);
+assert.match(styles, /#diagnostics-filter/);
+assert.match(styles, /#diagnostics-filter-apply/);
+assert.match(styles, /#diagnostics-filter-status/);
 assert.match(styles, /#terminal-log-confirm/);
 assert.match(styles, /\.terminal-log-confirm-card/);
 assert.match(styles, /#sshfs-manager-dialog \{[\s\S]*overflow-y: auto;/);

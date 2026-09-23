@@ -102,12 +102,16 @@
           <input id="terminal-log-search" type="search" hidden aria-label="Search terminal log text" placeholder="Search">
           <button id="terminal-log-search-next" type="button" hidden aria-label="Search next match. Use N for next and P for previous.">Search</button>
           <span id="terminal-log-search-status" hidden aria-live="polite"></span>
+          <input id="diagnostics-filter" type="search" hidden aria-label="Filter diagnostics" placeholder="Filter diagnostics">
+          <button id="diagnostics-filter-apply" type="button" hidden>Filter</button>
+          <span id="diagnostics-filter-status" hidden aria-live="polite"></span>
           <input id="plugin-catalog-search" type="search" hidden aria-label="Search plugin catalog" placeholder="Search plugins">
           <span id="plugin-catalog-search-status" hidden aria-live="polite"></span>
           <button id="terminal-log-show-selected" type="button" hidden>Show Selected</button>
           <button id="terminal-log-delete-selected" type="button" hidden>Delete Selected</button>
           <button id="terminal-log-delete-all" type="button" hidden>Delete All</button>
           <button id="check-for-updates" type="button" hidden>Check for Updates</button>
+          <a id="updates-download-link" href="https://github.com/oyoguhito/fpasoterm/releases/latest" hidden>Latest downloads</a>
           <select id="terminal-encoding-select" hidden aria-label="Terminal output encoding">
             <option value="utf-8">UTF-8</option>
             <option value="shift-jis">Shift_JIS</option>

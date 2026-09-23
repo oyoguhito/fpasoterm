@@ -87,6 +87,12 @@ type FpasotermPluginApi = {
    * `tls://` verifies the certificate and target host using system trust roots.
    */
   openVncBridge: (options: { target: string }) => Promise<string>;
+  /**
+   * Opens a user-confirmed, one-time RDCleanPath loopback transport for a
+   * reviewed RDP WebAssembly client. The target must be a declared
+   * `tcp://host:port` endpoint.
+   */
+  openRdpBridge: (options: { target: string }) => Promise<string>;
   /** Prompts for a credential without persisting or logging its returned value. */
   promptSecret: (options?: { title?: string; message?: string; approve?: string }) => Promise<string | null>;
   /** Prompts for non-secret connection text without persisting or logging it. */

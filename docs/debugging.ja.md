@@ -54,6 +54,18 @@ ChromeOS/BaguetteでWebKitGTKの描画に問題がある場合は以下を使用
 fpasoterm --disable-dmabuf --foreground --console-diagnostics
 ```
 
+windowは開くもののterminal領域が見えない場合は、次の一回限りの診断起動を使用します。
+このoptionはWebViewに不透明なdark backgroundを注入しますが、その起動だけに限られ、
+`config.toml`は変更しません。
+
+```sh
+fpasoterm --opaque-terminal --foreground --console-diagnostics
+```
+
+consoleに`opaque terminal diagnostic CSS requested`が出ることを確認してください。
+backgroundが見えるようになった場合は、そのlineと最初のrenderer diagnosticを問題報告時に
+添付してください。
+
 glyph、terminfo、truecolor、OSC、bracketed paste、bellの問題は報告前にtitlebar menuの
 **Diagnostics > Font / Glyph Test**と**Diagnostics > Capability Test**を実行してください。
 [設定と診断](diagnostics.ja.md)、[Font / Glyph Diagnostics](font-diagnostics.ja.md)、

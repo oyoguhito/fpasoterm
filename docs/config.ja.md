@@ -247,7 +247,7 @@ cursorStyle = "block"
 fontFamily = "\"DejaVu Sans Mono\", \"Noto Sans Mono\", \"Noto Sans Mono CJK JP\", \"Noto Sans Mono CJK KR\", \"Noto Sans Mono CJK SC\", \"NanumGothicCoding\", \"BIZ UDGothic\", \"Symbols Nerd Font Mono\", \"Symbols Nerd Font\", \"JetBrainsMono Nerd Font\", \"Noto Sans CJK JP\", \"Noto Sans CJK KR\", \"Noto Sans CJK SC\", \"Noto Sans CJK TC\", \"Hiragino Kaku Gothic ProN\", \"Apple SD Gothic Neo\", \"Malgun Gothic\", Meiryo, ui-monospace, SFMono-Regular, Menlo, Consolas, monospace"
 fontSize = 14
 # 省略時の既定値はmacOS Intelで12、その他のOSで14です。
-lineHeight = 1
+lineHeight = 1.08
 minimumContrastRatio = 1
 rescaleOverlappingGlyphs = false
 backgroundOpacity = 0.65
@@ -379,7 +379,7 @@ autoStart = false
 maxBytes = 10485760
 ```
 
-`lineHeight` の既定値はmacOSを含む全OSで`1`です。TUI logo行の連続性より`g`/`q`/`y`などdescenderの判別を優先します。fpasoterm同梱のxterm.jsは`0.5`以上を受け付けます。macOSの以前のcompact既定値`0.8`、`0.81`、`0.82`、`0.85`、`0.9`、`0.92`と一致する既存設定はruntimeで移行します。明示したcustom値は保持します。
+`lineHeight` の既定値はmacOSで`1`、Linux/Windowsで`1.08`です。Linux/Windowsでは下端に小さな余白を設け、`g`/`q`/`y`などのdescenderと`_`が切れないようにします。fpasoterm同梱のxterm.jsは`0.5`以上を受け付けます。以前の既定値と一致する既存設定はruntimeで移行します。明示したcustom値は保持します。
 
 macOSではbox/block glyphのmetricsがmacOS Terminalに近い`Menlo`を既定fontの先頭にします。`SF Mono`はfallbackとして維持します。
 
@@ -400,7 +400,7 @@ encoding = "utf-8"
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`lineHeight` の既定値はterminal artやTUI logoの隣接行がつながるように `1` です。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。`terminal.kittyKeyboard` は既定で `false` です。enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化してください。WebViewごとにIME動作が異なるためです。graphicsを有効化する設定ではありません。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`lineHeight` の既定値はmacOSで `1`、Linux/Windowsで `1.08` です。Linux/Windowsでは下端の余白により`_`とdescenderを見やすくします。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。`terminal.kittyKeyboard` は既定で `false` です。enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化してください。WebViewごとにIME動作が異なるためです。graphicsを有効化する設定ではありません。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
 
 Windowsで非標準の場所にPowerShellをinstallしている場合は、`C:\Program Files\PowerShell\7\pwsh.exe` のようにshellのフルパスを指定できます。
 
