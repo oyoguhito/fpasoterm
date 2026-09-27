@@ -50,46 +50,32 @@ For IME, rendering, clipboard, and window issues, follow the forced rebuild,
 event-trace, and safe-reporting workflow in [docs/debugging.en.md](docs/debugging.en.md).
 Japanese contribution guidance is available in [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md).
 
-### Verify a Plugin activity error
+### Verify Plugin activity UI
 
-The unit test covers successful, failed, and missing plugin commands. To verify
-the actual WebView panel and its Close button, use a deliberately failing local
-plugin rather than relying on an incidental RDP or network failure. Create
-`~/.config/fpasoterm/User/plugins/plugin-activity-error-test.js` with the
-following trusted, temporary source:
-
-```js
-// @fpasoterm-plugin version: 1.0.0
-// @fpasoterm-plugin description: Temporary Plugin activity error-panel test.
-(() => {
-  const api = window.fpasotermPluginApi;
-  api.registerCommand(
-    'diagnostics.plugin-activity-error',
-    'Test Plugin Activity Error',
-    () => {
-      throw new Error('Intentional Plugin activity test error');
-    },
-  );
-})();
-```
-
-Enable it and restart the local development runtime:
+The unit test covers successful, failed, and missing plugin commands. The
+checked-in `examples/plugins/plugin-activity-test.ts` provides the equivalent
+repeatable UI check, so do not create a temporary plugin or depend on an
+incidental RDP/network failure. Install it into the trusted local plugin
+directory, enable it, and restart the local development runtime:
 
 ```sh
-node ./bin/fpasoterm --plugin-enable plugin-activity-error-test
+node ./bin/fpasoterm --plugin-install-file examples/plugins/plugin-activity-test.ts --enable
 node ./bin/fpasoterm --dev
 ```
 
-Choose **Test Plugin Activity Error** from the Plugin menu. Confirm that the
-error panel appears, then select **Close** and verify that the panel disappears
-and terminal keyboard input works immediately. Clean up the temporary trusted
-source and its `plugins.enabled` entry afterward:
+First choose **Test Plugin Activity Success** from the Plugin menu. It must
+write its completion line to the terminal and return terminal focus; this is the
+normal-path check. Then choose **Test Plugin Activity Error**. Confirm that the
+error panel appears, select **Close**, and verify that the panel disappears and
+terminal keyboard input works immediately. Remove the installed example when
+the checks are complete:
 
 ```sh
-node ./bin/fpasoterm --plugin-uninstall plugin-activity-error-test
+node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
 ```
 
-Do not commit, distribute, or normally enable this test plugin.
+The example is committed for development verification, but should not normally
+remain enabled in an end-user configuration.
 
 ## Pull Request Review
 

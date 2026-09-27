@@ -51,44 +51,31 @@ IME、描画、clipboard、window問題を再現・報告する場合は、
 [デバッグガイド](docs/debugging.ja.md)の強制rebuild、event trace、秘匿情報確認の手順を
 使用してください。
 
-### Plugin activity の error表示を実機確認する
+### Plugin activity UIを実機確認する
 
 unit testでは正常command、例外command、未登録commandを確認します。実際のWebView上の
-error panelとClose buttonは、偶発的なRDP/network errorに依存せず、意図的に例外を出す
-一時local pluginで確認します。`~/.config/fpasoterm/User/plugins/plugin-activity-error-test.js`
-を作成し、次の信頼できる検証用sourceだけを配置します。
-
-```js
-// @fpasoterm-plugin version: 1.0.0
-// @fpasoterm-plugin description: Temporary Plugin activity error-panel test.
-(() => {
-  const api = window.fpasotermPluginApi;
-  api.registerCommand(
-    'diagnostics.plugin-activity-error',
-    'Test Plugin Activity Error',
-    () => {
-      throw new Error('Intentional Plugin activity test error');
-    },
-  );
-})();
-```
-
-有効化してlocal development runtimeを再起動します。
+表示は、偶発的なRDP/network errorに依存せず、同梱済みの
+`examples/plugins/plugin-activity-test.ts`で繰り返し確認します。一時pluginを手作業で
+作成せず、信頼するlocal plugin directoryへinstallして有効化し、local development runtimeを
+再起動します。
 
 ```sh
-node ./bin/fpasoterm --plugin-enable plugin-activity-error-test
+node ./bin/fpasoterm --plugin-install-file examples/plugins/plugin-activity-test.ts --enable
 node ./bin/fpasoterm --dev
 ```
 
-Plugin menuから **Test Plugin Activity Error** を選択します。error panelが表示されること、
-**Close** でpanelが消えること、直後からterminalへkeyboard入力できることを確認してください。
-確認後は一時plugin sourceと`plugins.enabled` entryをまとめて削除します。
+最初にPlugin menuから **Test Plugin Activity Success** を選択します。terminalへ完了行を
+書き込み、terminal focusへ戻ることが正常系の確認です。次に
+**Test Plugin Activity Error** を選択します。error panelが表示されること、**Close** で
+panelが消えること、直後からterminalへkeyboard入力できることを確認してください。確認後は
+install済みexampleを削除します。
 
 ```sh
-node ./bin/fpasoterm --plugin-uninstall plugin-activity-error-test
+node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
 ```
 
-このtest pluginはcommit、配布、通常利用をしません。
+このexampleは開発検証用としてcommitされていますが、end-user設定で通常有効化したままに
+しないでください。
 
 ## Pull Requestの確認
 
