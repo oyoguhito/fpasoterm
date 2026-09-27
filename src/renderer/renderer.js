@@ -2858,8 +2858,35 @@ async function loadPlugins() {
       showDiagnostic(`plugin: ${text}`);
       showPluginCommandStatus(`plugin: ${text}`);
     },
-    readClipboard: () => window.fpasoterm.readClipboard(),
-    writeClipboard: (text) => window.fpasoterm.writeClipboard(text),
+    // Plugins use the same combined WebView + native clipboard path as the
+    // terminal itself.  Calling only the native backend here caused remote
+    // desktop ports to observe a stale X11/Wayland selection on some hosts.
+    // Clipboard access remains available only to a reviewed, enabled plugin.
+    readClipboard: async () => {
+      const readers = isMacPlatform()
+        ? [
+          async () => window.fpasoterm.readClipboard(),
+          async () => navigator.clipboard?.readText?.() || '',
+        ]
+        : [
+          async () => navigator.clipboard?.readText?.() || '',
+          async () => window.fpasoterm.readClipboard(),
+        ];
+      const errors = [];
+      for (const read of readers) {
+        try {
+          const value = await read();
+          if (value) return String(value);
+        } catch (error) {
+          errors.push(String(error));
+        }
+      }
+      if (errors.length) throw new Error(`clipboard read failed: ${errors.join('; ')}`);
+      return '';
+    },
+    writeClipboard: async (text) => {
+      await writeClipboardText(String(text || ''));
+    },
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
     openElementOverlay: (options) => openPluginElementOverlay(options),

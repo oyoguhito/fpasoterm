@@ -4453,6 +4453,9 @@ struct PublicPluginCatalogEntry {
     license: String,
     min_fpasoterm_version: String,
     install_path: String,
+    revision: String,
+    previous_version: String,
+    previous_revision: String,
 }
 
 // Permits only normal, portable port path components in a public registry request.
@@ -4484,8 +4487,11 @@ fn safe_public_plugin_relative_path(value: &str) -> bool {
 }
 
 // Downloads a bounded UTF-8 text file only from the fixed public ports repository.
-fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String, String> {
-    let url = format!("{PUBLIC_PLUGIN_PORTS_RAW_URL}/{relative_path}");
+fn download_public_plugin_file(reference: &str, relative_path: &str, limit: u64) -> Result<String, String> {
+    if reference != "main" && (reference.len() != 40 || !reference.chars().all(|value| value.is_ascii_hexdigit())) {
+        return Err("official plugin source revision is invalid".to_string());
+    }
+    let url = format!("{PUBLIC_PLUGIN_PORTS_RAW_URL}/{reference}/{relative_path}");
     let response = ureq::get(&url)
         .set(
             "User-Agent",
@@ -4517,13 +4523,13 @@ fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String
 
 // Downloads and validates the compact official INDEX without downloading plugin code.
 fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, String> {
-    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
+    let index = download_public_plugin_file("main", "INDEX", 256 * 1024)?;
     index
         .lines()
         .enumerate()
         .map(|(line_number, line)| {
             let fields = line.split('|').collect::<Vec<_>>();
-            if fields.len() != 8 || fields.iter().any(|field| field.trim().is_empty()) {
+            if fields.len() != 11 || fields.iter().any(|field| field.trim().is_empty()) {
                 return Err(format!("official INDEX:{} is malformed", line_number + 1));
             }
             let id = validate_public_plugin_port_id(fields[0])?;
@@ -4542,6 +4548,9 @@ fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, Stri
                 license: fields[5].to_string(),
                 min_fpasoterm_version: fields[6].to_string(),
                 install_path: fields[7].to_string(),
+                revision: fields[8].to_string(),
+                previous_version: fields[9].to_string(),
+                previous_revision: fields[10].to_string(),
             })
         })
         .collect()
@@ -4749,8 +4758,17 @@ fn install_public_plugin_port(
     selector: &str,
     force: bool,
 ) -> Result<String, String> {
-    let id = validate_public_plugin_port_id(selector)?;
+    let (requested_id, use_previous) = selector
+        .strip_suffix("@previous")
+        .map(|id| (id, true))
+        .unwrap_or((selector, false));
+    let id = validate_public_plugin_port_id(requested_id)?;
+    let catalog = public_plugin_catalog_entries()?;
+    let entry = catalog.iter().find(|entry| entry.id == id)
+        .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
+    let revision = if use_previous { &entry.previous_revision } else { &entry.revision };
     let manifest_text = download_public_plugin_file(
+        revision,
         &format!("ports/{id}/port.toml"),
         PUBLIC_PLUGIN_MANIFEST_LIMIT,
     )?;
@@ -4763,6 +4781,7 @@ fn install_public_plugin_port(
         ));
     }
     let source = download_public_plugin_file(
+        revision,
         &format!("ports/{}/{}", port.id, port.source),
         port.source_limit,
     )?;
