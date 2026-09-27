@@ -51,6 +51,32 @@ IME、描画、clipboard、window問題を再現・報告する場合は、
 [デバッグガイド](docs/debugging.ja.md)の強制rebuild、event trace、秘匿情報確認の手順を
 使用してください。
 
+### Plugin activity UIを実機確認する
+
+unit testでは正常command、例外command、未登録commandを確認します。実際のWebView上の
+表示は、偶発的なRDP/network errorに依存せず、同梱済みの
+`examples/plugins/plugin-activity-test.ts`で繰り返し確認します。一時pluginを手作業で
+作成せず、信頼するlocal plugin directoryへinstallして有効化し、local development runtimeを
+再起動します。
+
+```sh
+node ./bin/fpasoterm --plugin-install-file examples/plugins/plugin-activity-test.ts --enable
+node ./bin/fpasoterm --dev
+```
+
+最初にPlugin menuから **Test Plugin Activity Success** を選択します。terminalへ完了行を
+書き込み、terminal focusへ戻ることが正常系の確認です。次に
+**Test Plugin Activity Error** を選択します。error panelが表示されること、**Close** で
+panelが消えること、直後からterminalへkeyboard入力できることを確認してください。確認後は
+install済みexampleを削除します。
+
+```sh
+node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
+```
+
+このexampleは開発検証用としてcommitされていますが、end-user設定で通常有効化したままに
+しないでください。
+
 ## Pull Requestの確認
 
 Pull Request内の変更を確認する場合、tagged release assetではなくPR revisionをcheckoutして

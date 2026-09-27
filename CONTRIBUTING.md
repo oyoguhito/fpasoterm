@@ -50,6 +50,33 @@ For IME, rendering, clipboard, and window issues, follow the forced rebuild,
 event-trace, and safe-reporting workflow in [docs/debugging.en.md](docs/debugging.en.md).
 Japanese contribution guidance is available in [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md).
 
+### Verify Plugin activity UI
+
+The unit test covers successful, failed, and missing plugin commands. The
+checked-in `examples/plugins/plugin-activity-test.ts` provides the equivalent
+repeatable UI check, so do not create a temporary plugin or depend on an
+incidental RDP/network failure. Install it into the trusted local plugin
+directory, enable it, and restart the local development runtime:
+
+```sh
+node ./bin/fpasoterm --plugin-install-file examples/plugins/plugin-activity-test.ts --enable
+node ./bin/fpasoterm --dev
+```
+
+First choose **Test Plugin Activity Success** from the Plugin menu. It must
+write its completion line to the terminal and return terminal focus; this is the
+normal-path check. Then choose **Test Plugin Activity Error**. Confirm that the
+error panel appears, select **Close**, and verify that the panel disappears and
+terminal keyboard input works immediately. Remove the installed example when
+the checks are complete:
+
+```sh
+node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
+```
+
+The example is committed for development verification, but should not normally
+remain enabled in an end-user configuration.
+
 ## Pull Request Review
 
 Do not review a tagged release asset when the requested change is in a pull

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.6.9
+
+- Added a Close button to the Plugin activity error panel. It returns focus to
+  the terminal without discarding the underlying diagnostics.
+
 ## 1.6.8
 
 - Added the reviewed-plugin RDP WebAssembly bridge API. VNC uses a constrained

@@ -237,6 +237,7 @@ for (const file of [
   'scripts/security/scan-secrets.js',
   'src/config.js',
   'src/renderer/index.html',
+  'src/renderer/plugin-command-runtime.js',
   'src/renderer/renderer.js',
   'src/renderer/styles.css',
   'src/renderer/vendor/xterm/xterm.css',
@@ -806,6 +807,7 @@ assert.match(read('src/renderer/renderer.js'), /Plugin Catalog/);
 assert.match(read('src/renderer/renderer.js'), /minFpasotermVersion/);
 assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
+assert.match(read('src/renderer/renderer.js'), /pluginCommandRuntime\.closePluginCommandStatus\(pluginCommandStatusElement, focusTerminalInput\)/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
@@ -1302,6 +1304,8 @@ assert.doesNotMatch(indexHtml, /Write Diagnostics/);
 assert.doesNotMatch(indexHtml, /id="copy-diagnostics"/);
 assert.match(indexHtml, /id="close-diagnostics"/);
 assert.match(indexHtml, /id="terminal-mirror"[\s\S]*id="close-terminal-mirror"/);
+assert.match(indexHtml, /id="plugin-command-status"[\s\S]*id="close-plugin-command-status"/);
+assert.match(indexHtml, /script src="\.\/plugin-command-runtime\.js"/);
 assert.match(indexHtml, /id="terminal-mirror-text"/);
 assert.match(indexHtml, /id="terminal-copy-last-osc52"/);
 assert.doesNotMatch(indexHtml, removedKebabHttpUiPattern);
@@ -1482,6 +1486,16 @@ assert.match(readmeJa, /CONTRIBUTING\.ja\.md/);
 const debuggingDocsEn = read('docs/debugging.en.md');
 const debuggingDocsJa = read('docs/debugging.ja.md');
 const contributingJa = read('CONTRIBUTING.ja.md');
+assert.match(read('CONTRIBUTING.md'), /Verify Plugin activity UI/);
+assert.match(read('CONTRIBUTING.md'), /examples\/plugins\/plugin-activity-test\.ts/);
+assert.match(read('CONTRIBUTING.md'), /--plugin-uninstall plugin-activity-test\.ts/);
+assert.match(contributingJa, /Plugin activity UIを実機確認する/);
+assert.match(contributingJa, /--plugin-uninstall plugin-activity-test\.ts/);
+const pluginActivityTest = read('examples/plugins/plugin-activity-test.ts');
+assert.match(pluginActivityTest, /Test Plugin Activity Success/);
+assert.match(pluginActivityTest, /Test Plugin Activity Error/);
+assert.match(pluginActivityTest, /Intentional Plugin activity test error/);
+assert.doesNotThrow(() => new Function(pluginActivityTest));
 assert.match(debuggingDocsEn, /--dev --foreground --debug-keys --console-diagnostics/);
 assert.match(debuggingDocsEn, /compositionstart\|compositionupdate\|compositionend/);
 assert.match(debuggingDocsJa, /IME Composition Trace/);
@@ -1761,6 +1775,9 @@ assert.match(pluginDocsEn, /registerCommand/);
 assert.match(pluginDocsEn, /--plugin-run/);
 assert.match(pluginDocsEn, /plugin\/path:command-id/);
 assert.match(pluginDocsEn, /@fpasoterm-plugin version/);
+assert.match(pluginDocsEn, /openVncBridge\(\)[\s\S]*system-root certificate/);
+assert.match(pluginDocsEn, /openRdpBridge\(\)[\s\S]*RDCleanPath/);
+assert.match(pluginDocsEn, /openRdpBridge\(\)[\s\S]*tcp:\/\/host:port/);
 
 const pluginDocsJa = read('docs/plugins.ja.md');
 assert.match(pluginDocsJa, /\[plugins\]/);
@@ -1773,6 +1790,9 @@ assert.match(pluginDocsJa, /registerCommand/);
 assert.match(pluginDocsJa, /--plugin-run/);
 assert.match(pluginDocsJa, /plugin\/path:command-id/);
 assert.match(pluginDocsJa, /@fpasoterm-plugin version/);
+assert.match(pluginDocsJa, /openVncBridge\(\)[\s\S]*trust store/);
+assert.match(pluginDocsJa, /openRdpBridge\(\)[\s\S]*RDCleanPath/);
+assert.match(pluginDocsJa, /openRdpBridge\(\)[\s\S]*tcp:\/\/host:port/);
 
 const welcomeBannerPlugin = read('examples/plugins/welcome-banner.ts');
 assert.match(welcomeBannerPlugin, /fpasotermPluginApi/);
@@ -2009,6 +2029,10 @@ assert.match(read('src/renderer/index.html'), /id="updates-download-link"/);
 assert.match(pluginTypes, /selectLocalAsset:/);
 assert.match(pluginTypes, /openCanvasOverlay:/);
 assert.match(pluginTypes, /openWebPanel:/);
+assert.match(pluginTypes, /allowed-tcp-targets[\s\S]*openVncBridge:/);
+assert.match(pluginTypes, /system trust roots[\s\S]*openVncBridge:/);
+assert.match(pluginTypes, /RDCleanPath[\s\S]*openRdpBridge:/);
+assert.match(pluginTypes, /tcp:\/\/host:port[\s\S]*openRdpBridge:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
