@@ -4535,7 +4535,8 @@ fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, Stri
         .enumerate()
         .map(|(line_number, line)| {
             let fields = line.split('|').collect::<Vec<_>>();
-            if fields.len() != 11 || fields.iter().any(|field| field.trim().is_empty()) {
+            if !matches!(fields.len(), 8 | 11) || fields.iter().any(|field| field.trim().is_empty())
+            {
                 return Err(format!("official INDEX:{} is malformed", line_number + 1));
             }
             let id = validate_public_plugin_port_id(fields[0])?;
@@ -4554,9 +4555,12 @@ fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, Stri
                 license: fields[5].to_string(),
                 min_fpasoterm_version: fields[6].to_string(),
                 install_path: fields[7].to_string(),
-                revision: fields[8].to_string(),
-                previous_version: fields[9].to_string(),
-                previous_revision: fields[10].to_string(),
+                // The formerly published catalog has eight fields. Retain
+                // catalog search/install during the coordinated rollout; its
+                // source remains official main until revisions are published.
+                revision: fields.get(8).copied().unwrap_or("main").to_string(),
+                previous_version: fields.get(9).copied().unwrap_or("").to_string(),
+                previous_revision: fields.get(10).copied().unwrap_or("").to_string(),
             })
         })
         .collect()
@@ -4774,6 +4778,12 @@ fn install_public_plugin_port(
         .iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
+    if use_previous && entry.previous_revision.is_empty() {
+        return Err(format!(
+            "{} has no previous stable revision in the published INDEX yet",
+            entry.id
+        ));
+    }
     let revision = if use_previous {
         &entry.previous_revision
     } else {
