@@ -45,7 +45,7 @@ const helpText = `Usage: fpasoterm [options]
 
 Options:
   -h, --help                    Show this help.
-  -v, --version                 Show the version and source commit.
+  -v, --version                 Show the native runtime version and build commit.
       --update-check             Compare the installed version with npm latest, then exit.
       --completion <shell>      Print a completion script: bash, zsh, fish, or powershell.
       --completion-install <shell>
@@ -721,9 +721,46 @@ function validateArgs(argv) {
   }
 }
 
-// Prints the package version and the checkout commit without starting the desktop process.
+// Prints the same version string as the native runtime without opening its window.
 function printVersion() {
-  console.log(versionText());
+  console.log(runtimeVersionText() || versionText());
+}
+
+// The native runtime embeds its build commit in Rust at compile time. Prefer it
+// over the checkout revision so `bin/fpasoterm --version` and Help identify the
+// same executable. A source-only checkout has no runtime to query, so retain
+// the checkout identifier as a non-building fallback.
+function runtimeVersionText() {
+  const tauriBinary = findRuntimeVersionBinary();
+  if (!tauriBinary) {
+    return '';
+  }
+
+  const result = spawnSync(tauriBinary, ['--version'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+  return result.status === 0 ? result.stdout.trim() : '';
+}
+
+// Version reporting must describe the runtime a developer actually launched,
+// even when its sources have changed since then. Unlike findTauriBinary(), do
+// not apply the freshness check here: that check is for deciding whether it is
+// safe to launch a binary without rebuilding. Source-checkout launches produce
+// the debug runtime, so prefer it over an older release artifact.
+function findRuntimeVersionBinary() {
+  if (process.env.FPASOTERM_TAURI_BIN && fs.existsSync(process.env.FPASOTERM_TAURI_BIN)) {
+    return process.env.FPASOTERM_TAURI_BIN;
+  }
+
+  const executable = process.platform === 'win32' ? 'fpasoterm.exe' : 'fpasoterm';
+  for (const profile of ['debug', 'release']) {
+    const candidate = path.join(root, 'src-tauri', 'target', profile, executable);
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return '';
 }
 
 // Returns one stable build identifier for CLI output and diagnostics reports.

@@ -441,24 +441,13 @@ assert.deepEqual(prunedConfig.removed, ['retired']);
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-let sourceCommit = spawnSync(fs.existsSync(path.join(root, '.jj')) ? 'jj' : 'git', fs.existsSync(path.join(root, '.jj'))
-  ? ['-R', root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id.short(12)']
-  : ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
-  encoding: 'utf8',
-});
-// A checkout can retain .jj metadata while a minimal CI/runtime PATH exposes
-// only Git. Match the launcher's Git fallback in that case.
-if (sourceCommit.error) {
-  sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
-    encoding: 'utf8',
-  });
-}
-const expectedVersion = `fpasoterm ${packageJson.version} (commit ${(sourceCommit.stdout || '').trim() || 'unknown'})`;
-assert.equal(versionResult.stdout.trim(), expectedVersion);
+assert.match(versionResult.stdout.trim(), new RegExp(`^fpasoterm ${packageJson.version.replaceAll('.', '\\.')} \\(commit (?:[0-9a-f]{12}|unknown)\\)$`));
 
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
-assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
+assert.equal(shortVersionResult.stdout.trim(), versionResult.stdout.trim());
+const launcherSource = fs.readFileSync(path.join(root, 'bin', 'fpasoterm'), 'utf8');
+assert.match(launcherSource, /function runtimeVersionText\(\)[\s\S]*?findRuntimeVersionBinary\(\)[\s\S]*?spawnSync\(tauriBinary, \['--version'\]/);
 
 const bashCompletionResult = runCli('--completion', 'bash');
 assert.equal(bashCompletionResult.status, 0, bashCompletionResult.stderr);
