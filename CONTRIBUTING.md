@@ -50,6 +50,47 @@ For IME, rendering, clipboard, and window issues, follow the forced rebuild,
 event-trace, and safe-reporting workflow in [docs/debugging.en.md](docs/debugging.en.md).
 Japanese contribution guidance is available in [CONTRIBUTING.ja.md](CONTRIBUTING.ja.md).
 
+### Verify a Plugin activity error
+
+The unit test covers successful, failed, and missing plugin commands. To verify
+the actual WebView panel and its Close button, use a deliberately failing local
+plugin rather than relying on an incidental RDP or network failure. Create
+`~/.config/fpasoterm/User/plugins/plugin-activity-error-test.js` with the
+following trusted, temporary source:
+
+```js
+// @fpasoterm-plugin version: 1.0.0
+// @fpasoterm-plugin description: Temporary Plugin activity error-panel test.
+(() => {
+  const api = window.fpasotermPluginApi;
+  api.registerCommand(
+    'diagnostics.plugin-activity-error',
+    'Test Plugin Activity Error',
+    () => {
+      throw new Error('Intentional Plugin activity test error');
+    },
+  );
+})();
+```
+
+Enable it and restart the local development runtime:
+
+```sh
+node ./bin/fpasoterm --plugin-enable plugin-activity-error-test
+node ./bin/fpasoterm --dev
+```
+
+Choose **Test Plugin Activity Error** from the Plugin menu. Confirm that the
+error panel appears, then select **Close** and verify that the panel disappears
+and terminal keyboard input works immediately. Clean up the temporary trusted
+source and its `plugins.enabled` entry afterward:
+
+```sh
+node ./bin/fpasoterm --plugin-uninstall plugin-activity-error-test
+```
+
+Do not commit, distribute, or normally enable this test plugin.
+
 ## Pull Request Review
 
 Do not review a tagged release asset when the requested change is in a pull
