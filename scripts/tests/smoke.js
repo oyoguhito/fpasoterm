@@ -963,6 +963,8 @@ assert.match(rustMain, /sanitize_cli_value/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_SHELL"/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_WINDOW_TITLE"/);
 assert.match(rustMain, /FPASOTERM_WINDOW_TITLE_LOCKED/);
+assert.match(rustMain, /https:\/\/raw\.githubusercontent\.com\/oyoguhito\/fpasoterm-plugins"/);
+assert.match(rustMain, /\{PUBLIC_PLUGIN_PORTS_RAW_URL\}\/\{reference\}\/\{relative_path\}/);
 assert.match(rustMain, /title_locked/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_START_COMMAND"/);
 assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);

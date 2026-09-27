@@ -4423,7 +4423,7 @@ fn read_plugin_metadata(path: &Path) -> PluginMetadata {
 }
 
 const PUBLIC_PLUGIN_PORTS_RAW_URL: &str =
-    "https://raw.githubusercontent.com/oyoguhito/fpasoterm-plugins/main";
+    "https://raw.githubusercontent.com/oyoguhito/fpasoterm-plugins";
 const PUBLIC_PLUGIN_MANIFEST_LIMIT: u64 = 64 * 1024;
 const PUBLIC_PLUGIN_SOURCE_LIMIT: u64 = 1024 * 1024;
 // A reviewed port may opt into a larger bundled source, for example a WebAssembly
