@@ -32,6 +32,8 @@ const {
 } = require(path.join(root, 'src', 'config'));
 const packageJson = require(path.join(root, 'package.json'));
 const releaseLatestUrl = 'https://github.com/oyoguhito/fpasoterm/releases/latest';
+const defaultPluginPortSourceLimit = 1024 * 1024;
+const maximumDeclaredPluginPortSourceLimit = 8 * 1024 * 1024;
 const launcherStartedAt = Number(process.env.FPASOTERM_LAUNCH_STARTED_AT) || Date.now();
 const launcherLogPath = process.env.FPASOTERM_LAUNCHER_LOG || path.join(
   process.platform === 'win32'
@@ -945,7 +947,16 @@ function parsePluginPortManifest(id, manifestText, label) {
     || !/^(?:[A-Za-z0-9_-]+\/)+[A-Za-z0-9_-]+\.(?:js|ts)$/.test(installPath)) {
     throw new Error(`${label} port manifest has an unsafe source or install path`);
   }
-  return { version, sourceName, installPath };
+  const declaredSourceLimit = manifest?.maxSourceBytes;
+  const sourceLimit = declaredSourceLimit === undefined
+    ? defaultPluginPortSourceLimit
+    : declaredSourceLimit;
+  if (!Number.isInteger(sourceLimit)
+    || sourceLimit < defaultPluginPortSourceLimit
+    || sourceLimit > maximumDeclaredPluginPortSourceLimit) {
+    throw new Error(`${label} port manifest port.maxSourceBytes must be an integer from ${defaultPluginPortSourceLimit} to ${maximumDeclaredPluginPortSourceLimit}`);
+  }
+  return { version, sourceName, installPath, sourceLimit };
 }
 
 // Writes one reviewed source into User/plugins without following an existing symlink.
@@ -1004,8 +1015,8 @@ function installPluginSource(options, source, installPath, origin, version) {
 async function installPublicPlugin(options) {
   for (const id of pluginInstallPortIds(options.pluginInstall)) {
     const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
-    const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'public');
-    const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, 1024 * 1024);
+    const { version, sourceName, installPath, sourceLimit } = parsePluginPortManifest(id, manifestText, 'public');
+    const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, sourceLimit);
     installPluginSource(options, source, installPath, `public port ${id}`, version);
   }
 }
@@ -1044,8 +1055,8 @@ function installLocalPluginPort(options) {
   for (const id of pluginInstallPortIds(options.pluginInstall)) {
     const portDirectory = path.join(portsDirectory, ...id.split('/'));
     const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
-    const { version, sourceName, installPath } = parsePluginPortManifest(id, manifestText, 'local');
-    const source = readLocalPluginText(path.join(portDirectory, sourceName), 1024 * 1024, 'local plugin source');
+    const { version, sourceName, installPath, sourceLimit } = parsePluginPortManifest(id, manifestText, 'local');
+    const source = readLocalPluginText(path.join(portDirectory, sourceName), sourceLimit, 'local plugin source');
     installPluginSource(options, source, installPath, `local port ${id}`, version);
   }
 }
@@ -1054,7 +1065,7 @@ function installLocalPluginPort(options) {
 function installLocalPluginFile(options) {
   const filePath = path.resolve(options.pluginInstallFile);
   if (!/\.(?:js|ts)$/i.test(filePath)) throw new Error('--plugin-install-file requires a .js or .ts file');
-  const source = readLocalPluginText(filePath, 1024 * 1024, 'local plugin source');
+  const source = readLocalPluginText(filePath, defaultPluginPortSourceLimit, 'local plugin source');
   const version = pluginMetadata(source).version;
   if (!version || version === '(not declared)') {
     throw new Error('local plugin source must declare // @fpasoterm-plugin version: <version>');
