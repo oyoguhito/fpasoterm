@@ -237,6 +237,7 @@ for (const file of [
   'scripts/security/scan-secrets.js',
   'src/config.js',
   'src/renderer/index.html',
+  'src/renderer/plugin-command-runtime.js',
   'src/renderer/renderer.js',
   'src/renderer/styles.css',
   'src/renderer/vendor/xterm/xterm.css',
@@ -806,7 +807,7 @@ assert.match(read('src/renderer/renderer.js'), /Plugin Catalog/);
 assert.match(read('src/renderer/renderer.js'), /minFpasotermVersion/);
 assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
-assert.match(read('src/renderer/renderer.js'), /closePluginCommandStatusButton\?\.addEventListener\('click',[\s\S]*pluginCommandStatusElement\.hidden = true;[\s\S]*focusTerminalInput\(\)/);
+assert.match(read('src/renderer/renderer.js'), /pluginCommandRuntime\.closePluginCommandStatus\(pluginCommandStatusElement, focusTerminalInput\)/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
@@ -1304,6 +1305,7 @@ assert.doesNotMatch(indexHtml, /id="copy-diagnostics"/);
 assert.match(indexHtml, /id="close-diagnostics"/);
 assert.match(indexHtml, /id="terminal-mirror"[\s\S]*id="close-terminal-mirror"/);
 assert.match(indexHtml, /id="plugin-command-status"[\s\S]*id="close-plugin-command-status"/);
+assert.match(indexHtml, /script src="\.\/plugin-command-runtime\.js"/);
 assert.match(indexHtml, /id="terminal-mirror-text"/);
 assert.match(indexHtml, /id="terminal-copy-last-osc52"/);
 assert.doesNotMatch(indexHtml, removedKebabHttpUiPattern);

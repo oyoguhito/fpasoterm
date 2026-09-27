@@ -114,6 +114,7 @@ const pluginCommandStatusElement = document.getElementById('plugin-command-statu
 const pluginCommandStatusTextElement = document.getElementById('plugin-command-status-text');
 const pluginCommandStatusCopyButton = document.getElementById('plugin-command-status-copy');
 const closePluginCommandStatusButton = document.getElementById('close-plugin-command-status');
+const pluginCommandRuntime = window.fpasotermPluginCommandRuntime;
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 let pluginActivity = false;
 const diagnosticLines = [];
@@ -1010,10 +1011,7 @@ pluginCommandStatusCopyButton?.addEventListener('click', async () => {
 // must never trap the user above the terminal. Closing it preserves its log
 // lines until the next activity update and returns keyboard input to xterm.
 closePluginCommandStatusButton?.addEventListener('click', () => {
-  if (pluginCommandStatusElement) {
-    pluginCommandStatusElement.hidden = true;
-  }
-  focusTerminalInput();
+  pluginCommandRuntime.closePluginCommandStatus(pluginCommandStatusElement, focusTerminalInput);
 });
 
 // Converts control characters into visible markers for diagnostics output.
@@ -3038,28 +3036,20 @@ function resolvePluginCommand(selector) {
 
 // Invokes a registered command and reports plugin failures without closing the app.
 async function runPluginCommand(commandId, args) {
-  const command = pluginCommands.get(commandId);
-  if (!command) {
-    return;
-  }
-  setWindowMenuOpen(false);
-  showPluginCommandStatus(`command started: ${commandId}`);
-  pluginCommandInvocationDepth += 1;
-  try {
-    await command.handler(args);
-    showPluginCommandStatus(`command completed: ${commandId}`);
-  } catch (error) {
-    // WebKitGTK's Error.stack can contain locations without the message.
-    // Preserve every available field so activity/log diagnostics identify the
-    // failed API rather than reporting only a source line.
-    const detail = [error?.name, error?.message, error?.stack || String(error)]
-      .filter((value, index, values) => value && values.indexOf(value) === index)
-      .join('\n');
-    showPluginCommandStatus(`command failed: ${commandId}\n${detail}`, 'error');
-    showDiagnostic(`plugin command ${commandId} failed: ${detail}`);
-  } finally {
-    pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
-  }
+  return pluginCommandRuntime.runPluginCommand({
+    commandId,
+    args,
+    commands: pluginCommands,
+    closeMenu: () => setWindowMenuOpen(false),
+    showStatus: showPluginCommandStatus,
+    showDiagnostic,
+    begin: () => {
+      pluginCommandInvocationDepth += 1;
+    },
+    finish: () => {
+      pluginCommandInvocationDepth = Math.max(0, pluginCommandInvocationDepth - 1);
+    },
+  });
 }
 
 // Runs a one-shot local CLI request after every enabled plugin had the chance
