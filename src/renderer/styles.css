@@ -538,7 +538,14 @@ body {
   touch-action: none;
 }
 
-#plugin-command-status-copy {
+.plugin-command-status-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 6px;
+}
+
+#plugin-command-status-copy,
+#close-plugin-command-status {
   padding: 3px 8px;
   border: 1px solid currentColor;
   border-radius: 4px;

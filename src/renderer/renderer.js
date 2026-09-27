@@ -113,6 +113,7 @@ const closeTerminalMirrorButton = document.getElementById('close-terminal-mirror
 const pluginCommandStatusElement = document.getElementById('plugin-command-status');
 const pluginCommandStatusTextElement = document.getElementById('plugin-command-status-text');
 const pluginCommandStatusCopyButton = document.getElementById('plugin-command-status-copy');
+const closePluginCommandStatusButton = document.getElementById('close-plugin-command-status');
 let debugKeys = new URLSearchParams(window.location.search).has('debugKeys');
 let pluginActivity = false;
 const diagnosticLines = [];
@@ -1003,6 +1004,16 @@ pluginCommandStatusCopyButton?.addEventListener('click', async () => {
   setTimeout(() => {
     pluginCommandStatusCopyButton.textContent = 'Copy';
   }, 1400);
+});
+
+// The activity panel is intentionally retained after a plugin error, but it
+// must never trap the user above the terminal. Closing it preserves its log
+// lines until the next activity update and returns keyboard input to xterm.
+closePluginCommandStatusButton?.addEventListener('click', () => {
+  if (pluginCommandStatusElement) {
+    pluginCommandStatusElement.hidden = true;
+  }
+  focusTerminalInput();
 });
 
 // Converts control characters into visible markers for diagnostics output.

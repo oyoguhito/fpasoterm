@@ -82,7 +82,10 @@
     <section id="plugin-command-status" hidden aria-live="assertive">
       <div class="plugin-command-status-toolbar" data-panel-drag-handle>
         <span>Plugin activity</span>
-        <button id="plugin-command-status-copy" type="button">Copy</button>
+        <div class="plugin-command-status-actions">
+          <button id="plugin-command-status-copy" type="button">Copy</button>
+          <button id="close-plugin-command-status" type="button" aria-label="Close plugin activity">Close</button>
+        </div>
       </div>
       <pre id="plugin-command-status-text"></pre>
     </section>
