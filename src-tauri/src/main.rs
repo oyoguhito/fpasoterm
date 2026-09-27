@@ -4487,8 +4487,14 @@ fn safe_public_plugin_relative_path(value: &str) -> bool {
 }
 
 // Downloads a bounded UTF-8 text file only from the fixed public ports repository.
-fn download_public_plugin_file(reference: &str, relative_path: &str, limit: u64) -> Result<String, String> {
-    if reference != "main" && (reference.len() != 40 || !reference.chars().all(|value| value.is_ascii_hexdigit())) {
+fn download_public_plugin_file(
+    reference: &str,
+    relative_path: &str,
+    limit: u64,
+) -> Result<String, String> {
+    if reference != "main"
+        && (reference.len() != 40 || !reference.chars().all(|value| value.is_ascii_hexdigit()))
+    {
         return Err("official plugin source revision is invalid".to_string());
     }
     let url = format!("{PUBLIC_PLUGIN_PORTS_RAW_URL}/{reference}/{relative_path}");
@@ -4764,9 +4770,15 @@ fn install_public_plugin_port(
         .unwrap_or((selector, false));
     let id = validate_public_plugin_port_id(requested_id)?;
     let catalog = public_plugin_catalog_entries()?;
-    let entry = catalog.iter().find(|entry| entry.id == id)
+    let entry = catalog
+        .iter()
+        .find(|entry| entry.id == id)
         .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
-    let revision = if use_previous { &entry.previous_revision } else { &entry.revision };
+    let revision = if use_previous {
+        &entry.previous_revision
+    } else {
+        &entry.revision
+    };
     let manifest_text = download_public_plugin_file(
         revision,
         &format!("ports/{id}/port.toml"),
