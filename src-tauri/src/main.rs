@@ -8856,7 +8856,7 @@ fn parse_rdp_clean_path_request(
 }
 
 fn build_rdp_clean_path_response(
-    target: &PluginTcpTarget,
+    server_addr: &str,
     x224_response: &[u8],
     certificates: &[CertificateDer<'_>],
 ) -> Result<Vec<u8>, String> {
@@ -8873,16 +8873,26 @@ fn build_rdp_clean_path_response(
         certificate_sequence.extend_from_slice(&der_encode_tlv(0x04, certificate.as_ref()));
     }
     let certificates = der_encode_tlv(0xa7, &der_encode_tlv(0x30, &certificate_sequence));
-    let destination = der_encode_tlv(
-        0xa9,
-        &der_encode_tlv(0x0c, rdp_clean_path_destination(target).as_bytes()),
-    );
+    let server_addr = der_encode_tlv(0xa9, &der_encode_tlv(0x0c, server_addr.as_bytes()));
     let mut body = Vec::new();
     body.extend_from_slice(&version);
     body.extend_from_slice(&x224);
     body.extend_from_slice(&certificates);
-    body.extend_from_slice(&destination);
+    body.extend_from_slice(&server_addr);
     Ok(der_encode_tlv(0x30, &body))
+}
+
+// Return a valid RDCleanPath error PDU instead of closing the WebSocket without
+// a response. IronRDP otherwise has no bytes to decode and reports the
+// misleading "not enough bytes" error, hiding the bridge-side diagnostic.
+fn build_rdp_clean_path_general_error() -> Vec<u8> {
+    let version = der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[0x0d, 0x3e]));
+    let error_code = der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[1]));
+    let error = der_encode_tlv(0xa1, &der_encode_tlv(0x30, &error_code));
+    let mut body = Vec::new();
+    body.extend_from_slice(&version);
+    body.extend_from_slice(&error);
+    der_encode_tlv(0x30, &body)
 }
 
 async fn read_rdp_x224_response(stream: &mut TokioTcpStream) -> Result<Vec<u8>, String> {
@@ -8955,6 +8965,7 @@ async fn connect_rdp_clean_path_target(
         tokio_rustls::client::TlsStream<TokioTcpStream>,
         Vec<u8>,
         Vec<CertificateDer<'static>>,
+        String,
     ),
     String,
 > {
@@ -8975,6 +8986,11 @@ async fn connect_rdp_clean_path_target(
         .map_err(|error| format!("could not configure RDP socket: {error}"))?;
     let mut stream = TokioTcpStream::from_std(stream)
         .map_err(|error| format!("could not adopt RDP socket into the relay: {error}"))?;
+    let server_addr = stream
+        .peer_addr()
+        .map_err(|error| format!("could not resolve connected RDP server address: {error}"))?
+        .ip()
+        .to_string();
     timeout(Duration::from_secs(10), stream.write_all(x224_request))
         .await
         .map_err(|_| "timed out sending RDP X.224 request".to_string())?
@@ -9006,7 +9022,7 @@ async fn connect_rdp_clean_path_target(
         .peer_certificates()
         .ok_or_else(|| "RDP server did not provide a TLS certificate".to_string())?
         .to_vec();
-    Ok((tls_stream, x224_response, certificates))
+    Ok((tls_stream, x224_response, certificates, server_addr))
 }
 
 async fn relay_plugin_websocket(
@@ -9170,23 +9186,33 @@ async fn serve_plugin_rdp_clean_path_bridge(
         Ok(request) => request,
         Err(error) => {
             eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket
+                .send(Message::Binary(build_rdp_clean_path_general_error()))
+                .await;
             let _ = websocket.close(None).await;
             return;
         }
     };
-    let (remote, x224_response, certificates) =
+    let (remote, x224_response, certificates, server_addr) =
         match connect_rdp_clean_path_target(&target, &request.x224_request).await {
             Ok(connection) => connection,
             Err(error) => {
                 eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+                let _ = websocket
+                    .send(Message::Binary(build_rdp_clean_path_general_error()))
+                    .await;
                 let _ = websocket.close(None).await;
                 return;
             }
         };
-    let response = match build_rdp_clean_path_response(&target, &x224_response, &certificates) {
+    let response = match build_rdp_clean_path_response(&server_addr, &x224_response, &certificates)
+    {
         Ok(response) => response,
         Err(error) => {
             eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket
+                .send(Message::Binary(build_rdp_clean_path_general_error()))
+                .await;
             let _ = websocket.close(None).await;
             return;
         }
@@ -10567,6 +10593,39 @@ maxSourceBytes = 8388608
         let mut wrong_request = request.clone();
         wrong_request[mismatched..mismatched + b"192.0.2.25".len()].copy_from_slice(b"192.0.2.26");
         assert!(parse_rdp_clean_path_request(&wrong_request, &target).is_err());
+    }
+
+    #[test]
+    fn rdp_clean_path_response_uses_connected_server_address_and_errors_are_framed() {
+        let certificate = CertificateDer::from(vec![0x30, 0]);
+        let response = build_rdp_clean_path_response(
+            "192.0.2.25",
+            &[3, 0, 0, 8, 0xd0, 0, 0, 0],
+            &[certificate],
+        )
+        .expect("response");
+        let sequence = der_single_value(&response, 0x30).expect("response sequence");
+        let mut cursor = 0;
+        let mut server_addr = None;
+        while cursor < sequence.len() {
+            let (tag, value) = der_read_tlv(sequence, &mut cursor).expect("response field");
+            if tag == 0xa9 {
+                server_addr = Some(
+                    std::str::from_utf8(der_single_value(value, 0x0c).expect("server address"))
+                        .expect("UTF-8 server address"),
+                );
+            }
+        }
+        assert_eq!(server_addr, Some("192.0.2.25"));
+
+        let error = build_rdp_clean_path_general_error();
+        let error_sequence = der_single_value(&error, 0x30).expect("error sequence");
+        let mut error_cursor = 0;
+        let (version_tag, _) = der_read_tlv(error_sequence, &mut error_cursor).expect("version");
+        let (error_tag, _) = der_read_tlv(error_sequence, &mut error_cursor).expect("error");
+        assert_eq!(version_tag, 0xa0);
+        assert_eq!(error_tag, 0xa1);
+        assert_eq!(error_cursor, error_sequence.len());
     }
 
     #[test]
