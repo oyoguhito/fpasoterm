@@ -133,7 +133,7 @@ let terminalKeyboardCopyMark = null;
 // is active. Register this before terminal/menu handlers so a WebView that
 // routes keys directly to a canvas still has one deterministic host path.
 let activePluginElementKeyCapture = null;
-document.addEventListener('keydown', (event) => {
+function dispatchPluginElementKeyCapture(event) {
   const capture = activePluginElementKeyCapture;
   if (!capture) return;
   try {
@@ -144,7 +144,12 @@ document.addEventListener('keydown', (event) => {
   } catch (error) {
     showDiagnostic(`plugin element key capture failed: ${error}`);
   }
-}, true);
+}
+// A remote-desktop plugin must receive both halves of a captured key. This
+// prevents Escape from reaching an overlay's close handler before it can be
+// forwarded to the remote desktop.
+document.addEventListener('keydown', dispatchPluginElementKeyCapture, true);
+document.addEventListener('keyup', dispatchPluginElementKeyCapture, true);
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
 const fallbackConfig = {

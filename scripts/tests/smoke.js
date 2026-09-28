@@ -800,6 +800,8 @@ assert.match(read('src/renderer/renderer.js'), /minFpasotermVersion/);
 assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
 assert.match(read('src/renderer/renderer.js'), /pluginCommandRuntime\.closePluginCommandStatus\(pluginCommandStatusElement, focusTerminalInput\)/);
+assert.match(read('src/renderer/renderer.js'), /function dispatchPluginElementKeyCapture\(event\)/);
+assert.match(read('src/renderer/renderer.js'), /document\.addEventListener\('keyup', dispatchPluginElementKeyCapture, true\)/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
