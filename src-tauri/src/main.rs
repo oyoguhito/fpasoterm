@@ -8293,28 +8293,21 @@ fn write_clipboard_with_commands(commands: &[(&str, &[&str])], text: &str) -> Re
 }
 
 #[tauri::command]
-// Reads text from the OS clipboard for terminal paste shortcuts and reviewed
-// plugins. On Linux the desktop GTK clipboard is the authoritative bridge to
-// the ChromeOS host; wl-paste/xclip can see a different or stale selection.
-fn clipboard_read(app: AppHandle) -> Result<String, String> {
+// Reads text from the OS clipboard for terminal paste shortcuts.
+fn clipboard_read() -> Result<String, String> {
     #[cfg(target_os = "macos")]
     {
-        let _ = app;
         return read_clipboard_with_commands(&[("pbpaste", &[])]);
     }
 
     #[cfg(target_os = "windows")]
     {
-        let _ = app;
         return read_windows_clipboard_native()
             .or_else(|_| read_windows_clipboard_with_powershell());
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        if let Ok(text) = read_linux_clipboard_native(&app) {
-            return Ok(text);
-        }
         // herdr writes its copied text as this exact MIME type via wl-copy.
         // Read it before X11 only when it is genuinely offered; otherwise an
         // old Wayland selection must not hide a newer X11 UTF8_STRING value.
@@ -8347,37 +8340,6 @@ fn clipboard_read(app: AppHandle) -> Result<String, String> {
             ])
         }
     }
-}
-
-// Requests Linux clipboard text on GTK's main thread without blocking it.
-// This mirrors the native write path and reaches the shared ChromeOS clipboard
-// even when WebKit denies navigator.clipboard.readText().
-#[cfg(all(unix, not(target_os = "macos")))]
-fn read_linux_clipboard_native(app: &AppHandle) -> Result<String, String> {
-    if !gtk::is_initialized() {
-        return Err("GTK clipboard is unavailable before the desktop runtime starts".to_string());
-    }
-    let (sender, receiver) = mpsc::sync_channel(1);
-    app.run_on_main_thread(move || {
-        if !gtk::is_initialized() {
-            let _ = sender.send(Err(
-                "GTK clipboard is unavailable on the main thread".to_string()
-            ));
-            return;
-        }
-        let clipboard = Clipboard::get(&gdk::SELECTION_CLIPBOARD);
-        clipboard.request_text(move |_clipboard, text| {
-            let result = text
-                .filter(|value| !value.is_empty())
-                .map(str::to_owned)
-                .ok_or_else(|| "GTK clipboard contains no text".to_string());
-            let _ = sender.send(result);
-        });
-    })
-    .map_err(|error| format!("could not schedule GTK clipboard read: {error}"))?;
-    receiver
-        .recv_timeout(Duration::from_secs(1))
-        .map_err(|_| "GTK clipboard read did not complete".to_string())?
 }
 
 // GTK clipboard calls must run on its main thread. Tauri commands are allowed
