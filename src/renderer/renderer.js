@@ -2576,6 +2576,7 @@ function openPluginElementOverlay(options = {}) {
   const heading = document.createElement('h2');
   const closeButton = document.createElement('button');
   const content = document.createElement('div');
+  const onClose = typeof resolved.onClose === 'function' ? resolved.onClose : null;
   let closed = false;
   const keyCaptureOwner = Symbol('plugin-element-key-capture');
   const releaseKeyCapture = () => {
@@ -2607,6 +2608,9 @@ function openPluginElementOverlay(options = {}) {
     if (closed) return;
     closed = true;
     releaseKeyCapture();
+    if (onClose) {
+      try { onClose(); } catch (error) { recordPluginActivity(`plugin overlay close callback failed: ${error}`); }
+    }
     overlay.remove();
     term.focus();
   };

@@ -2032,6 +2032,8 @@ assert.match(pluginTypes, /tcp:\/\/host:port[\s\S]*openRdpBridge:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
+assert.match(renderer, /const onClose = typeof resolved\.onClose === 'function'/);
+assert.match(renderer, /if \(onClose\)[\s\S]*onClose\(\)[\s\S]*overlay\.remove\(\)/);
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
 assert.match(embeddedDefaultConfig, /logShow = "l"/);
 assert.doesNotMatch(embeddedDefaultConfig, /logMenu =/);
