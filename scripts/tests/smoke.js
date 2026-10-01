@@ -947,6 +947,11 @@ assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
 assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
+assert.match(
+  rustMain,
+  /"images":\s*\{\s*"enabled": true,\s*"kittySupport": true,\s*"kittySizeLimit": 8388608,\s*"storageLimit": 8,/,
+  'native runtime defaults must not override the bounded Kitty renderer defaults',
+);
 const rustBuild = read('src-tauri/build.rs');
 assert.match(rustBuild, /FPASOTERM_BUILD_COMMIT/);
 assert.match(rustBuild, /jj_working_copy_commit/);
