@@ -386,6 +386,9 @@ assert.match(bin, /function localCargoBuildEnvironment/);
 assert.match(bin, /link-arg=-fuse-ld=lld/);
 assert.match(bin, /FPASOTERM_DISABLE_BUNDLED_LLD/);
 assert.match(bin, /buildTauriBinary/);
+assert.match(bin, /defaultPluginPortSourceLimit = 1024 \* 1024/);
+assert.match(bin, /maximumDeclaredPluginPortSourceLimit = 8 \* 1024 \* 1024/);
+assert.match(bin, /port\.maxSourceBytes must be an integer/);
 assert.match(bin, /buildStampPath/);
 assert.match(bin, /readBuildStamp/);
 assert.match(bin, /writeBuildStamp/);
@@ -441,24 +444,13 @@ assert.deepEqual(prunedConfig.removed, ['retired']);
 
 const versionResult = runCli('--version');
 assert.equal(versionResult.status, 0, versionResult.stderr);
-let sourceCommit = spawnSync(fs.existsSync(path.join(root, '.jj')) ? 'jj' : 'git', fs.existsSync(path.join(root, '.jj'))
-  ? ['-R', root, 'log', '-r', '@', '--no-graph', '-T', 'commit_id.short(12)']
-  : ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
-  encoding: 'utf8',
-});
-// A checkout can retain .jj metadata while a minimal CI/runtime PATH exposes
-// only Git. Match the launcher's Git fallback in that case.
-if (sourceCommit.error) {
-  sourceCommit = spawnSync('git', ['-C', root, 'rev-parse', '--short=12', 'HEAD'], {
-    encoding: 'utf8',
-  });
-}
-const expectedVersion = `fpasoterm ${packageJson.version} (commit ${(sourceCommit.stdout || '').trim() || 'unknown'})`;
-assert.equal(versionResult.stdout.trim(), expectedVersion);
+assert.match(versionResult.stdout.trim(), new RegExp(`^fpasoterm ${packageJson.version.replaceAll('.', '\\.')} \\(commit (?:[0-9a-f]{12}|unknown)\\)$`));
 
 const shortVersionResult = runCli('-v');
 assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
-assert.equal(shortVersionResult.stdout.trim(), expectedVersion);
+assert.equal(shortVersionResult.stdout.trim(), versionResult.stdout.trim());
+const launcherSource = fs.readFileSync(path.join(root, 'bin', 'fpasoterm'), 'utf8');
+assert.match(launcherSource, /function runtimeVersionText\(\)[\s\S]*?findRuntimeVersionBinary\(\)[\s\S]*?spawnSync\(tauriBinary, \['--version'\]/);
 
 const bashCompletionResult = runCli('--completion', 'bash');
 assert.equal(bashCompletionResult.status, 0, bashCompletionResult.stderr);
@@ -808,6 +800,8 @@ assert.match(read('src/renderer/renderer.js'), /minFpasotermVersion/);
 assert.match(read('src/renderer/renderer.js'), /function renderPluginCatalog/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl/);
 assert.match(read('src/renderer/renderer.js'), /pluginCommandRuntime\.closePluginCommandStatus\(pluginCommandStatusElement, focusTerminalInput\)/);
+assert.match(read('src/renderer/renderer.js'), /function dispatchPluginElementKeyCapture\(event\)/);
+assert.match(read('src/renderer/renderer.js'), /document\.addEventListener\('keyup', dispatchPluginElementKeyCapture, true\)/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
@@ -963,6 +957,8 @@ assert.match(rustMain, /sanitize_cli_value/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_SHELL"/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_WINDOW_TITLE"/);
 assert.match(rustMain, /FPASOTERM_WINDOW_TITLE_LOCKED/);
+assert.match(rustMain, /https:\/\/raw\.githubusercontent\.com\/oyoguhito\/fpasoterm-plugins"/);
+assert.match(rustMain, /\{PUBLIC_PLUGIN_PORTS_RAW_URL\}\/\{reference\}\/\{relative_path\}/);
 assert.match(rustMain, /title_locked/);
 assert.match(rustMain, /set_env_from_cli\("FPASOTERM_START_COMMAND"/);
 assert.match(rustMain, /cli_has_flag\(&\["--help", "-h"\]\)/);
@@ -2036,6 +2032,8 @@ assert.match(pluginTypes, /tcp:\/\/host:port[\s\S]*openRdpBridge:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
+assert.match(renderer, /const onClose = typeof resolved\.onClose === 'function'/);
+assert.match(renderer, /if \(onClose\)[\s\S]*onClose\(\)[\s\S]*overlay\.remove\(\)/);
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
 assert.match(embeddedDefaultConfig, /logShow = "l"/);
 assert.doesNotMatch(embeddedDefaultConfig, /logMenu =/);
@@ -2064,8 +2062,11 @@ assert.match(renderer, /pluginReadyGeneration/);
 assert.match(renderer, /registerPluginCommand/);
 assert.match(renderer, /getPluginCatalog: \(\) => invoke\('plugin_catalog'\)/);
 assert.match(renderer, /getOfficialPluginIndex: \(\) => window\.fpasoterm\.getPluginCatalog\(\)/);
-assert.match(renderer, /readClipboard: \(\) => window\.fpasoterm\.readClipboard\(\)/);
-assert.match(renderer, /writeClipboard: \(text\) => window\.fpasoterm\.writeClipboard\(text\)/);
+assert.match(renderer, /readClipboard: async \(\) => \{/);
+assert.match(renderer, /async \(\) => navigator\.clipboard\?\.readText\?\.\(\) \|\| ''/);
+assert.match(renderer, /async \(\) => window\.fpasoterm\.readClipboard\(\)/);
+assert.match(renderer, /writeClipboard: async \(text\) => \{/);
+assert.match(renderer, /await writeClipboardText\(String\(text \|\| ''\)\)/);
 assert.match(renderer, /writeOsc52Clipboard: \(text\) => invoke\('clipboard_write_osc52', \{ text \}\)/);
 assert.match(renderer, /openExternalUrl: \(url\) => window\.fpasoterm\.openExternalUrl\(url\)/);
 assert.match(renderer, /updatesDownloadLink\?\.addEventListener\('click'/);

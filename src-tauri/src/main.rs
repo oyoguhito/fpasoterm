@@ -4423,7 +4423,7 @@ fn read_plugin_metadata(path: &Path) -> PluginMetadata {
 }
 
 const PUBLIC_PLUGIN_PORTS_RAW_URL: &str =
-    "https://raw.githubusercontent.com/oyoguhito/fpasoterm-plugins/main";
+    "https://raw.githubusercontent.com/oyoguhito/fpasoterm-plugins";
 const PUBLIC_PLUGIN_MANIFEST_LIMIT: u64 = 64 * 1024;
 const PUBLIC_PLUGIN_SOURCE_LIMIT: u64 = 1024 * 1024;
 // A reviewed port may opt into a larger bundled source, for example a WebAssembly
@@ -4453,6 +4453,9 @@ struct PublicPluginCatalogEntry {
     license: String,
     min_fpasoterm_version: String,
     install_path: String,
+    revision: String,
+    previous_version: String,
+    previous_revision: String,
 }
 
 // Permits only normal, portable port path components in a public registry request.
@@ -4484,8 +4487,17 @@ fn safe_public_plugin_relative_path(value: &str) -> bool {
 }
 
 // Downloads a bounded UTF-8 text file only from the fixed public ports repository.
-fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String, String> {
-    let url = format!("{PUBLIC_PLUGIN_PORTS_RAW_URL}/{relative_path}");
+fn download_public_plugin_file(
+    reference: &str,
+    relative_path: &str,
+    limit: u64,
+) -> Result<String, String> {
+    if reference != "main"
+        && (reference.len() != 40 || !reference.chars().all(|value| value.is_ascii_hexdigit()))
+    {
+        return Err("official plugin source revision is invalid".to_string());
+    }
+    let url = format!("{PUBLIC_PLUGIN_PORTS_RAW_URL}/{reference}/{relative_path}");
     let response = ureq::get(&url)
         .set(
             "User-Agent",
@@ -4517,13 +4529,14 @@ fn download_public_plugin_file(relative_path: &str, limit: u64) -> Result<String
 
 // Downloads and validates the compact official INDEX without downloading plugin code.
 fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, String> {
-    let index = download_public_plugin_file("INDEX", 256 * 1024)?;
+    let index = download_public_plugin_file("main", "INDEX", 256 * 1024)?;
     index
         .lines()
         .enumerate()
         .map(|(line_number, line)| {
             let fields = line.split('|').collect::<Vec<_>>();
-            if fields.len() != 8 || fields.iter().any(|field| field.trim().is_empty()) {
+            if !matches!(fields.len(), 8 | 11) || fields.iter().any(|field| field.trim().is_empty())
+            {
                 return Err(format!("official INDEX:{} is malformed", line_number + 1));
             }
             let id = validate_public_plugin_port_id(fields[0])?;
@@ -4542,6 +4555,12 @@ fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, Stri
                 license: fields[5].to_string(),
                 min_fpasoterm_version: fields[6].to_string(),
                 install_path: fields[7].to_string(),
+                // The formerly published catalog has eight fields. Retain
+                // catalog search/install during the coordinated rollout; its
+                // source remains official main until revisions are published.
+                revision: fields.get(8).copied().unwrap_or("main").to_string(),
+                previous_version: fields.get(9).copied().unwrap_or("").to_string(),
+                previous_revision: fields.get(10).copied().unwrap_or("").to_string(),
             })
         })
         .collect()
@@ -4749,8 +4768,29 @@ fn install_public_plugin_port(
     selector: &str,
     force: bool,
 ) -> Result<String, String> {
-    let id = validate_public_plugin_port_id(selector)?;
+    let (requested_id, use_previous) = selector
+        .strip_suffix("@previous")
+        .map(|id| (id, true))
+        .unwrap_or((selector, false));
+    let id = validate_public_plugin_port_id(requested_id)?;
+    let catalog = public_plugin_catalog_entries()?;
+    let entry = catalog
+        .iter()
+        .find(|entry| entry.id == id)
+        .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
+    if use_previous && entry.previous_revision.is_empty() {
+        return Err(format!(
+            "{} has no previous stable revision in the published INDEX yet",
+            entry.id
+        ));
+    }
+    let revision = if use_previous {
+        &entry.previous_revision
+    } else {
+        &entry.revision
+    };
     let manifest_text = download_public_plugin_file(
+        revision,
         &format!("ports/{id}/port.toml"),
         PUBLIC_PLUGIN_MANIFEST_LIMIT,
     )?;
@@ -4763,6 +4803,7 @@ fn install_public_plugin_port(
         ));
     }
     let source = download_public_plugin_file(
+        revision,
         &format!("ports/{}/{}", port.id, port.source),
         port.source_limit,
     )?;
@@ -8815,7 +8856,7 @@ fn parse_rdp_clean_path_request(
 }
 
 fn build_rdp_clean_path_response(
-    target: &PluginTcpTarget,
+    server_addr: &str,
     x224_response: &[u8],
     certificates: &[CertificateDer<'_>],
 ) -> Result<Vec<u8>, String> {
@@ -8832,16 +8873,26 @@ fn build_rdp_clean_path_response(
         certificate_sequence.extend_from_slice(&der_encode_tlv(0x04, certificate.as_ref()));
     }
     let certificates = der_encode_tlv(0xa7, &der_encode_tlv(0x30, &certificate_sequence));
-    let destination = der_encode_tlv(
-        0xa9,
-        &der_encode_tlv(0x0c, rdp_clean_path_destination(target).as_bytes()),
-    );
+    let server_addr = der_encode_tlv(0xa9, &der_encode_tlv(0x0c, server_addr.as_bytes()));
     let mut body = Vec::new();
     body.extend_from_slice(&version);
     body.extend_from_slice(&x224);
     body.extend_from_slice(&certificates);
-    body.extend_from_slice(&destination);
+    body.extend_from_slice(&server_addr);
     Ok(der_encode_tlv(0x30, &body))
+}
+
+// Return a valid RDCleanPath error PDU instead of closing the WebSocket without
+// a response. IronRDP otherwise has no bytes to decode and reports the
+// misleading "not enough bytes" error, hiding the bridge-side diagnostic.
+fn build_rdp_clean_path_general_error() -> Vec<u8> {
+    let version = der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[0x0d, 0x3e]));
+    let error_code = der_encode_tlv(0xa0, &der_encode_tlv(0x02, &[1]));
+    let error = der_encode_tlv(0xa1, &der_encode_tlv(0x30, &error_code));
+    let mut body = Vec::new();
+    body.extend_from_slice(&version);
+    body.extend_from_slice(&error);
+    der_encode_tlv(0x30, &body)
 }
 
 async fn read_rdp_x224_response(stream: &mut TokioTcpStream) -> Result<Vec<u8>, String> {
@@ -8914,6 +8965,7 @@ async fn connect_rdp_clean_path_target(
         tokio_rustls::client::TlsStream<TokioTcpStream>,
         Vec<u8>,
         Vec<CertificateDer<'static>>,
+        String,
     ),
     String,
 > {
@@ -8934,6 +8986,11 @@ async fn connect_rdp_clean_path_target(
         .map_err(|error| format!("could not configure RDP socket: {error}"))?;
     let mut stream = TokioTcpStream::from_std(stream)
         .map_err(|error| format!("could not adopt RDP socket into the relay: {error}"))?;
+    let server_addr = stream
+        .peer_addr()
+        .map_err(|error| format!("could not resolve connected RDP server address: {error}"))?
+        .ip()
+        .to_string();
     timeout(Duration::from_secs(10), stream.write_all(x224_request))
         .await
         .map_err(|_| "timed out sending RDP X.224 request".to_string())?
@@ -8965,7 +9022,7 @@ async fn connect_rdp_clean_path_target(
         .peer_certificates()
         .ok_or_else(|| "RDP server did not provide a TLS certificate".to_string())?
         .to_vec();
-    Ok((tls_stream, x224_response, certificates))
+    Ok((tls_stream, x224_response, certificates, server_addr))
 }
 
 async fn relay_plugin_websocket(
@@ -9129,23 +9186,33 @@ async fn serve_plugin_rdp_clean_path_bridge(
         Ok(request) => request,
         Err(error) => {
             eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket
+                .send(Message::Binary(build_rdp_clean_path_general_error()))
+                .await;
             let _ = websocket.close(None).await;
             return;
         }
     };
-    let (remote, x224_response, certificates) =
+    let (remote, x224_response, certificates, server_addr) =
         match connect_rdp_clean_path_target(&target, &request.x224_request).await {
             Ok(connection) => connection,
             Err(error) => {
                 eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+                let _ = websocket
+                    .send(Message::Binary(build_rdp_clean_path_general_error()))
+                    .await;
                 let _ = websocket.close(None).await;
                 return;
             }
         };
-    let response = match build_rdp_clean_path_response(&target, &x224_response, &certificates) {
+    let response = match build_rdp_clean_path_response(&server_addr, &x224_response, &certificates)
+    {
         Ok(response) => response,
         Err(error) => {
             eprintln!("plugin RDP bridge {}: {error}", target.canonical());
+            let _ = websocket
+                .send(Message::Binary(build_rdp_clean_path_general_error()))
+                .await;
             let _ = websocket.close(None).await;
             return;
         }
@@ -10526,6 +10593,39 @@ maxSourceBytes = 8388608
         let mut wrong_request = request.clone();
         wrong_request[mismatched..mismatched + b"192.0.2.25".len()].copy_from_slice(b"192.0.2.26");
         assert!(parse_rdp_clean_path_request(&wrong_request, &target).is_err());
+    }
+
+    #[test]
+    fn rdp_clean_path_response_uses_connected_server_address_and_errors_are_framed() {
+        let certificate = CertificateDer::from(vec![0x30, 0]);
+        let response = build_rdp_clean_path_response(
+            "192.0.2.25",
+            &[3, 0, 0, 8, 0xd0, 0, 0, 0],
+            &[certificate],
+        )
+        .expect("response");
+        let sequence = der_single_value(&response, 0x30).expect("response sequence");
+        let mut cursor = 0;
+        let mut server_addr = None;
+        while cursor < sequence.len() {
+            let (tag, value) = der_read_tlv(sequence, &mut cursor).expect("response field");
+            if tag == 0xa9 {
+                server_addr = Some(
+                    std::str::from_utf8(der_single_value(value, 0x0c).expect("server address"))
+                        .expect("UTF-8 server address"),
+                );
+            }
+        }
+        assert_eq!(server_addr, Some("192.0.2.25"));
+
+        let error = build_rdp_clean_path_general_error();
+        let error_sequence = der_single_value(&error, 0x30).expect("error sequence");
+        let mut error_cursor = 0;
+        let (version_tag, _) = der_read_tlv(error_sequence, &mut error_cursor).expect("version");
+        let (error_tag, _) = der_read_tlv(error_sequence, &mut error_cursor).expect("error");
+        assert_eq!(version_tag, 0xa0);
+        assert_eq!(error_tag, 0xa1);
+        assert_eq!(error_cursor, error_sequence.len());
     }
 
     #[test]
