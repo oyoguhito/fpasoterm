@@ -2341,6 +2341,16 @@ function requirePluginUserActivation(apiName) {
   }
 }
 
+// Lets a reviewed plugin prepare visible input at the active prompt without
+// executing it. Control characters (including Enter and Escape) are rejected,
+// so the user always gets a chance to review the text before submitting it.
+function insertPluginTerminalText(text) {
+  requirePluginUserActivation('insertTerminalText');
+  const value = window.fpasotermPluginTerminalInput.normalizePluginTerminalText(text);
+  sendTerminalInput(value, 'plugin insert');
+  term.focus();
+}
+
 function pluginAssetAcceptValue(accept) {
   if (!Array.isArray(accept)) return '';
   return accept
@@ -2896,6 +2906,7 @@ async function loadPlugins() {
     writeClipboard: async (text) => {
       await writeClipboardText(String(text || ''));
     },
+    insertTerminalText: (text) => insertPluginTerminalText(text),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
     openElementOverlay: (options) => openPluginElementOverlay(options),

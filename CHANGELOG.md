@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.6.11
+
+- Added a reviewed-plugin API that inserts printable text into the active PTY
+  without submitting it. Control characters are rejected so helper plugins can
+  prepare commands while leaving execution to the user.
+
 ## 1.6.9
 
 - Added a Close button to the Plugin activity error panel. It returns focus to

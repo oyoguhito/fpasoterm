@@ -286,6 +286,10 @@ provides:
 - `version`: read the running fpasoterm version and build identifier.
 - `readClipboard()` / `writeClipboard(text)`: read or write plain UTF-8 text
   through fpasoterm's native clipboard bridge.
+- `insertTerminalText(text)`: insert visible text into the active PTY from a
+  user-initiated plugin action without submitting it. Enter, Escape, and other
+  control characters are rejected, the limit is 4096 characters, and the user
+  must review the prepared shell command and press Enter to run it.
 - `openExternalUrl(url)`: open an explicit HTTP(S) URL in the external browser.
   Call it only from a user-initiated action; fpasoterm validates the scheme and
   plugins must clearly explain when text is sent to an external service.
