@@ -1220,6 +1220,26 @@ body {
   overflow: hidden;
 }
 
+.xterm-screen {
+  position: relative;
+}
+
+.fpasoterm-kitty-graphics-layer {
+  position: absolute;
+  z-index: 4;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.fpasoterm-kitty-placement {
+  position: absolute;
+  display: block;
+  max-width: none;
+  image-rendering: auto;
+  pointer-events: none;
+}
+
 /* Kitty image canvases are visual layers; xterm's helper textarea owns input. */
 .xterm-image-layer-top,
 .xterm-image-layer-bottom {

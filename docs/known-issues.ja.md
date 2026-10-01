@@ -18,7 +18,7 @@ Tauri backend は Linux で WebKitGTK を使い、transparent window を有効�
 
 ## Kitty/SIXEL graphics
 
-現在のTauri/WebKitGTKでKitty、SIXEL、iTerm inline imageのstreamを描画すると、WebViewが無反応になり`Ctrl+C`も届かなくなることがあります。このため`[terminal.images]`は既定で無効です。
+従来のxterm.js ImageAddonは連続画像でWebViewが無反応になるため使用していません。独自のbounded rendererはKitty direct PNG/RGB/RGBAのみ対応し、古い未描画frameを破棄します。SIXEL、iTerm inline image、Kitty animation、file/shared-memory転送は未対応です。問題発生時は`[terminal.images]`の`enabled = false`で無効化して再起動してください。
 
 ## macOS Gatekeeper
 

@@ -2275,29 +2275,28 @@ function createTerminal() {
   fitAddon = new FitAddon.FitAddon();
   term.loadAddon(fitAddon);
   const imageConfig = appConfig.terminal?.images || {};
-  // ImageAddon can stall the current Tauri/WebKitGTK WebView on ChromeOS.
-  // Keep the requested settings for future diagnostics, but do not load it.
-  const graphicsEnabled = false;
-  if (imageConfig.enabled === true) {
-    showDiagnostic('terminal graphics are disabled in this build because ImageAddon can block input');
-  }
-  if (graphicsEnabled && window.ImageAddon?.ImageAddon) {
-    imageAddon = new ImageAddon.ImageAddon({
-      kittySupport: imageConfig.kittySupport === true,
-      kittySizeLimit: Number(imageConfig.kittySizeLimit) || 32 * 1024 * 1024,
-      storageLimit: Number(imageConfig.storageLimit) || 64,
-      sixelSupport: imageConfig.sixelSupport === true,
-      iipSupport: imageConfig.iipSupport === true,
-    });
-    term.loadAddon(imageAddon);
-    // Image layers are added asynchronously. Keep IME and keyboard input on xterm.
-    if (typeof imageAddon.onImageAdded === 'function') {
-      imageAddon.onImageAdded(() => requestAnimationFrame(focusTerminalInput));
+  term.open(terminalElement);
+  const graphicsEnabled = imageConfig.enabled !== false && imageConfig.kittySupport !== false;
+  if (graphicsEnabled && window.FpasotermKittyGraphics?.KittyGraphicsAddon) {
+    try {
+      imageAddon = new window.FpasotermKittyGraphics.KittyGraphicsAddon({
+        limits: {
+          maxEncodedBytes: Math.ceil((Number(imageConfig.kittySizeLimit) || 8 * 1024 * 1024) * 4 / 3),
+          maxDecodedBytes: Number(imageConfig.kittySizeLimit) || 8 * 1024 * 1024,
+          maxImages: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
+          maxPlacements: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
+        },
+        onDiagnostic: (message) => showDebugDiagnostic(message),
+      });
+      term.loadAddon(imageAddon);
+      showDiagnostic('experimental bounded Kitty graphics renderer enabled');
+    } catch (error) {
+      imageAddon = undefined;
+      showDiagnostic(`Kitty graphics renderer unavailable: ${error?.message || error}`);
     }
   } else if (graphicsEnabled) {
-    showDiagnostic('xterm image addon is unavailable; terminal graphics are disabled');
+    showDiagnostic('Kitty graphics renderer script is unavailable; terminal graphics are disabled');
   }
-  term.open(terminalElement);
   installTerminalLinkHandlers();
   installXtermOverlayPruner();
   logXtermCanvasDiagnostics();

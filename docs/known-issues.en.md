@@ -29,7 +29,7 @@ The Tauri backend uses WebKitGTK on Linux, enables transparent windows, and sets
 
 ## Kitty/SIXEL Graphics
 
-Rendering Kitty, SIXEL, or iTerm inline-image streams can leave the current Tauri/WebKitGTK WebView unresponsive, including to `Ctrl+C`. `[terminal.images]` is therefore disabled by default.
+The former xterm.js ImageAddon is not used because continuous images could leave WebKitGTK unresponsive. The bounded renderer supports direct Kitty PNG/RGB/RGBA data and drops stale pending frames. SIXEL, iTerm inline images, Kitty animation, and file/shared-memory transfers remain unsupported. If graphics cause a problem, set `[terminal.images] enabled = false` and restart fpasoterm.
 
 ## macOS Gatekeeper
 

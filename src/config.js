@@ -59,10 +59,10 @@ const defaultConfig = Object.freeze({
     // verified across the supported WebView implementations.
     kittyKeyboard: false,
     images: {
-      enabled: false,
-      kittySupport: false,
-      kittySizeLimit: 33554432,
-      storageLimit: 64,
+      enabled: true,
+      kittySupport: true,
+      kittySizeLimit: 8388608,
+      storageLimit: 8,
       sixelSupport: false,
       iipSupport: false,
     },

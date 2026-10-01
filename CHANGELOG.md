@@ -7,6 +7,9 @@
   prepare commands while leaving execution to the user.
 - Exposed the read-only `capabilities.terminalGraphics` flag so plugins refuse
   to launch image-terminal applications on hosts where rendering can freeze.
+- Added a bounded Kitty Graphics renderer for direct PNG/RGB/RGBA payloads.
+  Decode work is serialized, stale pending frames are dropped, and file or
+  shared-memory transfers are rejected.
 
 ## 1.6.9
 
