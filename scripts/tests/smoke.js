@@ -2012,6 +2012,8 @@ const pluginTypes = read('docs/fpasoterm-plugin.d.ts');
 assert.match(pluginTypes, /fpasotermPluginApi/);
 assert.doesNotMatch(pluginTypes, /duplicateWindowMs/);
 assert.match(pluginTypes, /version: string/);
+assert.match(pluginTypes, /terminalGraphics: boolean/);
+assert.match(read('src/renderer/renderer.js'), /terminalGraphics: Boolean\(imageAddon\)/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
 assert.match(pluginTypes, /plugin-run/);

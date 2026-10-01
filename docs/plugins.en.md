@@ -284,6 +284,9 @@ provides:
 - `config`: read the resolved runtime configuration, including `plugins.enabled`.
 - `log(message)`: write a plugin-prefixed diagnostic entry.
 - `version`: read the running fpasoterm version and build identifier.
+- `capabilities.terminalGraphics`: `true` only when a safe terminal graphics
+  renderer is active. A plugin preparing an image-terminal application must
+  refuse to launch it when this is `false`.
 - `readClipboard()` / `writeClipboard(text)`: read or write plain UTF-8 text
   through fpasoterm's native clipboard bridge.
 - `insertTerminalText(text)`: insert visible text into the active PTY from a

@@ -192,6 +192,8 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `config`: `plugins.enabled` を含む解決済み runtime config の参照。
 - `log(message)`: plugin prefix 付き diagnostics の出力。
 - `version`: 実行中の fpasoterm version と build identifier の参照。
+- `capabilities.terminalGraphics`: 安全なterminal graphics rendererが有効な場合だけ
+  `true`。画像terminal applicationを準備するpluginは、`false`の場合に起動を拒否する。
 - `readClipboard()` / `writeClipboard(text)`: fpasoterm のnative clipboard bridgeを
   経由したplain UTF-8 textの読み書き。
 - `insertTerminalText(text)`: userが開始したplugin actionから、現在のPTYへ表示可能なtextを

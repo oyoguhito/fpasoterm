@@ -2865,6 +2865,9 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
 async function loadPlugins() {
   const pluginApi = (plugin) => Object.freeze({
     version: pluginVersion,
+    capabilities: Object.freeze({
+      terminalGraphics: Boolean(imageAddon),
+    }),
     terminal: term,
     fitAddon,
     imageAddon,

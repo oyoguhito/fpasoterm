@@ -5,6 +5,8 @@
 - Added a reviewed-plugin API that inserts printable text into the active PTY
   without submitting it. Control characters are rejected so helper plugins can
   prepare commands while leaving execution to the user.
+- Exposed the read-only `capabilities.terminalGraphics` flag so plugins refuse
+  to launch image-terminal applications on hosts where rendering can freeze.
 
 ## 1.6.9
 
