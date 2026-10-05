@@ -293,6 +293,9 @@ provides:
   user-initiated plugin action without submitting it. Enter, Escape, and other
   control characters are rejected, the limit is 4096 characters, and the user
   must review the prepared shell command and press Enter to run it.
+- `sendTerminalShortcut(name)`: send one fpasoterm-reviewed named shortcut
+  from a user-initiated action. Plugins cannot provide arbitrary control
+  sequences; the current allowlist is limited to terminal-browser zoom.
 - `openExternalUrl(url)`: open an explicit HTTP(S) URL in the external browser.
   Call it only from a user-initiated action; fpasoterm validates the scheme and
   plugins must clearly explain when text is sent to an external service.

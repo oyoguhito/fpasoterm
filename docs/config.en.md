@@ -445,6 +445,22 @@ The running titlebar can be updated from inside the terminal. Standard OSC title
 
 Direct Kitty Graphics PNG, RGB, and RGBA transmissions are supported by the bounded fpasoterm renderer. Decode work is serialized, stale pending frames are dropped, and the defaults limit decoded images to 8 MiB, 4M pixels, eight images, and eight placements. File, temporary-file, and shared-memory transmissions are rejected so terminal output cannot request arbitrary local files. SIXEL, iTerm inline images, and Kitty animation are not supported.
 
+Running terminal-browser directly in fpasoterm does not require a Herdr setting.
+When terminal-browser or another Kitty graphics application runs inside a Herdr
+pane, enable Herdr's pass-through in its configuration (normally
+`~/.config/herdr/config.toml`):
+
+```toml
+[terminal]
+kitty_graphics = true
+```
+
+Fully restart Herdr afterward. This is separate from fpasoterm's
+`[terminal.images]` setting. An explicit setting makes the requirement and
+troubleshooting state clear.
+Inside the Herdr pane, also verify that
+`printf 'HERDR_PANE_ID=%s\n' "$HERDR_PANE_ID"` is non-empty.
+
 To isolate a graphics problem, set `enabled = false` under `[terminal.images]` and restart fpasoterm.
 
 Use `kitten icat` or a direct Kitty graphics test to verify the bounded renderer. Do not use SIXEL or iTerm image modes because they remain unsupported.

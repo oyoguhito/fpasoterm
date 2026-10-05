@@ -77,6 +77,18 @@ node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
 このexampleは開発検証用としてcommitされていますが、end-user設定で通常有効化したままに
 しないでください。
 
+### Kitty graphicsとterminal-browserを実機確認する
+
+`npm run check`には、PNG decode、古い非同期frameの破棄、reset後に完了したdecode結果を
+表示・terminalへ応答しないことを含むbounded Kitty rendererのunit testがあります。
+実WebViewではterminal-browserを起動し、初期描画、連続frame、window resize、titlebar zoom、
+`Ctrl+Q`後のshell復帰とzoom control消去を確認してください。
+
+Herdr paneを経由する試験では、`HERDR_PANE_ID`が空でないことと、Herdr設定の
+`[terminal] kitty_graphics = true`が反映済みであることも確認します。この設定は
+HerdrがKitty sequenceを外側のfpasotermへ渡すためのもので、fpasoterm自身の設定ではありません。
+詳細は[設定ガイドのTerminal Graphics](docs/config.ja.md#terminal-graphics)を参照してください。
+
 ## Pull Requestの確認
 
 Pull Request内の変更を確認する場合、tagged release assetではなくPR revisionをcheckoutして

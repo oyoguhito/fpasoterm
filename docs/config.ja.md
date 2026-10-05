@@ -439,6 +439,15 @@ macOSは最後のwindowを閉じてもapplicationをactiveのまま維持する�
 
 Kitty Graphics Protocolのdirect PNG/RGB/RGBA転送に対応します。独自rendererはdecodeを直列化し、未処理の古いframeを破棄し、既定でdecoded image 8 MiB、4M pixels、画像・placement各8件に制限します。任意のlocal fileを読ませないためfile、temporary file、shared-memory転送は拒否します。SIXEL、iTerm inline image、Kitty animationは未対応です。
 
+fpasoterm上でterminal-browserを直接実行する場合、Herdrの設定は不要です。Herdr pane内でterminal-browserなどのKitty graphics applicationを実行する場合だけ、Herdrが画像sequenceを外側のterminalへ転送できるよう、Herdrの設定（通常`~/.config/herdr/config.toml`）へ次を設定します。
+
+```toml
+[terminal]
+kitty_graphics = true
+```
+
+設定後はHerdrを完全再起動します。これはfpasotermの`[terminal.images]`とは別の設定です。利用条件と障害切分けを明確にするため、Herdr pane内で`printf 'HERDR_PANE_ID=%s\n' "$HERDR_PANE_ID"`を実行し、空でないことも確認してください。
+
 問題を切り分ける場合は`[terminal.images]`の`enabled = false`で無効化し、fpasotermを再起動してください。
 
 ## Broadcast Input

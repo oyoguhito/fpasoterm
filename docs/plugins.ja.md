@@ -199,6 +199,9 @@ install 後の plugin では declaration file をローカルへコピーし、r
 - `insertTerminalText(text)`: userが開始したplugin actionから、現在のPTYへ表示可能なtextを
   入力する。実行はせず、Enter、Escape等のcontrol characterを拒否し、4096文字を上限とする。
   shell commandを準備するpluginでは、userが内容を確認してEnterを押すまで実行されない。
+- `sendTerminalShortcut(name)`: userが開始した操作から、fpasotermが審査した名前付きshortcut
+  だけを送信する。pluginは任意のcontrol sequenceを指定できず、現時点のallowlistは
+  terminal-browserのzoom操作だけに限定される。
 - `openExternalUrl(url)`: 明示した HTTP(S) URL を外部 browser で開く。user が操作した
   場合だけ呼び出し、外部 service へ text を送る場合は plugin 側で明示すること。
 - `selectLocalAsset({ accept, maxBytes })`: userの直接操作からnative file pickerを

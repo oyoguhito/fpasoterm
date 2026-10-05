@@ -121,6 +121,42 @@ body {
   -webkit-app-region: no-drag;
 }
 
+#terminal-graphics-zoom {
+  position: relative;
+  display: flex;
+  gap: 3px;
+  height: 24px;
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#terminal-graphics-zoom[hidden],
+#terminal-graphics-zoom-presets[hidden] {
+  display: none;
+}
+
+#window-controls #terminal-graphics-zoom-toggle {
+  width: 44px;
+}
+
+#terminal-graphics-zoom-presets {
+  position: absolute;
+  top: 28px;
+  right: 27px;
+  z-index: 14030;
+  display: flex;
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(17, 21, 26, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+}
+
+#terminal-graphics-zoom-presets button {
+  width: 48px;
+}
+
 #window-controls button:focus,
 #window-controls button:focus-visible {
   outline: 2px solid #f5d76e;
@@ -701,6 +737,7 @@ body {
   background: rgba(0, 0, 0, 0.001);
   app-region: no-drag;
   -webkit-app-region: no-drag;
+  touch-action: none;
 }
 
 .resize-edge-top,
@@ -721,6 +758,8 @@ body {
 
 .resize-edge-top {
   top: 0;
+  height: 10px;
+  z-index: 10003;
 }
 
 .resize-edge-right {

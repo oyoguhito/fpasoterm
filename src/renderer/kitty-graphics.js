@@ -122,11 +122,24 @@
     constructor(options = {}) {
       this.limits = Object.freeze({ ...DEFAULT_LIMITS, ...(options.limits || {}) });
       this.onDiagnostic = typeof options.onDiagnostic === 'function' ? options.onDiagnostic : () => {};
+      this.onErrorDiagnostic = typeof options.onErrorDiagnostic === 'function'
+        ? options.onErrorDiagnostic
+        : this.onDiagnostic;
+      this.onActiveChange = typeof options.onActiveChange === 'function' ? options.onActiveChange : () => {};
+      this.active = false;
       this.images = new Map();
       this.placements = new Map();
       this.chunks = null;
       this.nextImageId = 1;
       this.nextPlacementId = 1;
+      this.generation = 0;
+      this.deleteSequence = 0;
+      this.deleteAllSequence = 0;
+      this.imageDeleteSequences = new Map();
+      this.activeDecodeImageIds = new Set();
+      this.deleteSnapshots = new Map();
+      this.pendingDeleteSequence = null;
+      this.pendingDeleteTimer = null;
       this.disposables = [];
       this.queue = new LatestJobQueue((job) => this._decodeAndDisplay(job));
     }
@@ -143,6 +156,7 @@
           this.payload = '';
           this.inControl = true;
           this.rejected = false;
+          this.rejectionReason = '';
         },
         put: (data, start, end) => this._put(data, start, end),
         end: (success) => this._end(success),
@@ -163,16 +177,27 @@
         }
         if (this.inControl) {
           this.control += character;
-          if (this.control.length > this.limits.maxControlBytes) this.rejected = true;
+          if (this.control.length > this.limits.maxControlBytes) {
+            this.rejected = true;
+            this.rejectionReason = 'control data exceeds limit';
+          }
         } else {
           this.payload += character;
-          if (this.payload.length > this.limits.maxEncodedBytes) this.rejected = true;
+          if (this.payload.length > this.limits.maxEncodedBytes) {
+            this.rejected = true;
+            this.rejectionReason = 'encoded payload exceeds limit';
+          }
         }
       }
     }
 
     _end(success) {
-      if (!success || this.rejected) return true;
+      if (!success) return true;
+      if (this.rejected) {
+        this._flushDeleteSnapshots(this.deleteSequence);
+        this.onErrorDiagnostic(`Kitty graphics rejected: ${this.rejectionReason || 'parser limit exceeded'}`);
+        return true;
+      }
       const command = parseKittyControl(this.control);
       try {
         const action = validateKittyCommand(command, this.payload.length, this.limits);
@@ -180,8 +205,12 @@
         else if (action === 'p') this._placeStored(command);
         else this._receive(command, this.payload, action);
       } catch (error) {
+        // A preceding delete remains authoritative even when its attempted
+        // replacement is rejected before decode. Do not leave the old frame
+        // pinned merely because the next APC was malformed or unsupported.
+        this._flushDeleteSnapshots(this.deleteSequence);
         this._respond(command, `EINVAL:${error.message}`, false);
-        this.onDiagnostic(`Kitty graphics rejected: ${error.message}`);
+        this.onErrorDiagnostic(`Kitty graphics rejected: ${error.message}`);
       }
       return true;
     }
@@ -207,27 +236,99 @@
       }
       const id = command.i || this.nextImageId++;
       const key = `image:${id}`;
-      this.queue.push(key, { command: { ...command, i: id }, payload, display: action === 'T' });
+      // Decoding a full terminal-browser frame is asynchronous. Capture the
+      // cursor anchor while the APC is parsed; reading it after decompression
+      // can place the image at a cursor position belonging to later output.
+      const anchor = this._captureAnchor();
+      this.queue.push(key, {
+        command: { ...command, i: id },
+        payload,
+        display: action === 'T',
+        anchor,
+        generation: this.generation,
+        deleteThrough: this.deleteSequence,
+      });
+    }
+
+    _captureAnchor() {
+      const buffer = this.terminal?.buffer?.active;
+      return {
+        line: (buffer?.baseY || 0) + (buffer?.cursorY || 0),
+        column: buffer?.cursorX || 0,
+      };
     }
 
     async _decodeAndDisplay(job) {
       const { command } = job;
+      this.activeDecodeImageIds.add(command.i);
       try {
+        if (this._jobWasDeleted(job)) {
+          this._discardDeletedJob(job);
+          return;
+        }
         let bytes = decodeBase64(job.payload, this.limits.maxDecodedBytes);
         if (command.o === 'z') bytes = await inflateZlib(bytes, this.limits.maxDecodedBytes);
+        if (job.generation !== this.generation) return;
+        if (this._jobWasDeleted(job)) {
+          this._discardDeletedJob(job);
+          return;
+        }
         const bitmap = await this._createBitmap(command, bytes);
+        if (job.generation !== this.generation) {
+          bitmap.close?.();
+          return;
+        }
+        if (this._jobWasDeleted(job)) {
+          bitmap.close?.();
+          this._discardDeletedJob(job);
+          return;
+        }
         if (bitmap.width * bitmap.height > this.limits.maxPixels) {
           bitmap.close();
           throw new Error('decoded image exceeds pixel limit');
         }
         this._storeImage(command.i, bitmap);
-        if (job.display) this._createPlacement(command.i, command);
+        const placementId = job.display
+          ? this._createPlacement(command.i, command, job.anchor)
+          : null;
+        this._flushDeleteSnapshots(job.deleteThrough, command.i, placementId);
         this._respond(command, 'OK', true);
         this.onDiagnostic(`Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height}`);
       } catch (error) {
+        if (job.generation !== this.generation) return;
+        // Successful replacements flush the same snapshots after paint. A
+        // failed replacement must also finish the preceding delete rather than
+        // keeping a stale placement visible until the fallback timer expires.
+        this._flushDeleteSnapshots(job.deleteThrough);
         this._respond(command, `EINVAL:${error.message}`, false);
-        this.onDiagnostic(`Kitty graphics decode failed: ${error.message}`);
+        this.onErrorDiagnostic(`Kitty graphics decode failed: ${error.message}`);
+      } finally {
+        this.activeDecodeImageIds.delete(command.i);
+        this._pruneImageDeleteSequences();
       }
+    }
+
+    _pruneImageDeleteSequences() {
+      const pendingIds = new Set(Array.from(this.queue?.pending?.keys?.() || [])
+        .map((key) => /^image:(\d+)$/.exec(String(key)))
+        .filter(Boolean)
+        .map((match) => Number(match[1])));
+      for (const imageId of this.imageDeleteSequences.keys()) {
+        if (!this.activeDecodeImageIds.has(imageId) && !pendingIds.has(imageId)) {
+          this.imageDeleteSequences.delete(imageId);
+        }
+      }
+    }
+
+    _jobWasDeleted(job) {
+      const imageDeleteSequence = this.imageDeleteSequences.get(job.command.i) || 0;
+      return job.deleteThrough < this.deleteAllSequence
+        || job.deleteThrough < imageDeleteSequence;
+    }
+
+    _discardDeletedJob(job) {
+      this._respond(job.command, 'OK', true);
+      this.onDiagnostic(`Kitty graphics discarded deleted decode id=${job.command.i}`);
     }
 
     async _createBitmap(command, bytes) {
@@ -277,22 +378,26 @@
       return true;
     }
 
-    _createPlacement(imageId, command) {
-      if (!this.images.has(imageId) || !this._ensureLayer()) return;
-      const placementId = command.p || this.nextPlacementId++;
+    _createPlacement(imageId, command, anchor = this._captureAnchor()) {
+      if (!this.images.has(imageId) || !this._ensureLayer()) return null;
+      const placementId = this._placementIdFor(imageId, command);
       const existing = this.placements.get(placementId);
-      existing?.canvas.remove();
-      existing?.marker.dispose();
-      const canvas = document.createElement('canvas');
-      canvas.className = 'fpasoterm-kitty-placement';
+      // terminal-browser updates the same implicit image repeatedly. Reusing
+      // its canvas keeps the previous frame visible until the new bitmap is
+      // painted; removing and appending a canvas for every frame produces a
+      // visible blank interval, especially through Herdr pass-through.
+      const canvas = existing?.canvas || document.createElement('canvas');
+      if (!existing) {
+        canvas.className = 'fpasoterm-kitty-placement';
+        this.layer.appendChild(canvas);
+      }
       canvas.dataset.imageId = String(imageId);
-      this.layer.appendChild(canvas);
       const placement = {
         id: placementId,
         imageId,
         canvas,
-        marker: this.terminal.registerMarker(0),
-        column: this.terminal.buffer.active.cursorX,
+        line: anchor.line,
+        column: anchor.column,
         columns: command.c,
         rows: command.r,
         xOffset: command.X || 0,
@@ -300,17 +405,28 @@
         zIndex: command.z || 0,
       };
       this.placements.set(placementId, placement);
+      this._setActive(true);
       while (this.placements.size > this.limits.maxPlacements) {
         this._deletePlacement(this.placements.keys().next().value);
       }
       this._paintPlacement(placement);
       this._renderPlacements();
+      return placementId;
+    }
+
+    _placementIdFor(imageId, command) {
+      if (command.p) return command.p;
+      for (const [placementId, placement] of this.placements) {
+        if (placement.imageId === imageId) return placementId;
+      }
+      return this.nextPlacementId++;
     }
 
     _placeStored(command) {
       const id = command.i;
       if (!id || !this.images.has(id)) throw new Error('unknown image id');
-      this._createPlacement(id, command);
+      const placementId = this._createPlacement(id, command);
+      this._flushDeleteSnapshots(this.deleteSequence, id, placementId);
       this._respond(command, 'OK', true);
     }
 
@@ -332,7 +448,7 @@
       const cellHeight = rect.height / this.terminal.rows;
       const viewportY = this.terminal.buffer.active.viewportY;
       for (const placement of this.placements.values()) {
-        const row = placement.marker.line - viewportY;
+        const row = placement.line - viewportY;
         placement.canvas.hidden = row < -this.terminal.rows || row >= this.terminal.rows;
         placement.canvas.style.left = `${placement.column * cellWidth + placement.xOffset}px`;
         placement.canvas.style.top = `${row * cellHeight + placement.yOffset}px`;
@@ -343,10 +459,130 @@
     }
 
     _delete(command) {
-      const selector = command.d || 'a';
-      if (selector.toLowerCase() === 'a') this.reset();
-      else if (selector.toLowerCase() === 'i' && command.i) this._deleteImage(command.i);
+      const selector = String(command.d || 'a');
+      const normalizedSelector = selector.toLowerCase();
+      if (!['a', 'i', 'p'].includes(normalizedSelector)) {
+        throw new Error(`unsupported delete selector d=${selector}`);
+      }
+      if (normalizedSelector === 'i' && !command.i) {
+        throw new Error('delete selector d=i requires an image id');
+      }
+      if (normalizedSelector === 'p'
+          && (!(Number(command.x) > 0) || !(Number(command.y) > 0))) {
+        throw new Error('delete selector d=p requires positive x and y cells');
+      }
+      if (this.pendingDeleteSequence !== null) {
+        if (this.pendingDeleteTimer !== null) clearTimeout(this.pendingDeleteTimer);
+        this.pendingDeleteTimer = null;
+        const previousSequence = this.pendingDeleteSequence;
+        this.pendingDeleteSequence = null;
+        this._flushDeleteSnapshots(previousSequence);
+      }
+      const sequence = ++this.deleteSequence;
+      if (normalizedSelector === 'i' && !command.p) {
+        this.imageDeleteSequences.set(command.i, sequence);
+      } else if (normalizedSelector === 'a') {
+        // A decode may still be awaiting inflate/createImageBitmap and is not
+        // represented by the placement snapshot below. Record the deletion
+        // sequence as a barrier so that such a job cannot resurrect an image.
+        this.deleteAllSequence = sequence;
+        this.imageDeleteSequences.clear();
+      }
+      this._pruneImageDeleteSequences();
+      this.deleteSnapshots.set(sequence, this._snapshotDelete(command));
+      this.pendingDeleteSequence = sequence;
+      // Herdr can forward a delete and its replacement frame as separate PTY
+      // writes. Keep the previous frame until its replacement has actually
+      // painted, then remove only the placements that existed at delete time.
+      // This avoids both a blank flash and multiple full-screen frames stacking.
+      this.pendingDeleteTimer = setTimeout(() => {
+        this.pendingDeleteTimer = null;
+        if (this.pendingDeleteSequence === sequence) this.pendingDeleteSequence = null;
+        this._flushDeleteSnapshots(sequence);
+      }, 750);
       this._respond(command, 'OK', true);
+    }
+
+    _snapshotDelete(command) {
+      const rawSelector = String(command.d || 'a');
+      const selector = rawSelector.toLowerCase();
+      const selectedPlacementIds = (predicate) => new Set(Array.from(this.placements)
+        .filter(([, placement]) => predicate(placement))
+        .map(([placementId]) => placementId));
+      const imagesFullyRemovedBy = (placementIds) => {
+        const imageIds = new Set();
+        for (const [imageId] of this.images) {
+          const placements = Array.from(this.placements)
+            .filter(([, placement]) => placement.imageId === imageId)
+            .map(([placementId]) => placementId);
+          if (placements.length === 0 || placements.every((placementId) => placementIds.has(placementId))) {
+            imageIds.add(imageId);
+          }
+        }
+        return imageIds;
+      };
+      if (selector === 'p') {
+        const x = Number(command.x);
+        const y = Number(command.y);
+        const placementIds = selectedPlacementIds((placement) => {
+            const left = placement.column + 1;
+            const top = placement.line - (this.terminal?.buffer?.active?.viewportY || 0) + 1;
+            const width = Math.max(1, Number(placement.columns) || 1);
+            const height = Math.max(1, Number(placement.rows) || 1);
+            return x >= left && x < left + width && y >= top && y < top + height;
+          });
+        const imageIds = rawSelector === 'P' ? imagesFullyRemovedBy(placementIds) : new Set();
+        return { imageIds, placementIds };
+      }
+      if (selector === 'i' && command.i && command.p) {
+        const placement = this.placements.get(command.p);
+        const placementIds = new Set(placement?.imageId === command.i ? [command.p] : []);
+        return {
+          imageIds: rawSelector === 'I' ? imagesFullyRemovedBy(placementIds) : new Set(),
+          placementIds,
+        };
+      }
+      if (selector === 'i' && command.i) {
+        const placementIds = selectedPlacementIds((placement) => placement.imageId === command.i);
+        return {
+          imageIds: rawSelector === 'I' && this.images.has(command.i)
+            ? new Set([command.i])
+            : new Set(),
+          placementIds,
+        };
+      }
+      const viewportY = this.terminal?.buffer?.active?.viewportY || 0;
+      const terminalRows = Math.max(0, Number(this.terminal?.rows) || 0);
+      const placementIds = selectedPlacementIds((placement) => {
+        const top = placement.line - viewportY;
+        const height = Math.max(1, Number(placement.rows) || 1);
+        return terminalRows > 0 && top < terminalRows && top + height > 0;
+      });
+      return {
+        imageIds: rawSelector === 'A' ? imagesFullyRemovedBy(placementIds) : new Set(),
+        placementIds,
+      };
+    }
+
+    _flushDeleteSnapshots(through, protectedImageId = null, protectedPlacementId = null) {
+      if (!through) return;
+      for (const [sequence, snapshot] of Array.from(this.deleteSnapshots)) {
+        if (sequence > through) continue;
+        for (const imageId of snapshot.imageIds) {
+          if (imageId !== protectedImageId) this._deleteImage(imageId);
+        }
+        for (const placementId of snapshot.placementIds) {
+          if (placementId !== protectedPlacementId) this._deletePlacement(placementId);
+        }
+        this.deleteSnapshots.delete(sequence);
+      }
+    }
+
+    _clearPendingDeletes() {
+      if (this.pendingDeleteTimer !== null) clearTimeout(this.pendingDeleteTimer);
+      this.pendingDeleteTimer = null;
+      this.pendingDeleteSequence = null;
+      this.deleteSnapshots.clear();
     }
 
     _deleteImage(id) {
@@ -360,9 +596,16 @@
     _deletePlacement(id) {
       const placement = this.placements.get(id);
       if (!placement) return;
-      placement.marker?.dispose?.();
       placement.canvas?.remove?.();
       this.placements.delete(id);
+      if (this.placements.size === 0) this._setActive(false);
+    }
+
+    _setActive(active) {
+      const next = Boolean(active);
+      if (this.active === next) return;
+      this.active = next;
+      this.onActiveChange(next);
     }
 
     _respond(command, message, success) {
@@ -373,11 +616,19 @@
     }
 
     reset() {
+      // Invalidate a decode that is already awaiting inflate/createImageBitmap.
+      // Its completion belongs to the previous full-screen application and
+      // must not draw or send a Kitty response into the restored shell.
+      this.generation += 1;
+      this._clearPendingDeletes();
+      this.deleteAllSequence = this.deleteSequence;
+      this.imageDeleteSequences.clear();
       this.queue.clear();
       this.chunks = null;
       for (const id of Array.from(this.placements.keys())) this._deletePlacement(id);
       for (const bitmap of this.images.values()) bitmap.close?.();
       this.images.clear();
+      this._setActive(false);
     }
 
     dispose() {

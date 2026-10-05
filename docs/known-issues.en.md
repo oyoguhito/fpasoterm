@@ -27,10 +27,6 @@ Before the Tauri migration, xterm.js canvas alpha backgrounds did not compose as
 
 The Tauri backend uses WebKitGTK on Linux, enables transparent windows, and sets xterm.js `allowTransparency = true` with a 65% opaque terminal background by default. ChromeOS/Baguette still needs device testing. If rendering flickers or turns black/white, launch with `--disable-dmabuf`, which sets `WEBKIT_DISABLE_DMABUF_RENDERER=1`.
 
-## Kitty/SIXEL Graphics
-
-The former xterm.js ImageAddon is not used because continuous images could leave WebKitGTK unresponsive. The bounded renderer supports direct Kitty PNG/RGB/RGBA data and drops stale pending frames. SIXEL, iTerm inline images, Kitty animation, and file/shared-memory transfers remain unsupported. If graphics cause a problem, set `[terminal.images] enabled = false` and restart fpasoterm.
-
 ## macOS Gatekeeper
 
 Release builds use ad-hoc code signing so CI can verify the generated `.app` bundle and `.dmg` structure. This prevents unsigned or structurally broken artifacts from being uploaded, but it is not the same as Apple Developer ID signing and notarization.

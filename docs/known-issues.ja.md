@@ -16,10 +16,6 @@ Tauri 移行前にテストした ChromeOS/Baguette 環境では、xterm.js canv
 
 Tauri backend は Linux で WebKitGTK を使い、transparent window を有効にし、xterm.js に `allowTransparency = true` と 65% 不透明の terminal 背景を設定します。ChromeOS/Baguette 実機では再検証が必要です。描画がちらつく、黒または白になる場合は `--disable-dmabuf` で起動してください。この引数は `WEBKIT_DISABLE_DMABUF_RENDERER=1` を設定します。
 
-## Kitty/SIXEL graphics
-
-従来のxterm.js ImageAddonは連続画像でWebViewが無反応になるため使用していません。独自のbounded rendererはKitty direct PNG/RGB/RGBAのみ対応し、古い未描画frameを破棄します。SIXEL、iTerm inline image、Kitty animation、file/shared-memory転送は未対応です。問題発生時は`[terminal.images]`の`enabled = false`で無効化して再起動してください。
-
 ## macOS Gatekeeper
 
 Release build では ad-hoc code signing を使い、CI で生成された `.app` bundle と `.dmg` の構造を検証します。これにより、未署名または構造的に壊れた artifact が upload されることは防ぎますが、Apple Developer ID による署名と notarization とは別物です。

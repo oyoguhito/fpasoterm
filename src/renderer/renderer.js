@@ -44,6 +44,13 @@ const closeAllConfirmUnmountButton = document.getElementById('close-all-confirm-
 const windowMenu = document.getElementById('window-menu');
 const windowMenuToggleButton = document.getElementById('window-menu-toggle');
 const windowMenuItems = document.getElementById('window-menu-items');
+const terminalGraphicsZoomElement = document.getElementById('terminal-graphics-zoom');
+const terminalGraphicsZoomOutButton = document.getElementById('terminal-graphics-zoom-out');
+const terminalGraphicsZoomToggleButton = document.getElementById('terminal-graphics-zoom-toggle');
+const terminalGraphicsZoomInButton = document.getElementById('terminal-graphics-zoom-in');
+const terminalGraphicsZoomPresets = document.getElementById('terminal-graphics-zoom-presets');
+const terminalGraphicsZoom50Button = document.getElementById('terminal-graphics-zoom-50');
+const terminalGraphicsZoom100Button = document.getElementById('terminal-graphics-zoom-100');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const sshfsMountStatusElement = document.getElementById('sshfs-mount-status');
@@ -149,6 +156,22 @@ function dispatchPluginElementKeyCapture(event) {
 // prevents Escape from reaching an overlay's close handler before it can be
 // forwarded to the remote desktop.
 document.addEventListener('keydown', dispatchPluginElementKeyCapture, true);
+document.addEventListener('keydown', (event) => {
+  if (event.ctrlKey && !event.altKey && !event.metaKey && event.code === 'KeyQ'
+      && !terminalGraphicsZoomElement.hidden) {
+    // Do not consume Ctrl+Q: a live terminal-browser must receive it. If the
+    // child has already exited but Herdr omitted its final graphics cleanup,
+    // clear only fpasoterm's stale local placement and controls. Herdr's own
+    // terminal modes are restored by the helper's post-exit VT cleanup.
+    // Herdr may still have fragments of an already-produced Kitty frame in
+    // its PTY queue. Those fragments can arrive after this reset and must not
+    // make the controls reappear while terminal-browser is shutting down.
+    // The next alternate-screen entry clears this suppression for a new app.
+    terminalGraphicsControlsSuppressed = true;
+    imageAddon?.reset?.();
+    setTerminalGraphicsZoomVisible(false);
+  }
+}, true);
 document.addEventListener('keyup', dispatchPluginElementKeyCapture, true);
 let closeAllConfirmResolver = null;
 let terminalBroadcastConfirmResolver = null;
@@ -256,6 +279,9 @@ let pluginCatalogEntries = [];
 let term;
 let fitAddon;
 let imageAddon;
+let terminalWebLinksAddon = null;
+let terminalPathLinkDisposable = null;
+let terminalLinksSuspended = false;
 let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
@@ -282,6 +308,8 @@ let diagnosticsPanelMode = 'diagnostics';
 let diagnosticsPanelDismissed = false;
 let syncDiagnosticsEnabled = false;
 let syncDiagnosticsTimer = null;
+let terminalGraphicsHideTimer = null;
+let terminalGraphicsControlsSuppressed = false;
 let terminalLogSearchState = {
   query: '',
   text: '',
@@ -290,6 +318,42 @@ let terminalLogSearchState = {
 };
 let terminalLogConfirmResolver = null;
 let terminalLogConfirmReturnFocus = null;
+
+function setTerminalGraphicsZoomVisible(visible) {
+  if (terminalGraphicsHideTimer !== null) {
+    clearTimeout(terminalGraphicsHideTimer);
+    terminalGraphicsHideTimer = null;
+  }
+  terminalGraphicsZoomElement.hidden = !visible;
+  if (visible) suspendTerminalLinkHandlers();
+  else resumeTerminalLinkHandlers();
+  if (!visible) {
+    terminalGraphicsZoomPresets.hidden = true;
+    terminalGraphicsZoomToggleButton.setAttribute('aria-expanded', 'false');
+  }
+}
+
+function handleTerminalGraphicsActiveChange(active) {
+  if (active) {
+    if (!terminalGraphicsControlsSuppressed) setTerminalGraphicsZoomVisible(true);
+    return;
+  }
+  if (terminalGraphicsHideTimer !== null) clearTimeout(terminalGraphicsHideTimer);
+  // Frame producers may delete the previous placement immediately before
+  // transmitting its replacement. Avoid flashing the controls for that
+  // transient empty state; explicit terminal reset/exit still calls the
+  // immediate visibility setter above.
+  terminalGraphicsHideTimer = setTimeout(() => {
+    terminalGraphicsHideTimer = null;
+    setTerminalGraphicsZoomVisible(false);
+  }, 250);
+}
+
+function sendTerminalGraphicsZoom(shortcut) {
+  const sequence = window.fpasotermPluginTerminalInput.pluginTerminalShortcutSequence(shortcut);
+  sendTerminalInput(sequence, `terminal graphics zoom ${shortcut}`);
+  focusTerminalInput();
+}
 
 // Resolves a configurable shortcut. A single key inherits keybindings.prefix;
 // full values such as Ctrl+Alt+KeyN override the prefix for that action.
@@ -1042,11 +1106,48 @@ function normalizeJapaneseTerminalText(data) {
 function normalizeTerminalStateAfterAlternateScreenExit(data) {
   const combined = terminalModeSequenceTail + data;
   terminalModeSequenceTail = combined.slice(-16);
+  if (/\x1b\[\?(?:47|1047|1049)h/.test(combined)) {
+    terminalGraphicsControlsSuppressed = false;
+  }
   if (!/\x1b\[\?(?:47|1047|1049)l/.test(combined)) {
     return data;
   }
+  // Full-screen graphics applications such as terminal-browser draw Kitty
+  // placements over xterm.js. Their process can exit normally while the last
+  // placement remains visible, because restoring the alternate screen does
+  // not itself delete custom Kitty placements. Clear only the graphics layer
+  // when the alternate screen is left so the restored shell is visible.
+  terminalKittyDiagnosticPayload = false;
+  imageAddon?.reset?.();
+  setTerminalGraphicsZoomVisible(false);
   showDebugDiagnostic('renderer normalized terminal state after alternate-screen exit');
   return `${data}\x1b(B\x1b[0m\x1b[?25h`;
+}
+
+let terminalKittyDiagnosticPayload = false;
+
+// PTY reads may split one Kitty APC across hundreds of chunks. Track whether
+// the current chunk is inside ESC_G ... ESC\\ instead of checking only for
+// the introducer in each individual read.
+function containsKittyGraphicsPayload(data) {
+  let containsGraphics = terminalKittyDiagnosticPayload;
+  let offset = 0;
+  while (offset < data.length) {
+    if (terminalKittyDiagnosticPayload) {
+      containsGraphics = true;
+      const end = data.indexOf('\x1b\\', offset);
+      if (end < 0) break;
+      terminalKittyDiagnosticPayload = false;
+      offset = end + 2;
+      continue;
+    }
+    const start = data.indexOf('\x1b_G', offset);
+    if (start < 0) break;
+    containsGraphics = true;
+    terminalKittyDiagnosticPayload = true;
+    offset = start + 3;
+  }
+  return containsGraphics;
 }
 
 // Restores local xterm display state after a full-screen program leaves the
@@ -1057,6 +1158,9 @@ function resetTerminalDisplayState() {
     return;
   }
   terminalModeSequenceTail = '';
+  terminalKittyDiagnosticPayload = false;
+  imageAddon?.reset?.();
+  setTerminalGraphicsZoomVisible(false);
   clearImePreedit();
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
   // Blur first to cancel a pending browser composition (for example GTK's
@@ -1074,14 +1178,25 @@ function resetTerminalDisplayState() {
 
 function queueTerminalOutput(data) {
   const normalizedData = normalizeTerminalStateAfterAlternateScreenExit(normalizeJapaneseTerminalText(data));
-  showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
+  // A terminal-browser frame arrives as many large Kitty APC chunks. Logging
+  // every base64 chunk and running canvas diagnostics for each one can become
+  // more expensive than rendering the frame itself under --console-diagnostics.
+  const containsKittyGraphics = containsKittyGraphicsPayload(normalizedData);
+  // Controls are shown by handleTerminalGraphicsActiveChange only after the
+  // addon has created a real placement. A capability query is also a Kitty APC
+  // but must not suspend terminal link handling or leave an orphaned Zoom UI.
+  if (!containsKittyGraphics) {
+    showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
+  }
   processRuntimeOsc(normalizedData);
   mirrorTerminalData(normalizedData);
   term.write(normalizedData, () => {
     removeXtermVisualOverlays();
-    logXtermCanvasDiagnostics();
-    logXtermTextDiagnostics();
-    showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
+    if (!containsKittyGraphics) {
+      logXtermCanvasDiagnostics();
+      logXtermTextDiagnostics();
+      showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
+    }
     schedulePluginsReadyAfterTerminalOutput(180);
   });
 }
@@ -1365,6 +1480,10 @@ function closeTerminalUrlDialog() {
 // Opens a confirmation dialog for terminal-provided URLs instead of navigating automatically.
 function showTerminalUrlDialog(value, kind = 'URL') {
   const url = String(value || '').trim();
+  if (terminalLinksSuspended || !terminalGraphicsZoomElement.hidden) {
+    focusTerminalInput();
+    return;
+  }
   if (!isExternalHttpUrl(url) || !terminalUrlDialog || !terminalUrlMessageElement) {
     copyTerminalLink(url, kind);
     return;
@@ -1397,11 +1516,12 @@ async function openPendingTerminalUrl() {
 // Registers local absolute and home-relative paths that are not covered by
 // the URL addon. The terminal buffer uses 1-based link positions.
 function installTerminalPathLinks() {
-  if (!term || typeof term.registerLinkProvider !== 'function') {
+  if (!term || terminalLinksSuspended || terminalPathLinkDisposable
+      || typeof term.registerLinkProvider !== 'function') {
     return;
   }
   const pathPattern = /(?:~\/|\/(?:[^\s'"`<>()[\]{}|]+)|[A-Za-z]:\\(?:[^\s'"`<>()[\]{}|]+))/g;
-  term.registerLinkProvider({
+  terminalPathLinkDisposable = term.registerLinkProvider({
     provideLinks(y, callback) {
       const line = term.buffer.active.getLine(y - 1);
       const lineText = line?.translateToString(true) || '';
@@ -1428,18 +1548,34 @@ function installTerminalPathLinks() {
 
 // Installs plain URL and OSC 8 handlers. Browser navigation is always explicit.
 function installTerminalLinkHandlers() {
-  if (!term) {
+  if (!term || terminalLinksSuspended) {
     return;
   }
-  if (window.WebLinksAddon?.WebLinksAddon) {
-    const webLinksAddon = new window.WebLinksAddon.WebLinksAddon((_, uri) => {
+  if (!terminalWebLinksAddon && window.WebLinksAddon?.WebLinksAddon) {
+    terminalWebLinksAddon = new window.WebLinksAddon.WebLinksAddon((_, uri) => {
       showTerminalUrlDialog(uri, 'URL');
     });
-    term.loadAddon(webLinksAddon);
-  } else {
+    term.loadAddon(terminalWebLinksAddon);
+  } else if (!terminalWebLinksAddon && !window.WebLinksAddon?.WebLinksAddon) {
     showDiagnostic('xterm web links addon is unavailable');
   }
   installTerminalPathLinks();
+}
+
+function suspendTerminalLinkHandlers() {
+  if (terminalLinksSuspended) return;
+  terminalLinksSuspended = true;
+  terminalWebLinksAddon?.dispose?.();
+  terminalWebLinksAddon = null;
+  terminalPathLinkDisposable?.dispose?.();
+  terminalPathLinkDisposable = null;
+  if (terminalUrlDialog && !terminalUrlDialog.hidden) closeTerminalUrlDialog();
+}
+
+function resumeTerminalLinkHandlers() {
+  if (!terminalLinksSuspended) return;
+  terminalLinksSuspended = false;
+  installTerminalLinkHandlers();
 }
 
 // Returns true for editable UI controls other than xterm's hidden IME textarea.
@@ -2266,7 +2402,13 @@ function createTerminal() {
     // Keep this opt-in until it is verified not to interfere with IME input.
     vtExtensions: { kittyKeyboard: appConfig.terminal?.kittyKeyboard === true },
     linkHandler: {
-      activate: (_, uri) => showTerminalUrlDialog(uri, 'OSC 8 link'),
+      activate: (_, uri) => {
+        if (terminalLinksSuspended || !terminalGraphicsZoomElement.hidden) {
+          focusTerminalInput();
+          return;
+        }
+        showTerminalUrlDialog(uri, 'OSC 8 link');
+      },
     },
   });
   if (typeof term.onTitleChange === 'function') {
@@ -2287,6 +2429,8 @@ function createTerminal() {
           maxPlacements: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
         },
         onDiagnostic: (message) => showDebugDiagnostic(message),
+        onErrorDiagnostic: (message) => showDiagnostic(message),
+        onActiveChange: handleTerminalGraphicsActiveChange,
       });
       term.loadAddon(imageAddon);
       showDiagnostic('experimental bounded Kitty graphics renderer enabled');
@@ -2347,6 +2491,13 @@ function insertPluginTerminalText(text) {
   requirePluginUserActivation('insertTerminalText');
   const value = window.fpasotermPluginTerminalInput.normalizePluginTerminalText(text);
   sendTerminalInput(value, 'plugin insert');
+  term.focus();
+}
+
+function sendPluginTerminalShortcut(shortcut) {
+  requirePluginUserActivation('sendTerminalShortcut');
+  const sequence = window.fpasotermPluginTerminalInput.pluginTerminalShortcutSequence(shortcut);
+  sendTerminalInput(sequence, `plugin shortcut ${shortcut}`);
   term.focus();
 }
 
@@ -2909,6 +3060,7 @@ async function loadPlugins() {
       await writeClipboardText(String(text || ''));
     },
     insertTerminalText: (text) => insertPluginTerminalText(text),
+    sendTerminalShortcut: (shortcut) => sendPluginTerminalShortcut(shortcut),
     selectLocalAsset: (options) => selectPluginLocalAsset(options),
     openCanvasOverlay: (options) => openPluginCanvasOverlay(options),
     openElementOverlay: (options) => openPluginElementOverlay(options),
@@ -4795,6 +4947,10 @@ document.addEventListener('pointerdown', (event) => {
   if (windowMenu && !windowMenuItems.hidden && !windowMenu.contains(event.target)) {
     setWindowMenuOpen(false);
   }
+  if (!terminalGraphicsZoomPresets.hidden && !terminalGraphicsZoomElement.contains(event.target)) {
+    terminalGraphicsZoomPresets.hidden = true;
+    terminalGraphicsZoomToggleButton.setAttribute('aria-expanded', 'false');
+  }
 });
 
 
@@ -5174,6 +5330,35 @@ function setWindowMenuOpen(open, preferredItem = newWindowButton) {
 
 windowMenuToggleButton.addEventListener('click', () => {
   setWindowMenuOpen(windowMenuItems.hidden);
+});
+
+terminalGraphicsZoomOutButton.addEventListener('click', () => {
+  sendTerminalGraphicsZoom('terminal-browser-zoom-out');
+});
+
+terminalGraphicsZoomInButton.addEventListener('click', () => {
+  sendTerminalGraphicsZoom('terminal-browser-zoom-in');
+});
+
+terminalGraphicsZoomToggleButton.addEventListener('click', () => {
+  const open = terminalGraphicsZoomPresets.hidden;
+  terminalGraphicsZoomPresets.hidden = !open;
+  terminalGraphicsZoomToggleButton.setAttribute('aria-expanded', String(open));
+  // terminal-browser starts at 100%. Keep the first keyboard focus aligned
+  // with the actual initial page zoom instead of implying that 50% is active.
+  if (open) terminalGraphicsZoom100Button.focus();
+});
+
+terminalGraphicsZoom50Button.addEventListener('click', () => {
+  sendTerminalGraphicsZoom('terminal-browser-zoom-50');
+  terminalGraphicsZoomPresets.hidden = true;
+  terminalGraphicsZoomToggleButton.setAttribute('aria-expanded', 'false');
+});
+
+terminalGraphicsZoom100Button.addEventListener('click', () => {
+  sendTerminalGraphicsZoom('terminal-browser-zoom-reset');
+  terminalGraphicsZoomPresets.hidden = true;
+  terminalGraphicsZoomToggleButton.setAttribute('aria-expanded', 'false');
 });
 
 windowMenuToggleButton.addEventListener('keydown', (event) => {

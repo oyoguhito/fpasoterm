@@ -15,5 +15,19 @@
     return value;
   }
 
-  return Object.freeze({ normalizePluginTerminalText });
+  // Reviewed plugins may request only these named control inputs. Arbitrary
+  // escape sequences and Enter remain unavailable to plugins.
+  function pluginTerminalShortcutSequence(shortcut) {
+    const sequences = {
+      'terminal-browser-zoom-out': '\x1b-',
+      'terminal-browser-zoom-in': '\x1b=',
+      'terminal-browser-zoom-reset': '\x1b0',
+      'terminal-browser-zoom-50': '\x1b-\x1b-\x1b-\x1b-\x1b-',
+    };
+    const sequence = sequences[String(shortcut || '')];
+    if (!sequence) throw new Error(`unsupported terminal shortcut: ${shortcut}`);
+    return sequence;
+  }
+
+  return Object.freeze({ normalizePluginTerminalText, pluginTerminalShortcutSequence });
 }));

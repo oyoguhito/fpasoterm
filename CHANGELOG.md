@@ -10,6 +10,9 @@
 - Added a bounded Kitty Graphics renderer for direct PNG/RGB/RGBA payloads.
   Decode work is serialized, stale pending frames are dropped, and file or
   shared-memory transfers are rejected.
+- Added a user-activated, allowlisted terminal shortcut API so reviewed helper
+  plugins can expose terminal-browser zoom controls on platforms where Alt is
+  reserved, without allowing arbitrary escape sequences or Enter.
 
 ## 1.6.9
 
