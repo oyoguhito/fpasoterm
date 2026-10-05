@@ -1,5 +1,9 @@
 type FpasotermPluginApi = {
   version: string;
+  capabilities: {
+    /** True only when a safe terminal graphics renderer is active. */
+    terminalGraphics: boolean;
+  };
   terminal: {
     options: Record<string, unknown>;
     write: (data: string) => void;
@@ -28,6 +32,15 @@ type FpasotermPluginApi = {
   readClipboard: () => Promise<string>;
   /** Writes plain UTF-8 text to the native system clipboard. */
   writeClipboard: (text: string) => Promise<void>;
+  /**
+   * Inserts visible printable text into the active PTY without submitting it.
+   * Only available from a user-initiated plugin action. Control characters,
+   * including Enter and Escape, are rejected and the input is capped at 4096
+   * characters.
+   */
+  insertTerminalText: (text: string) => void;
+  /** Sends one reviewed named shortcut; arbitrary control sequences are rejected. */
+  sendTerminalShortcut: (shortcut: 'terminal-browser-zoom-out' | 'terminal-browser-zoom-in' | 'terminal-browser-zoom-reset' | 'terminal-browser-zoom-50') => void;
   /** Opens an HTTP(S) URL in the external browser after a plugin's explicit user action. */
   openExternalUrl: (url: string) => Promise<void>;
   /**

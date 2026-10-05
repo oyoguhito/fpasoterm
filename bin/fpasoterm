@@ -2889,6 +2889,14 @@ async function launch(options) {
   appendLauncherLog(`launcher cwd=${root}`);
 
   let logFd;
+  const closeLauncherLog = () => {
+    if (logFd === undefined) return;
+    try {
+      fs.closeSync(logFd);
+    } finally {
+      logFd = undefined;
+    }
+  };
   let stdio = options.foreground ? 'inherit' : 'ignore';
   if (!options.foreground) {
     try {

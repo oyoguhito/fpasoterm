@@ -8,9 +8,18 @@
     <link rel="stylesheet" href="./styles.css">
   </head>
   <body>
-    <header id="drag-region" data-tauri-drag-region>
+    <header id="drag-region">
       <span id="window-title">fpasoterm</span>
       <div id="window-controls" aria-label="Window controls">
+        <div id="terminal-graphics-zoom" hidden>
+          <button id="terminal-graphics-zoom-out" type="button" aria-label="Make browser content smaller">−</button>
+          <button id="terminal-graphics-zoom-toggle" type="button" aria-label="Open browser zoom presets" aria-expanded="false">Zoom</button>
+          <button id="terminal-graphics-zoom-in" type="button" aria-label="Make browser content larger">＋</button>
+          <div id="terminal-graphics-zoom-presets" hidden>
+            <button id="terminal-graphics-zoom-50" type="button">50%</button>
+            <button id="terminal-graphics-zoom-100" type="button">100%</button>
+          </div>
+        </div>
         <div id="window-menu">
           <span id="terminal-log-status" hidden aria-live="polite">Logging</span>
           <span id="sshfs-mount-status" hidden aria-live="polite">SSHFS</span>
@@ -256,9 +265,10 @@
     </section>
     <script src="./vendor/xterm/xterm.js"></script>
     <script src="./vendor/addon-fit/addon-fit.js"></script>
-    <script src="./vendor/addon-image/addon-image.js"></script>
     <script src="./vendor/addon-web-links/addon-web-links.js"></script>
     <script src="./plugin-command-runtime.js"></script>
+    <script src="./plugin-terminal-input.js"></script>
+    <script src="./kitty-graphics.js"></script>
     <script src="./renderer.js"></script>
   </body>
 </html>

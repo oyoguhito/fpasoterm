@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.6.11
+
+- Added a reviewed-plugin API that inserts printable text into the active PTY
+  without submitting it. Control characters are rejected so helper plugins can
+  prepare commands while leaving execution to the user.
+- Exposed the read-only `capabilities.terminalGraphics` flag so plugins refuse
+  to launch image-terminal applications on hosts where rendering can freeze.
+- Added a bounded Kitty Graphics renderer for direct PNG/RGB/RGBA payloads.
+  Decode work is serialized, stale pending frames are dropped, and file or
+  shared-memory transfers are rejected.
+- Added a user-activated, allowlisted terminal shortcut API so reviewed helper
+  plugins can expose terminal-browser zoom controls on platforms where Alt is
+  reserved, without allowing arbitrary escape sequences or Enter.
+
 ## 1.6.9
 
 - Added a Close button to the Plugin activity error panel. It returns focus to

@@ -77,6 +77,20 @@ node ./bin/fpasoterm --plugin-uninstall plugin-activity-test.ts
 The example is committed for development verification, but should not normally
 remain enabled in an end-user configuration.
 
+### Verify Kitty graphics and terminal-browser
+
+`npm run check` includes bounded Kitty renderer unit coverage for PNG decode,
+stale asynchronous-frame eviction, and suppressing a decode result or terminal
+response when it completes after reset. In the real WebView, start
+terminal-browser and verify its initial image, continuous frames, window
+resize, title-bar zoom, and that **Ctrl+Q** returns to the shell and removes the
+zoom controls.
+
+For the Herdr path, also verify that `HERDR_PANE_ID` is non-empty and that
+Herdr has applied `[terminal] kitty_graphics = true`. This setting lets
+Herdr pass the Kitty sequence to the outer fpasoterm; it is not an fpasoterm
+setting. See [Terminal Graphics](docs/config.en.md#terminal-graphics).
+
 ## Pull Request Review
 
 Do not review a tagged release asset when the requested change is in a pull

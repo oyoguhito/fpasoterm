@@ -33,8 +33,13 @@ shell = ""
 # unless needed; this is separate from the currently disabled graphics addon.
 kittyKeyboard = false
 
-# [terminal.images] is reserved for a future stable renderer.
-# Current builds ignore this section. Do not add it to config.toml.
+# The bounded Kitty Graphics renderer is enabled by default. It accepts direct
+# PNG/RGB/RGBA payloads only; file and shared-memory transfers are rejected.
+# [terminal.images]
+# enabled = true
+# kittySupport = true
+# kittySizeLimit = 8388608
+# storageLimit = 8
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.65)"

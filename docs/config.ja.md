@@ -257,11 +257,12 @@ encoding = "utf-8"
 shell = ""
 
 # enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化します。
-# 現在無効なgraphics addonとは別の設定です。
+# Kitty Graphics rendererとは別の設定です。
 kittyKeyboard = false
 
-# [terminal.images] は将来の安定した renderer 用に予約されています。
-# 現在の build はこの section を無視します。config.toml へ追加しないでください。
+# Kitty Graphics renderer は既定で有効です。必要な場合だけ無効化できます。
+# [terminal.images]
+# enabled = false
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.65)"
@@ -400,7 +401,7 @@ encoding = "utf-8"
 ## セクション
 
 - `window`: titlebar の表示名、初期ウィンドウサイズ、最小サイズ、背景色、custom titlebar 色、native theme source、frame/titlebar 表示、最後の window bounds を local に記憶するかどうか。`themeSource` は `system`、`light`、`dark` を指定できます。`titleLocked` は既定で `true` で、shell が送る title sequence で fpasoterm の titlebar が上書きされないようにします。`--title` / `-t` と `--titlebar-color` / `-b` は一度だけ titlebar 表示を上書きします。
-- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`lineHeight` の既定値はmacOSで `1`、Linux/Windowsで `1.08` です。Linux/Windowsでは下端の余白により`_`とdescenderを見やすくします。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。`terminal.kittyKeyboard` は既定で `false` です。enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化してください。WebViewごとにIME動作が異なるためです。graphicsを有効化する設定ではありません。`[terminal.images]` は予約済みで、現在の build は値を無視します。追加・有効化しないでください。
+- `terminal`: terminal 作成時に渡す xterm.js options。既定の `fontFamily` は罫線・block文字のcell計測を安定させるため、Noto/DejaVu等幅font候補を先頭にします。Nerd Font候補はprivate-use glyph用のfallbackです。macOSでは`SF Mono`、`Menlo`、Hiragino、`Apple SD Gothic Neo`を含みます。ASCII文字のcell計測を等幅に保つため、可変幅の`Hiragino Sans`を等幅fontより前へ置かないでください。他OSでは半角カタカナやCJK文字を優先して描画するため、日本語・韓国語・中国語向けのNoto CJK候補とOSごとの一般的なfallbackを含めます。ただし、installされていないfontのglyphはfont stackだけでは表示できません。韓国語がtofu boxになる、またはNerd Fontのprivate-use glyphが別記号になる場合は、Font / Glyph Testで確認し、OS側でCJK fontまたはNerd Fontをinstallしてください。`lineHeight` の既定値はmacOSで `1`、Linux/Windowsで `1.08` です。Linux/Windowsでは下端の余白により`_`とdescenderを見やすくします。`minimumContrastRatio` の既定値は `1` で、terminal applicationが指定したANSI/RGB色を維持します。`rescaleOverlappingGlyphs` の既定値は `false` で、block artやPowerline形式の装飾などapplication側のglyphを保ちます。CJK fontが隣接cellへ重なる場合だけ有効化してください。`terminal.termName` は既定で `xterm-256color` です。backend PTY は `TERM=xterm-256color` と `COLORTERM=truecolor` を設定するため、tmuxなどのterminal multiplexerがterminfoを使え、TUI applicationもtruecolor経路を選択できます。`terminal.shell` は空でなければ platform default shell を上書きします。Windows では `powershell.exe`、`pwsh.exe`、`cmd.exe` などを指定できます。`--shell <command>` / `-s <command>` は一度だけこの設定を上書きします。`terminal.kittyKeyboard` は既定で `false` です。enhanced Kitty keyboard inputを明示的に必要とするTUIだけで有効化してください。WebViewごとにIME動作が異なるためです。graphicsとは別の設定です。Kitty Graphics rendererは既定で有効で、問題切分け時だけ`[terminal.images] enabled = false`で無効化します。
 
 Windowsで非標準の場所にPowerShellをinstallしている場合は、`C:\Program Files\PowerShell\7\pwsh.exe` のようにshellのフルパスを指定できます。
 
@@ -436,9 +437,18 @@ macOSは最後のwindowを閉じてもapplicationをactiveのまま維持する�
 
 ## Terminal Graphics
 
-Kitty Graphics Protocol、SIXEL、iTerm inline imageは、現在のbuildでは未対応です。xterm.js image addonはChromeOSの現行Tauri/WebKitGTKでWebViewを無反応にすることがあるため、`config.toml`に`[terminal.images]`があっても意図的にloadしません。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA転送に対応します。独自rendererはdecodeを直列化し、未処理の古いframeを破棄し、既定でdecoded image 8 MiB、4M pixels、画像・placement各8件に制限します。任意のlocal fileを読ませないためfile、temporary file、shared-memory転送は拒否します。SIXEL、iTerm inline image、Kitty animationは未対応です。
 
-graphicsの検証目的でも、fpasoterm内で`kitten icat`、`chafa --format kitty`、`chafa --format sixels`を実行しないでください。fpasotermは`TERM=xterm-256color`を維持し、Kitty graphics capability queryへ応答しないため、`kitten icat`はgraphics非対応のerrorを表示します。これは想定どおりであり、以前再現したrenderer freezeを避けるためです。
+fpasoterm上でterminal-browserを直接実行する場合、Herdrの設定は不要です。Herdr pane内でterminal-browserなどのKitty graphics applicationを実行する場合だけ、Herdrが画像sequenceを外側のterminalへ転送できるよう、Herdrの設定（通常`~/.config/herdr/config.toml`）へ次を設定します。
+
+```toml
+[terminal]
+kitty_graphics = true
+```
+
+設定後はHerdrを完全再起動します。これはfpasotermの`[terminal.images]`とは別の設定です。利用条件と障害切分けを明確にするため、Herdr pane内で`printf 'HERDR_PANE_ID=%s\n' "$HERDR_PANE_ID"`を実行し、空でないことも確認してください。
+
+問題を切り分ける場合は`[terminal.images]`の`enabled = false`で無効化し、fpasotermを再起動してください。
 
 ## Broadcast Input
 

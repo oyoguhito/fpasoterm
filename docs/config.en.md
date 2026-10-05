@@ -265,11 +265,13 @@ encoding = "utf-8"
 shell = ""
 
 # Enable only for a TUI that explicitly requires enhanced Kitty keyboard input.
-# It is separate from the currently disabled graphics addon.
+# It is separate from the Kitty Graphics renderer.
 kittyKeyboard = false
 
-# [terminal.images] is reserved for a future stable renderer.
-# Current builds ignore this section. Do not add it to config.toml.
+# The Kitty Graphics renderer is enabled by default. Disable it only when
+# isolating a graphics problem.
+# [terminal.images]
+# enabled = false
 
 [terminal.theme]
 background = "rgba(16, 19, 23, 0.65)"
@@ -405,7 +407,7 @@ glyph metrics match the macOS Terminal renderer more closely than `SF Mono`.
 ## Sections
 
 - `window`: titlebar title, initial window size, minimum size, background color, custom titlebar color, native theme source, frame/titlebar visibility, and whether to remember the last bounds locally. `themeSource` can be `system`, `light`, or `dark`. `titleLocked` defaults to `true` so shell-emitted title sequences do not replace the fpasoterm titlebar. `--title` / `-t` and `--titlebar-color` / `-b` override titlebar appearance for one launch.
-- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `lineHeight` defaults to `1` on macOS and `1.08` on Linux and Windows, leaving enough room for `_` and descenders. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.encoding` defaults to `utf-8`. On Unix, fpasoterm supplies a UTF-8 locale to a UTF-8 PTY when the inherited locale is not UTF-8, which prevents path names from being replaced with `?`. Use `shift-jis` or `euc-jp` only for a known legacy byte stream; the decoder is selected explicitly because automatic encoding detection is ambiguous. **Diagnostics > Capability Test** can save this setting; restart the window to start a new PTY with it. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. PowerShell 7 (`pwsh.exe`) is the default when it is available; otherwise fpasoterm checks common PowerShell 7 install paths and accepts a full path. `terminal.kittyKeyboard` is `false` by default: enable it only for a TUI that explicitly needs enhanced Kitty keyboard input, because IME behavior differs among WebViews. It does not enable graphics. `[terminal.images]` is reserved and ignored by current builds; do not add or enable it.
+- `terminal`: xterm.js options passed when the terminal is created. The default `fontFamily` starts with Noto/DejaVu monospace candidates so terminal cell metrics remain stable for box and block art. Nerd Font candidates follow as fallbacks for private-use glyphs. On macOS, this includes `SF Mono`, `Menlo`, Hiragino, and `Apple SD Gothic Neo`; do not put proportional `Hiragino Sans` before the monospace fonts. Other platforms include Japanese, Korean, and Chinese Noto CJK candidates, plus common OS-specific fallbacks, so half-width kana and CJK characters are preferred during rendering. A font stack cannot render glyphs from a font that is not installed: use Font / Glyph Test and install a CJK or Nerd Font through the operating system when its sample is a tofu box or an incorrect private-use glyph. `lineHeight` defaults to `1` on macOS and `1.08` on Linux and Windows, leaving enough room for `_` and descenders. `minimumContrastRatio` defaults to `1` so terminal applications retain their selected ANSI and RGB colors. `rescaleOverlappingGlyphs` defaults to `false` to preserve application glyphs such as block art and Powerline-style decorations; enable it only when a CJK font overlaps adjacent cells. `terminal.termName` defaults to `xterm-256color`, and the backend PTY exports `TERM=xterm-256color` plus `COLORTERM=truecolor`, so terminal multiplexers and TUI applications can use terminfo and the truecolor path. `terminal.encoding` defaults to `utf-8`. On Unix, fpasoterm supplies a UTF-8 locale to a UTF-8 PTY when the inherited locale is not UTF-8, which prevents path names from being replaced with `?`. Use `shift-jis` or `euc-jp` only for a known legacy byte stream; the decoder is selected explicitly because automatic encoding detection is ambiguous. **Diagnostics > Capability Test** can save this setting; restart the window to start a new PTY with it. `terminal.shell` overrides the platform default when non-empty. Windows examples are `powershell.exe`, `pwsh.exe`, and `cmd.exe`. `--shell <command>` / `-s <command>` overrides this for one launch. PowerShell 7 (`pwsh.exe`) is the default when it is available; otherwise fpasoterm checks common PowerShell 7 install paths and accepts a full path. `terminal.kittyKeyboard` is `false` by default and is separate from graphics. `[terminal.images] enabled = false` disables the bounded Kitty renderer for troubleshooting.
 
 On Windows, a full shell path can be written as `C:\Program Files\PowerShell\7\pwsh.exe` when PowerShell is installed in a nonstandard location.
 
@@ -441,9 +443,27 @@ The running titlebar can be updated from inside the terminal. Standard OSC title
 
 ## Terminal Graphics
 
-Kitty Graphics Protocol, SIXEL, and iTerm inline images are not supported by the current build. The xterm.js image addon can make the current Tauri/WebKitGTK WebView unresponsive on ChromeOS, so it is deliberately not loaded even when `[terminal.images]` is present in `config.toml`.
+Direct Kitty Graphics PNG, RGB, and RGBA transmissions are supported by the bounded fpasoterm renderer. Decode work is serialized, stale pending frames are dropped, and the defaults limit decoded images to 8 MiB, 4M pixels, eight images, and eight placements. File, temporary-file, and shared-memory transmissions are rejected so terminal output cannot request arbitrary local files. SIXEL, iTerm inline images, and Kitty animation are not supported.
 
-Do not run `kitten icat`, `chafa --format kitty`, or `chafa --format sixels` in fpasoterm for graphics testing. `kitten icat` reports that graphics are unsupported because fpasoterm keeps `TERM=xterm-256color` and does not answer the Kitty graphics capability query. This is expected and avoids the previously reproduced renderer freeze.
+Running terminal-browser directly in fpasoterm does not require a Herdr setting.
+When terminal-browser or another Kitty graphics application runs inside a Herdr
+pane, enable Herdr's pass-through in its configuration (normally
+`~/.config/herdr/config.toml`):
+
+```toml
+[terminal]
+kitty_graphics = true
+```
+
+Fully restart Herdr afterward. This is separate from fpasoterm's
+`[terminal.images]` setting. An explicit setting makes the requirement and
+troubleshooting state clear.
+Inside the Herdr pane, also verify that
+`printf 'HERDR_PANE_ID=%s\n' "$HERDR_PANE_ID"` is non-empty.
+
+To isolate a graphics problem, set `enabled = false` under `[terminal.images]` and restart fpasoterm.
+
+Use `kitten icat` or a direct Kitty graphics test to verify the bounded renderer. Do not use SIXEL or iTerm image modes because they remain unsupported.
 
 ## Broadcast Input
 

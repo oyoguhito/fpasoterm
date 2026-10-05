@@ -32,7 +32,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(all(unix, not(target_os = "macos")))]
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
 use tauri::{
@@ -3582,10 +3582,10 @@ fn default_runtime_config() -> RuntimeConfig {
                 "encoding": "utf-8",
                 "shell": read_configured_shell(&config_path).unwrap_or_default(),
                 "images": {
-                    "enabled": false,
-                    "kittySupport": false,
-                    "kittySizeLimit": 33554432,
-                    "storageLimit": 64,
+                    "enabled": true,
+                    "kittySupport": true,
+                    "kittySizeLimit": 8388608,
+                    "storageLimit": 8,
                     "sixelSupport": false,
                     "iipSupport": false
                 },
@@ -6463,12 +6463,25 @@ fn terminal_start(
     std::thread::spawn(move || {
         let mut buffer = [0_u8; 8192];
         let mut decoder = TerminalOutputDecoder::new(output_encoding);
+        let mut diagnostic_reads = 0_u64;
+        let mut diagnostic_bytes = 0_u64;
+        let mut diagnostic_started = Instant::now();
         loop {
             match reader.read(&mut buffer) {
                 Ok(0) => break,
                 Ok(read) => {
                     if console_diagnostics_enabled() {
-                        eprintln!("terminal_read bytes={read}");
+                        diagnostic_reads += 1;
+                        diagnostic_bytes += read as u64;
+                        if diagnostic_started.elapsed() >= Duration::from_secs(1) {
+                            eprintln!(
+                                "terminal_read reads={diagnostic_reads} bytes={diagnostic_bytes} interval_ms={}",
+                                diagnostic_started.elapsed().as_millis()
+                            );
+                            diagnostic_reads = 0;
+                            diagnostic_bytes = 0;
+                            diagnostic_started = Instant::now();
+                        }
                     }
                     append_terminal_log(&terminal_log, &buffer[..read]);
                     let data = decoder.decode(&buffer[..read]);
