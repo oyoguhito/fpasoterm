@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.12
+
+- Restored Unix PTY termios after force-killing a full-screen terminal child,
+  while applying display reset sequences in xterm.js instead of echoing them
+  through the surviving shell.
+- Reset xterm.js parser state after interrupted Kitty/OSC frames so Kill does
+  not leave image payload or mouse escape text on screen.
+- Kept Plugin Catalog visible while background diagnostics arrive and added an
+  explicit Diagnostics Log return action.
+
 ## 1.6.11
 
 - Added a reviewed-plugin API that inserts printable text into the active PTY
