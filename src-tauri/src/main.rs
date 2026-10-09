@@ -516,6 +516,8 @@ struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     shell_pid: Option<u32>,
+    #[cfg(unix)]
+    initial_termios: Option<libc::termios>,
 }
 
 // Decodes PTY bytes before they are sent to xterm.js.
@@ -6436,6 +6438,12 @@ fn terminal_start(
         .map_err(|error| error.to_string())?;
     let shell_pid = child.process_id();
     let killer = Arc::new(Mutex::new(child.clone_killer()));
+    #[cfg(unix)]
+    let initial_termios = pair.master.as_raw_fd().and_then(|fd| {
+        let mut termios = std::mem::MaybeUninit::<libc::termios>::uninit();
+        let result = unsafe { libc::tcgetattr(fd, termios.as_mut_ptr()) };
+        (result == 0).then(|| unsafe { termios.assume_init() })
+    });
     let mut reader = pair
         .master
         .try_clone_reader()
@@ -6526,6 +6534,8 @@ fn terminal_start(
         writer: writer_for_state,
         killer,
         shell_pid,
+        #[cfg(unix)]
+        initial_termios,
     });
     drop(terminal);
     start_terminal_broadcast_listener(app, state.inner());
@@ -6613,6 +6623,7 @@ fn terminal_kill(state: State<AppState>) -> Result<(), String> {
         // Negative PID signals every process in the foreground job's process group.
         let result = unsafe { libc::kill(-foreground_group, libc::SIGKILL) };
         if result == 0 {
+            restore_terminal_after_kill(session)?;
             return Ok(());
         }
         return Err(std::io::Error::last_os_error().to_string());
@@ -6627,7 +6638,9 @@ fn terminal_kill(state: State<AppState>) -> Result<(), String> {
         let shell_pid = session
             .shell_pid
             .ok_or_else(|| "could not identify the terminal shell process".to_string())?;
-        return kill_windows_shell_descendants(shell_pid);
+        kill_windows_shell_descendants(shell_pid)?;
+        restore_terminal_after_kill(session)?;
+        return Ok(());
     }
 
     #[cfg(all(not(unix), not(target_os = "windows")))]
@@ -6635,6 +6648,22 @@ fn terminal_kill(state: State<AppState>) -> Result<(), String> {
         let _ = state;
         Err("Kill is not available on this platform; use Ctrl+C or close the window".to_string())
     }
+}
+
+// A killed full-screen child cannot run its own terminal cleanup. Restore the
+// PTY termios captured before the shell launched the foreground command. The
+// xterm.js display reset is performed by the renderer; writing ANSI reset bytes
+// into the PTY would make the interactive shell echo those bytes as text.
+fn restore_terminal_after_kill(session: &TerminalSession) -> Result<(), String> {
+    #[cfg(unix)]
+    if let (Some(fd), Some(termios)) = (session.master.as_raw_fd(), session.initial_termios) {
+        let result = unsafe { libc::tcsetattr(fd, libc::TCSANOW, &termios) };
+        if result != 0 {
+            return Err(std::io::Error::last_os_error().to_string());
+        }
+    }
+
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]

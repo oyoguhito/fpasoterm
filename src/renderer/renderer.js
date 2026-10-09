@@ -65,6 +65,7 @@ const syncStatusButton = document.getElementById('sync-status');
 const syncCleanButton = document.getElementById('sync-clean');
 const diagnosticsMenuToggleButton = document.getElementById('diagnostics-menu-toggle');
 const diagnosticsMenuItems = document.getElementById('diagnostics-menu-items');
+const diagnosticsLogButton = document.getElementById('diagnostics-log');
 const fontGlyphTestButton = document.getElementById('font-glyph-test');
 const terminalCapabilityTestButton = document.getElementById('terminal-capability-test');
 const windowActionsMenuToggleButton = document.getElementById('window-actions-menu-toggle');
@@ -923,7 +924,9 @@ function applyDiagnosticsFilter() {
   diagnosticsElement.scrollTop = 0;
 }
 
-// Writes a diagnostic line to the optional in-window diagnostics panel.
+// Writes a diagnostic line to the optional in-window diagnostics panel. The
+// shared panel also hosts Plugin Catalog, terminal logs, and capability views;
+// background diagnostics must not steal those explicit views.
 function appendDiagnosticLine(message) {
   if (!debugKeys) {
     return;
@@ -933,16 +936,14 @@ function appendDiagnosticLine(message) {
   if (diagnosticLines.length > MAX_DIAGNOSTIC_LINES) {
     diagnosticLines.shift();
   }
-  if (diagnosticsPanelMode !== 'terminal-log') {
-    if (diagnosticsPanelMode !== 'diagnostics') {
-      diagnosticsPanelMode = 'diagnostics';
-      setTerminalLogPickerVisible(false);
-    }
-    showDiagnosticsTextArea();
-    setDiagnosticsFilterVisible(true);
-    if (diagnosticsTitleElement) {
-      diagnosticsTitleElement.textContent = 'Diagnostics';
-    }
+  if (diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  showDiagnosticsTextArea();
+  setTerminalLogPickerVisible(false);
+  setDiagnosticsFilterVisible(true);
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Diagnostics';
   }
   scheduleDiagnosticRender({ scrollToEnd: true });
   if (!diagnosticsPanelDismissed) {
@@ -954,6 +955,24 @@ function appendDiagnosticLine(message) {
 function showDiagnosticsPanel() {
   diagnosticsPanelDismissed = false;
   diagnosticsPanel.hidden = false;
+}
+
+// Reopens the live Diagnostics view explicitly after the shared panel has been
+// used for Plugin Catalog or another diagnostics mode.
+function showLiveDiagnosticsView() {
+  diagnosticsPanelMode = 'diagnostics';
+  setTerminalLogPickerVisible(false);
+  setTerminalEncodingControlsVisible(false);
+  showDiagnosticsTextArea();
+  setDiagnosticsFilterVisible(true);
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Diagnostics';
+  }
+  renderDiagnosticLines({ scrollToEnd: true });
+  diagnosticsPathElement.textContent = '';
+  showDiagnosticsPanel();
+  setWindowMenuOpen(false);
+  diagnosticsFilterElement?.focus({ preventScroll: true });
 }
 
 // Hides the panel without discarding collected diagnostics. Background events
@@ -1169,7 +1188,12 @@ function resetTerminalDisplayState() {
   if (textarea) {
     textarea.value = '';
   }
-  term.write('\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b(B\x1b[0m\x1b[2J\x1b[H\x1b[?25h', () => {
+  // A forced kill can interrupt a Kitty APC/OSC payload halfway through.
+  // Resetting only with CSI bytes is insufficient because xterm.js may still
+  // be inside that parser state and treat the reset as image payload. Reset
+  // the parser/buffer first, then send the screen-mode cleanup sequence.
+  term.reset();
+  term.write('\x18\x1a\x1b[?1049l\x1b[?1047l\x1b[?47l\x1b(B\x1b[0m\x1b[2J\x1b[H\x1b[?25h', () => {
     focusTerminalInput();
     sendTerminalInput('\x0c', 'terminal display reset prompt redraw');
   });
@@ -1773,6 +1797,7 @@ function installTerminalPasteHandlers() {
       event.preventDefault();
       event.stopPropagation();
       window.fpasoterm.killTerminal().then(() => {
+        resetTerminalDisplayState();
         showDiagnostic('terminal kill requested');
       }).catch((error) => {
         showDiagnostic(`terminal kill failed: ${error}`);
@@ -4503,6 +4528,10 @@ diagnosticsMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('diagnostics', diagnosticsMenuItems.hidden);
 });
 
+diagnosticsLogButton.addEventListener('click', () => {
+  showLiveDiagnosticsView();
+});
+
 pluginMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('plugins', pluginCommandItems.hidden);
 });
@@ -4679,6 +4708,7 @@ terminalCopyLastOsc52Button?.addEventListener('click', () => {
 // Kills the active terminal command while preserving the interactive shell.
 terminalKillButton.addEventListener('click', () => {
   window.fpasoterm.killTerminal().then(() => {
+    resetTerminalDisplayState();
     showDiagnostic('terminal kill requested');
   }).catch((error) => {
     showDiagnostic(`terminal kill failed: ${error}`);
