@@ -483,6 +483,9 @@ Use `fpasoterm --plugin-search [query]` to search official public port metadata
 without installing a plugin or downloading plugin source. The output includes a
 copyable `--plugin-install` command for every matching port. The command labels
 its source as the remote official INDEX, while `--plugin-list` is local-only.
+To update every installed official public plugin whose stable version is older
+than the catalog while preserving enabled state, run
+`fpasoterm --plugin-update-all`, then restart fpasoterm.
 
 Minimal TypeScript plugin:
 

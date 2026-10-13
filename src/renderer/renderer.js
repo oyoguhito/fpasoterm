@@ -15,6 +15,7 @@ const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
 const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
 const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
+const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
 const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
@@ -144,8 +145,17 @@ let activePluginElementKeyCapture = null;
 function dispatchPluginElementKeyCapture(event) {
   const capture = activePluginElementKeyCapture;
   if (!capture) return;
+  // A keydown consumed by a plugin must keep its physical keyup out of the
+  // underlying canvas as well. Sending only that keyup to noVNC corrupts its
+  // pressed-key bookkeeping and can leave a remote macOS modifier stuck.
+  if (event.type === 'keyup' && capture.capturedCodes.delete(event.code)) {
+    event.preventDefault();
+    event.stopImmediatePropagation();
+    return;
+  }
   try {
     if (capture.handler(event) === true) {
+      if (event.type === 'keydown') capture.capturedCodes.add(event.code);
       event.preventDefault();
       event.stopImmediatePropagation();
     }
@@ -153,9 +163,9 @@ function dispatchPluginElementKeyCapture(event) {
     showDiagnostic(`plugin element key capture failed: ${error}`);
   }
 }
-// A remote-desktop plugin must receive both halves of a captured key. This
-// prevents Escape from reaching an overlay's close handler before it can be
-// forwarded to the remote desktop.
+// A remote-desktop plugin must own both halves of a captured key. Otherwise a
+// synthesized remote shortcut on keydown can be paired with a stray keyup in
+// noVNC, leaving Control/Command state stuck on the remote desktop.
 document.addEventListener('keydown', dispatchPluginElementKeyCapture, true);
 document.addEventListener('keydown', (event) => {
   if (event.ctrlKey && !event.altKey && !event.metaKey && event.code === 'KeyQ'
@@ -277,6 +287,7 @@ const pluginCommands = new Map();
 // handler itself; a plugin startup script or timer still has no such access.
 let pluginCommandInvocationDepth = 0;
 let pluginCatalogEntries = [];
+let pluginCatalogUpdatesOnly = false;
 let term;
 let fitAddon;
 let imageAddon;
@@ -1014,7 +1025,49 @@ function setDiagnosticsFilterVisible(visible) {
 // Keeps public port filtering separate from terminal-log search controls.
 function setPluginCatalogSearchVisible(visible) {
   if (pluginCatalogSearchElement) pluginCatalogSearchElement.hidden = !visible;
+  if (pluginCatalogUpdatesOnlyButton) pluginCatalogUpdatesOnlyButton.hidden = !visible;
   if (pluginCatalogSearchStatusElement) pluginCatalogSearchStatusElement.hidden = !visible;
+}
+
+// Keeps the Catalog's explicit update-only control synchronized for mouse,
+// keyboard, and assistive-technology users.
+function setPluginCatalogUpdatesOnly(enabled) {
+  pluginCatalogUpdatesOnly = Boolean(enabled);
+  if (!pluginCatalogUpdatesOnlyButton) return;
+  pluginCatalogUpdatesOnlyButton.setAttribute('aria-pressed', String(pluginCatalogUpdatesOnly));
+  pluginCatalogUpdatesOnlyButton.classList.toggle('is-active', pluginCatalogUpdatesOnly);
+  pluginCatalogUpdatesOnlyButton.textContent = pluginCatalogUpdatesOnly
+    ? 'Updates only: On'
+    : 'Updates only';
+}
+
+// Produces a concise local-versus-catalog status without having the renderer
+// infer versions itself. The native command reads only User/plugins and the
+// configured enabled list, then provides the comparison fields with the
+// public INDEX entry.
+function pluginCatalogEntryStatus(entry) {
+  if (!entry.installedVersion) return 'status: not installed';
+  const activation = entry.installedEnabled ? 'enabled' : 'disabled';
+  if (entry.updateAvailable) {
+    return `status: update available (installed ${entry.installedVersion}, ${activation}; catalog ${entry.version})`;
+  }
+  if (entry.localBuildNewer) {
+    return `status: installed version is newer than catalog (${entry.installedVersion}, ${activation})`;
+  }
+  if (!entry.versionComparisonAvailable) {
+    return `status: installed ${entry.installedVersion} (${activation}; version comparison unavailable)`;
+  }
+  return `status: up to date (${entry.installedVersion}, ${activation})`;
+}
+
+function pluginCatalogSuggestedCommand(entry) {
+  if (entry.updateAvailable) {
+    return `update: fpasoterm --plugin-install ${entry.id} --enable --force`;
+  }
+  if (entry.installedVersion && !entry.installedEnabled) {
+    return `enable: fpasoterm --plugin-enable ${entry.installPath}`;
+  }
+  return `install: fpasoterm --plugin-install ${entry.id} --enable`;
 }
 
 // Renders catalog entries already fetched from the official INDEX without another request.
@@ -1025,19 +1078,35 @@ function renderPluginCatalog(query = '') {
     entry.name,
     entry.author,
     entry.description,
-  ].some((value) => String(value || '').toLowerCase().includes(needle)));
+    entry.version,
+    entry.installedVersion,
+    pluginCatalogEntryStatus(entry),
+  ].some((value) => String(value || '').toLowerCase().includes(needle))
+    && (!pluginCatalogUpdatesOnly || entry.updateAvailable));
+  const installedCount = pluginCatalogEntries.filter((entry) => entry.installedVersion).length;
+  const enabledCount = pluginCatalogEntries.filter((entry) => entry.installedEnabled).length;
+  const updateCount = pluginCatalogEntries.filter((entry) => entry.updateAvailable).length;
+  const summary = [
+    'Public Plugin Catalog',
+    `installed: ${installedCount} | enabled: ${enabledCount} | updates available: ${updateCount}`,
+    pluginCatalogUpdatesOnly ? 'filter: updates available only' : 'filter: all plugins',
+    ...(updateCount > 0 ? ['update all available: fpasoterm --plugin-update-all'] : []),
+    'Version state compares User/plugins with the official catalog. Restart fpasoterm after an install or update.',
+  ].join('\n');
   diagnosticsElement.value = entries.length === 0
-    ? 'No public plugins match this search.\n'
-    : entries.map((entry) => [
+    ? `${summary}\n\nNo public plugins match this search.\n`
+    : `${summary}\n\n${entries.map((entry) => [
       `${entry.id} (${entry.name} ${entry.version})`,
+      pluginCatalogEntryStatus(entry),
       `${entry.description}`,
       `author: ${entry.author}`,
       `requires: fpasoterm >= ${entry.minFpasotermVersion}`,
-      `install: fpasoterm --plugin-install ${entry.id} --enable`,
-    ].join('\n')).join('\n\n');
+      pluginCatalogSuggestedCommand(entry),
+    ].join('\n')).join('\n\n')}`;
   diagnosticsElement.scrollTop = 0;
   if (pluginCatalogSearchStatusElement) {
-    pluginCatalogSearchStatusElement.textContent = `${entries.length}/${pluginCatalogEntries.length}`;
+    const filterLabel = pluginCatalogUpdatesOnly ? ' updates only' : '';
+    pluginCatalogSearchStatusElement.textContent = `${entries.length}/${pluginCatalogEntries.length}${filterLabel}`;
   }
 }
 
@@ -2774,7 +2843,7 @@ function openPluginElementOverlay(options = {}) {
       releaseKeyCapture();
       return () => {};
     }
-    activePluginElementKeyCapture = { owner: keyCaptureOwner, handler };
+    activePluginElementKeyCapture = { owner: keyCaptureOwner, handler, capturedCodes: new Set() };
     return releaseKeyCapture;
   };
   overlay.className = 'fpasoterm-plugin-element-overlay';
@@ -3592,6 +3661,7 @@ function diagnosticsPanelFocusItems() {
     diagnosticsFilterElement,
     diagnosticsFilterApplyButton,
     pluginCatalogSearchElement,
+    pluginCatalogUpdatesOnlyButton,
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
@@ -4544,6 +4614,7 @@ pluginCatalogButton.addEventListener('click', () => {
     showDiagnosticsTextArea();
     pluginCatalogEntries = Array.isArray(catalog) ? catalog : [];
     if (pluginCatalogSearchElement) pluginCatalogSearchElement.value = '';
+    setPluginCatalogUpdatesOnly(false);
     setPluginCatalogSearchVisible(true);
     diagnosticsTitleElement.textContent = 'Plugin Catalog';
     showDiagnosticsPanel();
@@ -4560,11 +4631,17 @@ pluginCatalogSearchElement.addEventListener('input', () => {
   renderPluginCatalog(pluginCatalogSearchElement.value);
 });
 
+pluginCatalogUpdatesOnlyButton.addEventListener('click', () => {
+  setPluginCatalogUpdatesOnly(!pluginCatalogUpdatesOnly);
+  renderPluginCatalog(pluginCatalogSearchElement?.value || '');
+});
+
 pluginCatalogSearchElement.addEventListener('keydown', (event) => {
   if (event.key === 'Escape') {
     event.preventDefault();
     event.stopPropagation();
     pluginCatalogSearchElement.value = '';
+    setPluginCatalogUpdatesOnly(false);
     renderPluginCatalog();
   }
 });

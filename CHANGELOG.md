@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.6.13
+
+- Added installed-versus-catalog version status to Plugin Catalog, including an
+  explicit **Updates only** filter and per-plugin update guidance.
+- Added `--plugin-update-all` to update installed official public plugins as a
+  batch, while preserving each plugin's enabled state and validating every
+  download before writing any plugin files.
+- Preserved a reviewed plugin's captured key-up events after it handles a
+  key-down event, preventing modifier state from sticking in noVNC sessions.
+
 ## 1.6.12
 
 - Restored Unix PTY termios after force-killing a full-screen terminal child,
