@@ -254,9 +254,17 @@ dialog、picker、panelを開くcommandは通常どおりGUIを表示します�
 
 現在のrepository内sampleはすべて一つのcommandを登録します。最新版の`hello.ts`、`status-banner.ts`、
 `theme.ts`、`welcome-banner.ts`を有効化すると、4つのbuttonが表示されるのが正しい動作です。古いlocal sampleが
-commandを登録しない場合もplugin自体は有効で起動時処理を実行できますが、plugin固有のbuttonは意図してmenuには表示しません。`Plugin Catalog`は公式portのmetadataとinstall commandを表示するだけで、plugin sourceのdownload、install、enable、実行は行いません。sourceとversionは`--plugin-info <file>`で確認し、local plugin fileを差し替えた後はwindowを再起動してください。
+commandを登録しない場合もplugin自体は有効で起動時処理を実行できますが、plugin固有のbuttonは意図してmenuには表示しません。`Plugin Catalog`は公式portのmetadataとinstall commandに加えて、対応するlocal `User/plugins`のversionと有効・無効状態を表示します。localとcatalogの双方がstableな`major.minor.patch` versionでcatalog側が新しい場合は更新ありと表示します。local versionが未宣言または非標準の場合は、更新ありと誤表示せず、導入済み・比較不可と表示します。catalog自体はplugin sourceのdownload、install、enable、実行は行いません。sourceとversionは`--plugin-info <file>`で確認し、local plugin fileを差し替えた後はwindowを再起動してください。
 
-`Plugin Catalog`を開いた時点で公式`INDEX`を取得します。検索欄は取得済みentryをport ID、name、author、descriptionで絞り込み、追加のnetwork requestやplugin installは行いません。
+`Plugin Catalog`を開いた時点で公式`INDEX`を取得します。検索欄は取得済みentryをport ID、name、author、descriptionと表示中のlocal version／状態で絞り込み、追加のnetwork requestやplugin installは行いません。検索欄の横の`Updates only`を押すと、導入済みのstable versionがcatalogより古いportだけを一覧表示します。
+
+更新可能なportが一つ以上ある場合、Catalogには次の一括更新commandも表示されます。
+
+```sh
+fpasoterm --plugin-update-all
+```
+
+このcommandは、公式catalogのinstall pathと一致し、宣言されたstable versionがcatalogより古い通常fileだけを更新します。pluginの有効・無効状態は維持し、local専用file、symlink、非標準version headerは変更しません。対象となった公開sourceはすべて検証・downloadしてからlocal sourceを置き換えます。成功後はfpasotermを再起動してください。
 
 plugin は小さく防御的に実装してください。読み込み error は diagnostics に記録され、後続の有効 plugin の読み込みは継続します。ただし、実行中の不正な plugin は renderer に影響する可能性があります。
 

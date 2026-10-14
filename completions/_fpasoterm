@@ -78,6 +78,7 @@ _fpasoterm() {
     '--plugin-install=[install a public port or one from --plugin-ports-dir]:port:_fpasoterm_plugin_install_ports' \
     '--plugin-ports-dir=[install --plugin-install from this local fpasoterm-plugins checkout]:directory:_files -/' \
     '--plugin-install-file=[copy a trusted local JavaScript or TypeScript plugin]:plugin:_files -g "*.(js|ts)"' \
+    '--plugin-update-all[update installed official public plugins with newer catalog versions]' \
     '--force[replace an existing file during plugin install]' \
     '--enable[enable a plugin installed by one install command]' \
     '--enable-plugin=[enable plugins]:plugin:_fpasoterm_plugin_names' \

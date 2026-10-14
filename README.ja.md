@@ -287,6 +287,8 @@ ports repository全体をcloneせず、Node.jsも使わずにreview済み公開p
 
 review済みのlocal `fpasoterm-plugins` checkoutからは、`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`を使用します。単独の信頼済みsource fileは`fpasoterm --plugin-install-file ./my-plugin.ts --enable`でcopyできます。ports projectはcatalog / INDEX検索とplugin開発・検証用で、利用者向けのinstallはfpasoterm本体が行います。
 
+公式catalogより古いstable versionの導入済み公開pluginを、有効・無効状態を維持したまま一括更新するには、`fpasoterm --plugin-update-all`を実行してからfpasotermを再起動します。
+
 `fpasoterm --plugin-search [query]`はpluginを導入せず、公開port metadataだけを検索します。各結果にはcopyして使える`--plugin-install` commandとremote公式`INDEX`であるsourceを表示します。`--plugin-list`はlocal-onlyであり、networkには接続しません。
 
 最小の TypeScript plugin:

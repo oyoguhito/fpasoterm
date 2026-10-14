@@ -362,14 +362,31 @@ All current in-tree samples register one command, so enabling current copies of
 `hello.ts`, `status-banner.ts`, `theme.ts`, and `welcome-banner.ts` shows four
 buttons. If an older local sample does not register a command, it remains
 enabled and can still run its startup code, but it is intentionally absent from
-the menu. `Plugin Catalog` only displays official port metadata and install
-commands; it does not download, install, enable, or execute plugin source. Use
-`--plugin-info <file>` to inspect a local plugin's source/version and restart
-after replacing a local plugin file.
+the menu. `Plugin Catalog` displays official port metadata and install commands
+alongside the matching local `User/plugins` version and enabled state. It marks
+an available update when both version headers are stable `major.minor.patch`
+versions and the catalog version is newer. A missing or non-standard local
+version is shown as installed with comparison unavailable, rather than being
+misreported as an update. The catalog does not download, install, enable, or
+execute plugin source. Use `--plugin-info <file>` to inspect a local plugin's
+source/version and restart after replacing a local plugin file.
 
 `Plugin Catalog` fetches the official `INDEX` when opened. Its search field
-filters the already fetched entries by port ID, name, author, and description;
-it does not make an additional request or install a plugin.
+filters the already fetched entries by port ID, name, author, description, and
+the displayed local version/status; it does not make an additional request or
+install a plugin. Use the `Updates only` control beside the search field to
+list only ports whose installed stable version is older than the catalog.
+When one or more updates are available, the Catalog also shows this command:
+
+```sh
+fpasoterm --plugin-update-all
+```
+
+It updates only regular local files at matching official catalog install paths
+whose declared stable version is older. It preserves every plugin's enabled or
+disabled state and leaves local-only files, symlinks, and non-standard version
+headers untouched. The command validates and downloads all selected public
+sources before replacing any local source; restart fpasoterm after it succeeds.
 
 Keep plugins small and defensive. A plugin load error is reported in diagnostics
 and does not stop later enabled plugins from loading, but an invalid plugin can

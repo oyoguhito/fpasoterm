@@ -594,6 +594,10 @@ fn cli_help_text() -> String {
     .replace(
         "Use this local fpasoterm-plugins checkout.",
         "Use this local fpasoterm-plugins checkout or its ports directory.",
+    )
+    .replace(
+        "      --force                   Replace an existing file during a plugin install.",
+        "      --plugin-update-all       Update installed official public plugins with newer catalog versions.\n      --force                   Replace an existing file during a plugin install.",
     );
     format!(
         "{text}\nUpdates:\n  Latest standalone downloads: {RELEASES_LATEST_URL}\n  In fpasoterm, click the URL and confirm to open it in your browser.\n"
@@ -923,6 +927,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
+        "--plugin-update-all",
         "--force",
         "--enable",
         "--sync-status",
@@ -1110,6 +1115,31 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
     {
         return Err(
             "--plugin-uninstall cannot be combined with other plugin mutation options".to_string(),
+        );
+    }
+    let has_plugin_update_all = args
+        .iter()
+        .any(|argument| argument == "--plugin-update-all");
+    if has_plugin_update_all
+        && (plugin_install_count > 0
+            || has_plugin_uninstall
+            || args.iter().any(|argument| {
+                matches!(
+                    argument.as_str(),
+                    "--enable-plugin"
+                        | "--disable-plugin"
+                        | "--plugin-enable"
+                        | "--plugin-disable"
+                        | "--plugin-enable-all"
+                        | "--plugin-disable-all"
+                ) || argument.starts_with("--enable-plugin=")
+                    || argument.starts_with("--disable-plugin=")
+                    || argument.starts_with("--plugin-enable=")
+                    || argument.starts_with("--plugin-disable=")
+            }))
+    {
+        return Err(
+            "--plugin-update-all cannot be combined with other plugin mutation options".to_string(),
         );
     }
     let plugin_run = cli_option_value_from_args(args, "--plugin-run");
@@ -4458,6 +4488,26 @@ struct PublicPluginCatalogEntry {
     revision: String,
     previous_version: String,
     previous_revision: String,
+    // Local state is resolved only from User/plugins and plugins.enabled. It
+    // lets the Catalog answer the common "did my installed port update?"
+    // question without fetching or evaluating any plugin source.
+    installed_version: Option<String>,
+    installed_enabled: bool,
+    update_available: bool,
+    local_build_newer: bool,
+    version_comparison_available: bool,
+}
+
+// The local portion of a public catalog entry. This remains separate from the
+// download metadata so its comparison behaviour can be tested without a
+// network request or a Tauri window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PublicPluginCatalogStatus {
+    installed_version: Option<String>,
+    installed_enabled: bool,
+    update_available: bool,
+    local_build_newer: bool,
+    version_comparison_available: bool,
 }
 
 // Permits only normal, portable port path components in a public registry request.
@@ -4563,15 +4613,112 @@ fn public_plugin_catalog_entries() -> Result<Vec<PublicPluginCatalogEntry>, Stri
                 revision: fields.get(8).copied().unwrap_or("main").to_string(),
                 previous_version: fields.get(9).copied().unwrap_or("").to_string(),
                 previous_revision: fields.get(10).copied().unwrap_or("").to_string(),
+                installed_version: None,
+                installed_enabled: false,
+                update_available: false,
+                local_build_newer: false,
+                version_comparison_available: false,
             })
         })
         .collect()
 }
 
+// Normalizes the portable public install path to the same spelling used in
+// config.toml's plugins.enabled array and in PluginUrl::name.
+fn public_plugin_local_name(install_path: &str) -> String {
+    format!(
+        "plugins/{}",
+        install_path
+            .replace('\\', "/")
+            .trim_start_matches("./")
+            .trim_start_matches("plugins/")
+    )
+}
+
+// Parses the stable major.minor.patch versions allowed in the public catalog.
+fn stable_version_components(value: &str) -> Option<[u32; 3]> {
+    let parts = value.split('.').collect::<Vec<_>>();
+    if parts.len() != 3 {
+        return None;
+    }
+    Some([
+        parts[0].parse::<u32>().ok()?,
+        parts[1].parse::<u32>().ok()?,
+        parts[2].parse::<u32>().ok()?,
+    ])
+}
+
+// Calculates the presentation state for a local source that corresponds to a
+// public catalog entry. A missing or non-stable local version remains visible
+// as installed, but is deliberately not misreported as an available update.
+fn public_plugin_catalog_status(
+    installed_version: Option<String>,
+    installed_enabled: bool,
+    catalog_version: &str,
+) -> PublicPluginCatalogStatus {
+    let Some(installed) = installed_version.as_deref() else {
+        return PublicPluginCatalogStatus {
+            installed_version: None,
+            installed_enabled: false,
+            update_available: false,
+            local_build_newer: false,
+            version_comparison_available: false,
+        };
+    };
+    let comparison = match (
+        stable_version_components(installed),
+        stable_version_components(catalog_version),
+    ) {
+        (Some(local), Some(catalog)) => Some(local.cmp(&catalog)),
+        _ => None,
+    };
+    PublicPluginCatalogStatus {
+        installed_version,
+        installed_enabled,
+        update_available: comparison == Some(std::cmp::Ordering::Less),
+        local_build_newer: comparison == Some(std::cmp::Ordering::Greater),
+        version_comparison_available: comparison.is_some(),
+    }
+}
+
+// Adds local source/configuration state to entries from the fixed public INDEX.
+// A catalog lookup must still succeed when config.toml or User/plugins does not
+// exist, so the absence of a source is simply represented as "not installed".
+fn annotate_public_plugin_catalog_entries(
+    entries: &mut [PublicPluginCatalogEntry],
+    config: &RuntimeConfig,
+) {
+    let enabled = config
+        .plugin_urls
+        .iter()
+        .map(|plugin| plugin.name.replace('\\', "/"))
+        .collect::<HashSet<_>>();
+    let config_dir = Path::new(&config.config_dir);
+    for entry in entries {
+        let local_name = public_plugin_local_name(&entry.install_path);
+        let source_path = config_dir.join(&local_name);
+        let installed_version = source_path
+            .is_file()
+            .then(|| read_plugin_metadata(&source_path).version);
+        let status = public_plugin_catalog_status(
+            installed_version,
+            enabled.contains(&local_name),
+            &entry.version,
+        );
+        entry.installed_version = status.installed_version;
+        entry.installed_enabled = status.installed_enabled;
+        entry.update_available = status.update_available;
+        entry.local_build_newer = status.local_build_newer;
+        entry.version_comparison_available = status.version_comparison_available;
+    }
+}
+
 #[tauri::command]
 // Exposes only fixed-repository catalog metadata to trusted renderer plugins.
 fn plugin_catalog() -> Result<Vec<PublicPluginCatalogEntry>, String> {
-    public_plugin_catalog_entries()
+    let mut entries = public_plugin_catalog_entries()?;
+    annotate_public_plugin_catalog_entries(&mut entries, &runtime_config());
+    Ok(entries)
 }
 
 // Searches bounded public metadata without downloading or evaluating plugin source.
@@ -4686,16 +4833,10 @@ fn parse_public_plugin_manifest(
 
 // Compares required stable major.minor.patch versions without accepting prerelease labels.
 fn public_plugin_version_at_least(current: &str, required: &str) -> bool {
-    let parse = |value: &str| {
-        let parts = value.split('.').collect::<Vec<_>>();
-        (parts.len() == 3).then(|| {
-            parts
-                .iter()
-                .map(|part| part.parse::<u32>().ok())
-                .collect::<Option<Vec<_>>>()
-        })?
-    };
-    match (parse(current), parse(required)) {
+    match (
+        stable_version_components(current),
+        stable_version_components(required),
+    ) {
         (Some(current), Some(required)) => current >= required,
         _ => false,
     }
@@ -4764,6 +4905,57 @@ fn install_plugin_source(
     Ok(format!("plugins/{}", port.install_path.replace('\\', "/")))
 }
 
+// Downloads and validates one exact catalog revision before any local source is
+// modified. Callers can collect every update first, then replace atomically as
+// far as regular filesystem writes permit.
+fn download_public_plugin_catalog_entry(
+    entry: &PublicPluginCatalogEntry,
+    use_previous: bool,
+) -> Result<(PublicPluginPort, String), String> {
+    if use_previous && entry.previous_revision.is_empty() {
+        return Err(format!(
+            "{} has no previous stable revision in the published INDEX yet",
+            entry.id
+        ));
+    }
+    let revision = if use_previous {
+        &entry.previous_revision
+    } else {
+        &entry.revision
+    };
+    let manifest_text = download_public_plugin_file(
+        revision,
+        &format!("ports/{}/port.toml", entry.id),
+        PUBLIC_PLUGIN_MANIFEST_LIMIT,
+    )?;
+    let port = parse_public_plugin_manifest(&entry.id, &manifest_text)?;
+    let current_version = env!("CARGO_PKG_VERSION");
+    if !public_plugin_version_at_least(current_version, &port.min_fpasoterm_version) {
+        return Err(format!(
+            "{} requires fpasoterm >= {}; current version is {}",
+            port.id, port.min_fpasoterm_version, current_version
+        ));
+    }
+    let source = download_public_plugin_file(
+        revision,
+        &format!("ports/{}/{}", port.id, port.source),
+        port.source_limit,
+    )?;
+    Ok((port, source))
+}
+
+// Replaces the matching local source after the official manifest/source has
+// been downloaded and validated.
+fn install_public_plugin_catalog_entry(
+    config_path: &str,
+    entry: &PublicPluginCatalogEntry,
+    use_previous: bool,
+    force: bool,
+) -> Result<String, String> {
+    let (port, source) = download_public_plugin_catalog_entry(entry, use_previous)?;
+    install_plugin_source(config_path, &port, source, force)
+}
+
 // Copies a verified official port source into User/plugins without following symlinked directories.
 fn install_public_plugin_port(
     config_path: &str,
@@ -4780,36 +4972,55 @@ fn install_public_plugin_port(
         .iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
-    if use_previous && entry.previous_revision.is_empty() {
-        return Err(format!(
-            "{} has no previous stable revision in the published INDEX yet",
-            entry.id
-        ));
+    install_public_plugin_catalog_entry(config_path, entry, use_previous, force)
+}
+
+// Updates only local files that live at an official catalog install path and
+// have an older stable declared version. Local-only files, missing headers, and
+// disabled entries are left untouched; enabled state is never changed here.
+fn update_all_public_plugin_ports(
+    config_path: &str,
+) -> Result<Vec<(String, String, String, String)>, String> {
+    let catalog = public_plugin_catalog_entries()?;
+    let config_dir = Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let mut pending = Vec::new();
+    for entry in catalog {
+        let local_name = public_plugin_local_name(&entry.install_path);
+        let source_path = config_dir.join(&local_name);
+        let Ok(metadata) = fs::symlink_metadata(&source_path) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink() || !metadata.is_file() {
+            continue;
+        }
+        let installed_version = read_plugin_metadata(&source_path).version;
+        if public_plugin_catalog_status(Some(installed_version.clone()), false, &entry.version)
+            .update_available
+        {
+            pending.push((entry, installed_version));
+        }
     }
-    let revision = if use_previous {
-        &entry.previous_revision
-    } else {
-        &entry.revision
-    };
-    let manifest_text = download_public_plugin_file(
-        revision,
-        &format!("ports/{id}/port.toml"),
-        PUBLIC_PLUGIN_MANIFEST_LIMIT,
-    )?;
-    let port = parse_public_plugin_manifest(&id, &manifest_text)?;
-    let current_version = env!("CARGO_PKG_VERSION");
-    if !public_plugin_version_at_least(current_version, &port.min_fpasoterm_version) {
-        return Err(format!(
-            "{} requires fpasoterm >= {}; current version is {}",
-            port.id, port.min_fpasoterm_version, current_version
-        ));
+
+    let mut downloads = Vec::new();
+    for (entry, previous_version) in pending {
+        let (port, source) = download_public_plugin_catalog_entry(&entry, false)?;
+        if port.version != entry.version || port.install_path != entry.install_path {
+            return Err(format!(
+                "official catalog metadata changed for {}; retry after reviewing the catalog",
+                entry.id
+            ));
+        }
+        downloads.push((entry, previous_version, port, source));
     }
-    let source = download_public_plugin_file(
-        revision,
-        &format!("ports/{}/{}", port.id, port.source),
-        port.source_limit,
-    )?;
-    install_plugin_source(config_path, &port, source, force)
+
+    let mut updated = Vec::new();
+    for (entry, previous_version, port, source) in downloads {
+        let installed = install_plugin_source(config_path, &port, source, true)?;
+        updated.push((entry.id, previous_version, entry.version, installed));
+    }
+    Ok(updated)
 }
 
 // Locates either a fpasoterm-plugins checkout or its direct ports/ directory.
@@ -5123,6 +5334,30 @@ fn plugin_cli() {
         }
     };
     let enabled = configured_plugins(&config);
+    if cli_has_flag(&["--plugin-update-all"]) {
+        match update_all_public_plugin_ports(&config_path) {
+            Ok(updated) if updated.is_empty() => {
+                print_cli_text("no installed official public plugins have an update available\n");
+            }
+            Ok(updated) => {
+                for (id, previous, latest, installed) in &updated {
+                    print_cli_text(&format!(
+                        "updated public plugin {id}: {previous} -> {latest} ({installed})\n"
+                    ));
+                }
+                print_cli_text(&format!(
+                    "updated {} public plugin(s); enabled state was preserved\n",
+                    updated.len()
+                ));
+                print_cli_text("Restart fpasoterm to load the updated plugin sources.\n");
+            }
+            Err(error) => {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     let plugin_uninstall = cli_option_values_any(&["--plugin-uninstall"]);
     if !plugin_uninstall.is_empty() {
         let mut updated = config;
@@ -5319,6 +5554,7 @@ fn plugin_cli_requested() -> bool {
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
+        "--plugin-update-all",
         "--plugin-install",
         "--plugin-install-file",
         "--force",
@@ -10140,6 +10376,7 @@ mod tests {
             "--plugin-path",
             "--plugin-enable-all",
             "--plugin-disable-all",
+            "--plugin-update-all",
             "--sync-status",
             "--sync-clean",
             "--sync-diagnostics",
@@ -10214,6 +10451,10 @@ mod tests {
                 "--plugin-ports-dir".to_string(),
                 "../fpasoterm-plugins".to_string(),
             ]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-update-all".to_string()]),
             Ok(())
         );
         assert_eq!(
@@ -10308,6 +10549,21 @@ mod tests {
             validate_direct_cli_args(&args),
             Err(
                 "--plugin-uninstall cannot be combined with other plugin mutation options"
+                    .to_string()
+            )
+        );
+    }
+
+    #[test]
+    fn direct_cli_validation_rejects_plugin_update_all_with_other_mutations() {
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-update-all".to_string(),
+                "--plugin-install".to_string(),
+                "appearance/teal".to_string(),
+            ]),
+            Err(
+                "--plugin-update-all cannot be combined with other plugin mutation options"
                     .to_string()
             )
         );
@@ -10581,6 +10837,32 @@ maxSourceBytes = 8388608
                 version: "(not declared)".to_string(),
                 description: "Existing plugin comment".to_string(),
             }
+        );
+    }
+
+    #[test]
+    fn public_plugin_catalog_status_distinguishes_updates_and_disabled_sources() {
+        let update = public_plugin_catalog_status(Some("1.0.4".to_string()), true, "1.0.5");
+        assert_eq!(update.installed_version.as_deref(), Some("1.0.4"));
+        assert!(update.installed_enabled);
+        assert!(update.update_available);
+        assert!(!update.local_build_newer);
+        assert!(update.version_comparison_available);
+
+        let disabled_current =
+            public_plugin_catalog_status(Some("1.0.5".to_string()), false, "1.0.5");
+        assert!(!disabled_current.update_available);
+        assert!(!disabled_current.local_build_newer);
+        assert!(!disabled_current.installed_enabled);
+        assert!(disabled_current.version_comparison_available);
+
+        let undeclared =
+            public_plugin_catalog_status(Some("(not declared)".to_string()), true, "1.0.5");
+        assert!(!undeclared.update_available);
+        assert!(!undeclared.version_comparison_available);
+        assert_eq!(
+            public_plugin_local_name("integration\\example.js"),
+            "plugins/integration/example.js"
         );
     }
 

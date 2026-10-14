@@ -877,7 +877,8 @@ body {
 }
 
 #terminal-log-search,
-#diagnostics-filter {
+#diagnostics-filter,
+#plugin-catalog-search {
   width: min(170px, 20vw);
   height: 22px;
   min-width: 86px;
@@ -899,6 +900,7 @@ body {
 #terminal-log-show-selected,
 #terminal-log-search-next,
 #diagnostics-filter-apply,
+#plugin-catalog-updates-only,
 #terminal-log-delete-selected,
 #terminal-log-delete-all,
 #terminal-encoding-apply,
@@ -909,6 +911,12 @@ body {
   background: #222932;
   color: #e8edf2;
   font: inherit;
+}
+
+#plugin-catalog-updates-only.is-active {
+  border-color: #f5d76e;
+  background: #314156;
+  color: #f5d76e;
 }
 
 #updates-download-link {
