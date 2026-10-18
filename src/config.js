@@ -63,7 +63,8 @@ const defaultConfig = Object.freeze({
       kittySupport: true,
       kittySizeLimit: 8388608,
       storageLimit: 8,
-      sixelSupport: false,
+      sixelSupport: true,
+      sixelSizeLimit: 8388608,
       iipSupport: false,
     },
     theme: {
@@ -225,10 +226,10 @@ function migrateLegacyLogKeybindings(config) {
 }
 
 // Returns the settings persisted in user config files. Image protocol options
-// remain internal until their renderer support is stable.
+// are retained so users can explicitly disable one renderer while diagnosing a
+// terminal-graphics problem.
 function writableConfigDefaults(platform = process.platform, architecture = process.arch) {
   const defaults = mergeConfig({}, platformDefaultConfig(platform, architecture));
-  delete defaults.terminal.images;
   return defaults;
 }
 
@@ -284,11 +285,18 @@ encoding = "utf-8"
 # Windows examples: "powershell.exe", "pwsh.exe", or "cmd.exe".
 shell = ""
 # kittyKeyboard enables enhanced key negotiation for compatible TUIs. Keep it
-# false unless that TUI requires it; it is unrelated to the disabled graphics addon.
+# false unless that TUI requires it; it is unrelated to terminal image renderers.
 kittyKeyboard = false
 
-# [terminal.images] is reserved for a future stable renderer. Current builds
-# ignore it, so do not add this section to config.toml.
+# Bounded terminal-image renderers. Kitty and SIXEL are enabled by default.
+# Disable one protocol only when isolating a graphics issue.
+[terminal.images]
+enabled = true
+kittySupport = true
+kittySizeLimit = 8388608
+sixelSupport = true
+sixelSizeLimit = 8388608
+storageLimit = 8
 
 # Terminal color palette.
 [terminal.theme]

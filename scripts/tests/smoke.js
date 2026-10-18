@@ -98,7 +98,7 @@ assert.match(defaultConfigExample('darwin', 'arm64'), /fontSize = 14/);
 assert.match(defaultConfigExample('darwin', 'arm64'), /fontFamily = "Menlo, \\"SF Mono\\"/);
 const missingDefaults = missingConfigKeys(writableConfigDefaults(), { keybindings: { prefix: 'Ctrl+Alt' } });
 assert.ok(missingDefaults.includes('keybindings.newWindow'));
-assert.equal(missingDefaults.includes('terminal.images.enabled'), false);
+assert.equal(missingDefaults.includes('terminal.images.enabled'), true);
 assert.equal(missingDefaults.includes('keybindings.prefix'), false);
 assert.deepEqual(
   pruneUnsupportedConfig(writableConfigDefaults(), {
@@ -440,7 +440,7 @@ const migratedConfig = mergeConfig(writableConfigDefaults(), {
 });
 assert.equal(migratedConfig.keybindings.prefix, 'Ctrl+Alt');
 assert.equal(migratedConfig.keybindings.newWindow, 'n');
-assert.equal(migratedConfig.terminal.images, undefined);
+assert.equal(migratedConfig.terminal.images.sixelSupport, true);
 const prunedConfig = pruneUnsupportedConfig(writableConfigDefaults(), {
   ...migratedConfig,
   retired: { enabled: true },
@@ -2040,7 +2040,7 @@ assert.match(pluginTypes, /fpasotermPluginApi/);
 assert.doesNotMatch(pluginTypes, /duplicateWindowMs/);
 assert.match(pluginTypes, /version: string/);
 assert.match(pluginTypes, /terminalGraphics: boolean/);
-assert.match(read('src/renderer/renderer.js'), /terminalGraphics: Boolean\(imageAddon\)/);
+assert.match(read('src/renderer/renderer.js'), /terminalGraphics: Boolean\(imageAddon \|\| sixelImageAddon\)/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
 assert.match(pluginTypes, /plugin-run/);
@@ -2157,7 +2157,8 @@ assert.match(renderer, /function normalizeTerminalStateAfterAlternateScreenExit\
 assert.match(renderer, /47\|1047\|1049/);
 assert.match(renderer, /\\x1b\(B\\x1b\[0m\\x1b\[\?25h/);
 assert.match(renderer, /imageAddon\?\.reset\?\.\(\)/);
-assert.match(renderer, /terminalKittyDiagnosticPayload = false;[\s\S]*?imageAddon\?\.reset\?\.\(\);[\s\S]*?setTerminalGraphicsZoomVisible\(false\)/);
+assert.match(renderer, /terminalKittyDiagnosticPayload = false;[\s\S]*?terminalSixelDiagnosticPayload = false;[\s\S]*?resetTerminalImageAddons\(\);[\s\S]*?setTerminalGraphicsZoomVisible\(false\)/);
+assert.match(renderer, /function resetTerminalImageAddons\(\) \{[\s\S]*?imageAddon\?\.reset\?\.\(\);[\s\S]*?sixelImageAddon\?\.reset\?\.\(\)/);
 assert.doesNotMatch(read('src/renderer/index.html'), /id="drag-region" data-tauri-drag-region/);
 assert.match(read('src/renderer/styles.css'), /\.resize-edge-top \{[\s\S]*?height: 10px;[\s\S]*?z-index: 10003;/);
 assert.match(renderer, /plugin command registered id=/);
@@ -2481,11 +2482,14 @@ assert.match(renderer, /startTerminalOutputLog/);
 assert.match(renderer, /stopTerminalOutputLog/);
 assert.match(renderer, /getSelection/);
 assert.match(renderer, /onTitleChange/);
-assert.doesNotMatch(renderer, /ImageAddon\.ImageAddon/);
+assert.match(renderer, /ImageAddon\.ImageAddon/);
 assert.match(renderer, /FpasotermKittyGraphics\.KittyGraphicsAddon/);
 assert.match(renderer, /vtExtensions: \{ kittyKeyboard: appConfig\.terminal\?\.kittyKeyboard === true \}/);
 assert.match(renderer, /kittySupport/);
 assert.match(renderer, /kittySizeLimit/);
+assert.match(renderer, /sixelSupport/);
+assert.match(renderer, /sixelSizeLimit/);
+assert.match(renderer, /containsSixelGraphicsPayload/);
 assert.match(renderer, /function terminalPtySize/);
 assert.match(renderer, /pixelWidth/);
 assert.match(renderer, /pixelHeight/);
@@ -2495,6 +2499,7 @@ assert.match(kittyGraphics, /only direct transmission is supported/);
 assert.match(kittyGraphics, /maxDecodedBytes: 8 \* 1024 \* 1024/);
 assert.match(kittyGraphics, /class LatestJobQueue/);
 assert.match(read('src/renderer/index.html'), /src="\.\/kitty-graphics\.js"/);
+assert.match(read('src/renderer/index.html'), /src="\.\/vendor\/addon-image\/addon-image\.js"/);
 assert.match(renderer, /interrupt fallback/);
 assert.match(renderer, /sendTerminalInput\('\\x03'/);
 assert.match(renderer, /Let the native WebView create a paste event first/);
@@ -2713,7 +2718,8 @@ assert.match(config, /enabled: false/);
 assert.match(config, /kittySupport: true/);
 assert.match(config, /function writableConfigDefaults/);
 assert.match(config, /function migrateLegacyLogKeybindings/);
-assert.match(config, /sixelSupport: false/);
+assert.match(config, /sixelSupport: true/);
+assert.match(config, /sixelSizeLimit: 8388608/);
 assert.match(config, /commandTtlSeconds: 60/);
 assert.match(config, /sync:/);
 assert.match(config, /provider: 'folder'/);

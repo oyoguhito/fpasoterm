@@ -30,15 +30,17 @@ termName = "xterm-256color"
 encoding = "utf-8"
 shell = ""
 # Enables enhanced Kitty keyboard negotiation for compatible TUIs. Keep false
-# unless needed; this is separate from the currently disabled graphics addon.
+# unless needed; this is separate from terminal image renderers.
 kittyKeyboard = false
 
-# The bounded Kitty Graphics renderer is enabled by default. It accepts direct
-# PNG/RGB/RGBA payloads only; file and shared-memory transfers are rejected.
+# Bounded Kitty and SIXEL renderers are enabled by default. Kitty accepts
+# direct PNG/RGB/RGBA payloads only; file and shared-memory transfers are rejected.
 # [terminal.images]
 # enabled = true
 # kittySupport = true
 # kittySizeLimit = 8388608
+# sixelSupport = true
+# sixelSizeLimit = 8388608
 # storageLimit = 8
 
 [terminal.theme]

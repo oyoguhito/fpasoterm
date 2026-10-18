@@ -12,7 +12,7 @@ screen / tmux / byobu / zellij / herdr などの terminal multiplexer と併用�
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
-Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。file/shared-memory転送、SIXEL、iTerm inline image、Kitty animationは未対応です。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
 
 IME、描画、clipboard、window問題を再現して確認する手順は
 [デバッグガイド](docs/debugging.ja.md)を参照してください。
@@ -306,7 +306,7 @@ IME composition は表示専用です。WebView/xterm.js の入力経路で受�
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 
 複数端末間のメンテナンス用途では、Google Drive for desktop などのローカル同期フォルダを使って、diagnostics と terminal output log を共有できます。Google Drive API や OAuth は使いません。詳細は [Sync Folder](docs/sync.ja.md) を参照してください。
-Kitty Graphicsのdirect PNG/RGB/RGBAはbounded rendererで対応します。SIXEL、iTerm inline image、Kitty animationは未対応です。`Ctrl+Shift+b` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
+Kitty Graphicsのdirect PNG/RGB/RGBAはbounded rendererで対応します。SIXEL DCS graphicsも上限付きで既定有効です。iTerm inline image、Kitty animationは未対応です。`Ctrl+Shift+b` の Broadcast Input は対象の local fpasoterm window を選択して同じ command を送信できます。詳細は [設定](docs/config.ja.md) と [Sync Folder](docs/sync.ja.md) を参照してください。
 初回設定は `fpasoterm --setup-sync` で質問に答えるだけで作成できます。
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
 `fpasoterm --sync-status` で folder health と channel を確認でき、`fpasoterm --sync-clean` は期限切れの sync command file だけを削除します。

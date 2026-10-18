@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.14
+
+- Enabled bounded SIXEL DCS graphics by default through the retained
+  MIT-licensed xterm image addon, with encoded-size, pixel, palette, and image
+  storage limits.
+- Kept SIXEL image storage separate from the bounded Kitty renderer, reset
+  both image paths when leaving an alternate screen or terminating a terminal
+  application, and suppressed large graphics payloads in diagnostics.
+- Added configurable SIXEL support and size limits, English/Japanese guidance,
+  and a focused SIXEL configuration test.
+
 ## 1.6.13
 
 - Added installed-versus-catalog version status to Plugin Catalog, including an
