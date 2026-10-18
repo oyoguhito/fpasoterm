@@ -179,7 +179,7 @@ document.addEventListener('keydown', (event) => {
     // make the controls reappear while terminal-browser is shutting down.
     // The next alternate-screen entry clears this suppression for a new app.
     terminalGraphicsControlsSuppressed = true;
-    imageAddon?.reset?.();
+    resetTerminalImageAddons();
     setTerminalGraphicsZoomVisible(false);
   }
 }, true);
@@ -291,6 +291,7 @@ let pluginCatalogUpdatesOnly = false;
 let term;
 let fitAddon;
 let imageAddon;
+let sixelImageAddon;
 let terminalWebLinksAddon = null;
 let terminalPathLinkDisposable = null;
 let terminalLinksSuspended = false;
@@ -359,6 +360,14 @@ function handleTerminalGraphicsActiveChange(active) {
     terminalGraphicsHideTimer = null;
     setTerminalGraphicsZoomVisible(false);
   }, 250);
+}
+
+// Kitty placements live in a DOM overlay and SIXEL images live in xterm's
+// image storage. They have different renderers, but both must be cleared when
+// an application exits, is killed, or leaves an alternate screen.
+function resetTerminalImageAddons() {
+  imageAddon?.reset?.();
+  sixelImageAddon?.reset?.();
 }
 
 function sendTerminalGraphicsZoom(shortcut) {
@@ -1206,13 +1215,15 @@ function normalizeTerminalStateAfterAlternateScreenExit(data) {
   // not itself delete custom Kitty placements. Clear only the graphics layer
   // when the alternate screen is left so the restored shell is visible.
   terminalKittyDiagnosticPayload = false;
-  imageAddon?.reset?.();
+  terminalSixelDiagnosticPayload = false;
+  resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   showDebugDiagnostic('renderer normalized terminal state after alternate-screen exit');
   return `${data}\x1b(B\x1b[0m\x1b[?25h`;
 }
 
 let terminalKittyDiagnosticPayload = false;
+let terminalSixelDiagnosticPayload = false;
 
 // PTY reads may split one Kitty APC across hundreds of chunks. Track whether
 // the current chunk is inside ESC_G ... ESC\\ instead of checking only for
@@ -1238,6 +1249,38 @@ function containsKittyGraphicsPayload(data) {
   return containsGraphics;
 }
 
+// SIXEL uses DCS q ... ST. The payload can be split across PTY reads just as
+// Kitty APC data can, so retain parser state only for diagnostics suppression.
+// Actual decoding stays inside the vendored xterm image addon.
+function containsSixelGraphicsPayload(data) {
+  let containsGraphics = terminalSixelDiagnosticPayload;
+  let offset = 0;
+  while (offset < data.length) {
+    if (terminalSixelDiagnosticPayload) {
+      containsGraphics = true;
+      const escTerminator = data.indexOf('\x1b\\', offset);
+      const c1Terminator = data.indexOf('\x9c', offset);
+      const terminator = [escTerminator, c1Terminator]
+        .filter((value) => value >= 0)
+        .sort((left, right) => left - right)[0];
+      if (terminator === undefined) break;
+      terminalSixelDiagnosticPayload = false;
+      offset = terminator + (terminator === escTerminator ? 2 : 1);
+      continue;
+    }
+    const start = data.indexOf('\x1bPq', offset);
+    if (start < 0) break;
+    containsGraphics = true;
+    terminalSixelDiagnosticPayload = true;
+    offset = start + 3;
+  }
+  return containsGraphics;
+}
+
+function containsTerminalGraphicsPayload(data) {
+  return containsKittyGraphicsPayload(data) || containsSixelGraphicsPayload(data);
+}
+
 // Restores local xterm display state after a full-screen program leaves the
 // primary screen in DEC graphics or a non-default SGR state. The display reset
 // is local, then Ctrl+L asks the interactive shell to redraw its prompt.
@@ -1247,7 +1290,8 @@ function resetTerminalDisplayState() {
   }
   terminalModeSequenceTail = '';
   terminalKittyDiagnosticPayload = false;
-  imageAddon?.reset?.();
+  terminalSixelDiagnosticPayload = false;
+  resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   clearImePreedit();
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
@@ -1274,18 +1318,18 @@ function queueTerminalOutput(data) {
   // A terminal-browser frame arrives as many large Kitty APC chunks. Logging
   // every base64 chunk and running canvas diagnostics for each one can become
   // more expensive than rendering the frame itself under --console-diagnostics.
-  const containsKittyGraphics = containsKittyGraphicsPayload(normalizedData);
+  const containsTerminalGraphics = containsTerminalGraphicsPayload(normalizedData);
   // Controls are shown by handleTerminalGraphicsActiveChange only after the
   // addon has created a real placement. A capability query is also a Kitty APC
   // but must not suspend terminal link handling or leave an orphaned Zoom UI.
-  if (!containsKittyGraphics) {
+  if (!containsTerminalGraphics) {
     showDebugDiagnostic(`renderer terminal data bytes=${normalizedData.length} preview=${printableDiagnosticData(normalizedData).slice(0, 160)}`);
   }
   processRuntimeOsc(normalizedData);
   mirrorTerminalData(normalizedData);
   term.write(normalizedData, () => {
     removeXtermVisualOverlays();
-    if (!containsKittyGraphics) {
+    if (!containsTerminalGraphics) {
       logXtermCanvasDiagnostics();
       logXtermTextDiagnostics();
       showDebugDiagnostic(`renderer terminal write parsed bytes=${normalizedData.length}`);
@@ -2512,8 +2556,10 @@ function createTerminal() {
   term.loadAddon(fitAddon);
   const imageConfig = appConfig.terminal?.images || {};
   term.open(terminalElement);
-  const graphicsEnabled = imageConfig.enabled !== false && imageConfig.kittySupport !== false;
-  if (graphicsEnabled && window.FpasotermKittyGraphics?.KittyGraphicsAddon) {
+  const graphicsEnabled = imageConfig.enabled !== false;
+  const kittyGraphicsEnabled = graphicsEnabled && imageConfig.kittySupport !== false;
+  const sixelGraphicsEnabled = graphicsEnabled && imageConfig.sixelSupport !== false;
+  if (kittyGraphicsEnabled && window.FpasotermKittyGraphics?.KittyGraphicsAddon) {
     try {
       imageAddon = new window.FpasotermKittyGraphics.KittyGraphicsAddon({
         limits: {
@@ -2532,8 +2578,35 @@ function createTerminal() {
       imageAddon = undefined;
       showDiagnostic(`Kitty graphics renderer unavailable: ${error?.message || error}`);
     }
-  } else if (graphicsEnabled) {
+  } else if (kittyGraphicsEnabled) {
     showDiagnostic('Kitty graphics renderer script is unavailable; terminal graphics are disabled');
+  }
+  if (sixelGraphicsEnabled && window.ImageAddon?.ImageAddon) {
+    try {
+      // The vendored addon-image SIXEL decoder is kept separate from the
+      // fpasoterm Kitty overlay. Do not enable its Kitty/IIP handlers: the
+      // bounded fpasoterm implementation remains authoritative for those
+      // protocols, while this addon owns DCS q (SIXEL) only.
+      sixelImageAddon = new window.ImageAddon.ImageAddon({
+        sixelSupport: true,
+        sixelSizeLimit: Math.min(
+          32 * 1024 * 1024,
+          Math.max(64 * 1024, Number(imageConfig.sixelSizeLimit) || 8 * 1024 * 1024),
+        ),
+        sixelPaletteLimit: 256,
+        pixelLimit: 4 * 1024 * 1024,
+        storageLimit: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
+        iipSupport: false,
+        kittySupport: false,
+      });
+      term.loadAddon(sixelImageAddon);
+      showDiagnostic('bounded SIXEL graphics renderer enabled');
+    } catch (error) {
+      sixelImageAddon = undefined;
+      showDiagnostic(`SIXEL graphics renderer unavailable: ${error?.message || error}`);
+    }
+  } else if (sixelGraphicsEnabled) {
+    showDiagnostic('SIXEL graphics renderer script is unavailable; SIXEL is disabled');
   }
   installTerminalLinkHandlers();
   installXtermOverlayPruner();
@@ -3110,11 +3183,12 @@ async function loadPlugins() {
   const pluginApi = (plugin) => Object.freeze({
     version: pluginVersion,
     capabilities: Object.freeze({
-      terminalGraphics: Boolean(imageAddon),
+      terminalGraphics: Boolean(imageAddon || sixelImageAddon),
     }),
     terminal: term,
     fitAddon,
     imageAddon,
+    sixelImageAddon,
     config: appConfig,
     // Plugin Activity is the user-facing execution trace. Mirror explicit
     // plugin logs there as well as Diagnostics so runtime progress is visible

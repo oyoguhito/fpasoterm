@@ -3618,7 +3618,8 @@ fn default_runtime_config() -> RuntimeConfig {
                     "kittySupport": true,
                     "kittySizeLimit": 8388608,
                     "storageLimit": 8,
-                    "sixelSupport": false,
+                    "sixelSupport": true,
+                    "sixelSizeLimit": 8388608,
                     "iipSupport": false
                 },
                 "theme": {

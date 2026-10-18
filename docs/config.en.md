@@ -443,7 +443,9 @@ The running titlebar can be updated from inside the terminal. Standard OSC title
 
 ## Terminal Graphics
 
-Direct Kitty Graphics PNG, RGB, and RGBA transmissions are supported by the bounded fpasoterm renderer. Decode work is serialized, stale pending frames are dropped, and the defaults limit decoded images to 8 MiB, 4M pixels, eight images, and eight placements. File, temporary-file, and shared-memory transmissions are rejected so terminal output cannot request arbitrary local files. SIXEL, iTerm inline images, and Kitty animation are not supported.
+Direct Kitty Graphics PNG, RGB, and RGBA transmissions are supported by the bounded fpasoterm renderer. Decode work is serialized, stale pending frames are dropped, and the defaults limit decoded images to 8 MiB, 4M pixels, eight images, and eight placements. File, temporary-file, and shared-memory transmissions are rejected so terminal output cannot request arbitrary local files.
+
+SIXEL DCS graphics are enabled by default through the retained MIT-licensed xterm image addon. They use an 8 MiB encoded-size limit, a 4M-pixel limit, a 256-color palette limit, and the same eight-image storage limit. Set `sixelSupport = false` under `[terminal.images]` only to isolate a graphics issue; restart fpasoterm after changing it. SIXEL uses xterm's image storage rather than the Kitty DOM placement layer, so the Kitty titlebar Zoom controls intentionally do not appear for a SIXEL frame. iTerm inline images and Kitty animation remain unsupported.
 
 Running terminal-browser directly in fpasoterm does not require a Herdr setting.
 When terminal-browser or another Kitty graphics application runs inside a Herdr
@@ -463,7 +465,7 @@ Inside the Herdr pane, also verify that
 
 To isolate a graphics problem, set `enabled = false` under `[terminal.images]` and restart fpasoterm.
 
-Use `kitten icat` or a direct Kitty graphics test to verify the bounded renderer. Do not use SIXEL or iTerm image modes because they remain unsupported.
+Use `kitten icat` or a direct Kitty graphics test to verify Kitty rendering. To verify SIXEL with fpasobrowser, run `fpasobrowser --backend sixel <url>` inside fpasoterm. The image must render without literal `ESC P q` text, and `Ctrl+Q` or alternate-screen exit must restore the shell without a stale image.
 
 ## Broadcast Input
 

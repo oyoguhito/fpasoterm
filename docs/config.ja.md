@@ -437,7 +437,9 @@ macOSは最後のwindowを閉じてもapplicationをactiveのまま維持する�
 
 ## Terminal Graphics
 
-Kitty Graphics Protocolのdirect PNG/RGB/RGBA転送に対応します。独自rendererはdecodeを直列化し、未処理の古いframeを破棄し、既定でdecoded image 8 MiB、4M pixels、画像・placement各8件に制限します。任意のlocal fileを読ませないためfile、temporary file、shared-memory転送は拒否します。SIXEL、iTerm inline image、Kitty animationは未対応です。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA転送に対応します。独自rendererはdecodeを直列化し、未処理の古いframeを破棄し、既定でdecoded image 8 MiB、4M pixels、画像・placement各8件に制限します。任意のlocal fileを読ませないためfile、temporary file、shared-memory転送は拒否します。
+
+SIXEL DCS graphicsは、保持しているMIT licenseのxterm image addonにより既定で有効です。encoded sizeは8 MiB、pixel数は4M、paletteは256色、storageは8 imageに制限します。graphics問題を切り分ける場合だけ`[terminal.images]`で`sixelSupport = false`を設定し、fpasotermを再起動してください。SIXELはKittyのDOM placement layerではなくxtermのimage storageで描画するため、SIXEL frame中はKitty用titlebar Zoom controlを意図的に表示しません。iTerm inline imageとKitty animationは未対応です。
 
 fpasoterm上でterminal-browserを直接実行する場合、Herdrの設定は不要です。Herdr pane内でterminal-browserなどのKitty graphics applicationを実行する場合だけ、Herdrが画像sequenceを外側のterminalへ転送できるよう、Herdrの設定（通常`~/.config/herdr/config.toml`）へ次を設定します。
 
@@ -448,7 +450,9 @@ kitty_graphics = true
 
 設定後はHerdrを完全再起動します。これはfpasotermの`[terminal.images]`とは別の設定です。利用条件と障害切分けを明確にするため、Herdr pane内で`printf 'HERDR_PANE_ID=%s\n' "$HERDR_PANE_ID"`を実行し、空でないことも確認してください。
 
-問題を切り分ける場合は`[terminal.images]`の`enabled = false`で無効化し、fpasotermを再起動してください。
+問題を切り分ける場合は`[terminal.images]`の`enabled = false`で全graphicsを無効化するか、`sixelSupport = false`でSIXELだけを無効化し、fpasotermを再起動してください。
+
+Kittyは`kitten icat`またはdirect Kitty graphics testで確認します。fpasobrowserのSIXELは、fpasoterm内で`fpasobrowser --backend sixel <url>`を実行して確認します。literalな`ESC P q` textが表示されず画像として描画されること、`Ctrl+Q`またはalternate-screen exit後にshellへ戻りstale imageが残らないことを確認してください。
 
 ## Broadcast Input
 
