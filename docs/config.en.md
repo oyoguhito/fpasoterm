@@ -300,8 +300,7 @@ brightWhite = "#ffffff"
 prefix = "Mod+Shift"
 # A one-letter value inherits prefix. A full value overrides it for one action.
 # Physical-key example: newWindow = "Ctrl+Alt+KeyN"
-logToggle = "s"
-logShow = "l"
+# Log Start / Log Stop / Log Show are titlebar-menu actions without a shortcut.
 copy = "c"
 paste = "v"
 menu = "m"
@@ -393,6 +392,7 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
+videoMaxBytes = 2147483648
 ```
 
 `lineHeight` defaults to `1` on macOS and `1.08` on Linux and Windows. The
@@ -429,7 +429,7 @@ rescaleOverlappingGlyphs = false
 fpasoterm observes IME composition events only to show marked text. xterm.js and the WebView retain native input delivery: fpasoterm does not suppress, replay, replace, or directly commit IME text. On ChromeOS/Linux, at the start of a new composition, it clears xterm's hidden helper textarea when it contains stale committed text and before the new marked text is inserted. This prevents later conversions from inheriting accumulated committed text and does not change terminal text or the PTY payload. Windows/Linux use a visual-only `IME` marked-text fallback when the WebView does not paint xterm's helper textarea. macOS uses its native WebKit marked-text rendering and does not add this fallback, avoiding a stale IME overlay after commit.
 - `plugins.enabled`: plugin paths relative to `~/.config/fpasoterm/User/`.
 - `sync`: optional sync-folder integration for diagnostics and explicitly requested broadcast commands. `provider = "folder"` uses an already-synced local folder such as Google Drive for desktop. `commands` permits short-lived shared commands and `commandTtlSeconds` limits their lifetime. See [Sync Folder](sync.en.md).
-- `logging`: terminal output logging. The hamburger menu contains `Log Start (^s)` / `Log Stop (^s)` and `Log Show (^l)`. `Ctrl+Shift+s` toggles logging directly, and `Ctrl+Shift+l` opens a selector for captured logs. `Ctrl+Shift+p` is unassigned so it can be used by a future command palette. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems.
+- `logging`: terminal output logging. The hamburger menu contains `Log Start` / `Log Stop` and `Log Show`; these actions intentionally have no application-wide keyboard shortcut, so `Ctrl+Shift+s` and `Ctrl+Shift+l` remain available to terminal applications. Logging writes readable terminal output with control sequences removed to a local file. Saved automatic log names include the titlebar title and timestamp, for example `terminal-work-<timestamp>.log`. The log panel can delete the selected stopped log, or `Delete All` can empty the active log and delete all stopped `terminal-*.log` files after in-panel confirmation. `directory` defaults to `~/.config/fpasoterm/User/logs` when empty, and can point to a synced folder when needed. Paths can use `~`, `%USERPROFILE%`, `$HOME`, and similar environment variables. `~` is the most portable form when sharing config across operating systems. `videoMaxBytes` separately caps one `Log → Video Start` WebM, MP4, or GIF recording at 2 GiB by default; it does not change `maxBytes` or text-log cleanup. Video uses the OS screen/window picker when available, otherwise it records the rendered fpasoterm terminal surface; WebViews without `MediaRecorder` use the built-in animated GIF fallback. See [Screen video recording](video-recording.en.md) for capture support and privacy notes.
 
 When `window.rememberBounds` is enabled, the last window size is saved to `~/.config/fpasoterm/User/window-state.json` and restored on the next launch.
 

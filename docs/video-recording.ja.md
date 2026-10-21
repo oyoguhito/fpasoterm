@@ -1,0 +1,41 @@
+# 画面動画録画
+
+fpasotermはtitlebarの **Log** menuからvideoを録画できます。これは読みやすいterminal output logとは別の機能です。platform WebViewがOS pickerに対応する場合は利用者が選択したscreenまたはwindowを録画し、WebKitGTK/ChromeOSのようにpickerがない場合はfpasotermのterminal surfaceだけを録画します。
+
+## 録画手順
+
+1. titlebarのhamburger menuから **Log** を開きます。
+2. **Video Start** を選択します。
+3. OSのcapture pickerが開いた場合は録画対象のscreenまたはwindowを選択して共有を承認します。pickerがないplatformでは、terminal surface recording fallbackが直ちに開始します。
+4. titlebarは **Recording** に、menu actionは **Video Stop** に変わります。通常どおりfpasotermを操作できます。
+5. **Log → Video Stop** を選択します。最後のchunkを書き込む間は **Saving video** と表示されます。
+6. **Log → Video Show** を選択します。**Log Show** と同様に完了済みrecordingの一覧が表示されるため、fileを選択して **Open Selected** を押すとOS既定の関連applicationで開きます。**Delete Selected** を選び確認すると、そのrecordingを完全に削除できます。**Delete All** を選び確認すると、完了済みvideo recordingを全て削除できます。
+
+完了したfileは音声なしのWebM（優先）、MP4、またはanimated GIFで、`logging.directory`、または空の場合は
+`~/.config/fpasoterm/User/logs`に
+`video-<title>-<pid>-<timestamp>.webm`、`.mp4`、または`.gif`として保存されます。Diagnostics logには最終pathとbyte数を記録します。既存のtext log操作は`terminal-*.log`だけを対象にするため、**Log Show**と**Delete All**はvideo fileを表示・削除しません。GIF/WebM/MP4をtext diagnostics panelへdecodeしないため、**Video Show**は**Log Show**と同じpanelでfileを選択し、OS既定viewerで開きます。**Delete Selected** は確認後に、設定済みlogging directory内の選択済み`video-*.(gif|webm|mp4)` fileだけを削除します。**Delete All** も同じ制限と確認を使い、`terminal-*.log` text logは削除しません。
+
+組込みGIF fallbackは標準の無限repeat extensionを書き込みます。一度だけ再生して止まる場合は、開いているviewerがこのextensionを反映していません。連続再生が必要な場合はGIF対応のimage viewerまたはbrowserを使用してください。
+
+OS pickerが利用できる場合は、それが意図した安全境界です。fpasotermはterminal output、plugin、timerからcaptureを開始できず、利用者に代わってdisplayを選択しません。録画を許可されたsurfaceだけを選んでください。full screenを選ぶと他applicationや機密情報も含まれることがあります。terminal-surface fallbackは他applicationを録画せず、pickerも必要としません。
+
+## 制限とplatform対応
+
+platform WebViewが`MediaRecorder`を提供する場合、fpasotermはまずWebMを選択し、WebMが利用できない場合だけMP4を選びます。screen/windowの優先経路には`navigator.mediaDevices.getDisplayMedia`も使います。Linux/ChromeOSでは、このAPIがない場合、またはportal/deviceがなくpickerが失敗した場合にterminal canvasのPNG frameを取得し、WebKitGTKが利用しているGStreamer runtime内で`appsrc → VP8 → WebM`として5 fpsでencodeします。WebKitGTKの`CanvasCaptureMediaStream`が、形式上は正常なWebMへ古いterminal paintだけを記録してしまう問題を回避します。`gst-launch`、ffmpeg、Chromium、外部recorderの導入は不要です。GStreamerのappsrc/VP8/WebM pluginがない最小Linux imageでは、組込みanimated `.gif` writerへfallbackします。macOS/Windowsはbrowser canvasのMediaRecorder fallbackを維持します。PNGは内部frame形式であり、完成したrecording fileではありません。どの経路でもPNG canvas frameを作れない場合だけ、Video Startはterminalの状態を変えず、titlebarに一時的に **Video unavailable** を表示してdiagnosticを出します。
+
+一部のWebKitGTKはMediaRecorderのtimesliceごとに完結したWebM documentを返します。これらを連結すると、多くのviewerが先頭fragmentだけで再生を止めます。Linux/ChromeOSのterminal fallbackはこれらを連結せず、PNG snapshotを1本のnative WebM muxerへ直接streamします。macOS/Windowsのterminal-surface MediaRecorder fallbackだけは、**Video Stop**まで1本のrecordingをbufferし、最終payloadを1回だけ保存します。memoryが少ないsystemでは長時間recordingを避けてください。OS pickerによるscreen/window captureは、引き続きbounded chunkをstreamします。
+
+macOSでは、OSに要求された場合に **System Settings → Privacy & Security → Screen & System Audio Recording** からfpasotermへScreen Recording permissionを付与してください。Linux/ChromeOSでは導入済みWebKitGTK/WebViewとportal設定に依存します。Windowsでは導入済みWebView2 runtimeとそのscreen-capture対応に依存します。workflowで使う前に、各target platformでpickerが開くことを確認してください。
+
+audio・microphone capture・automatic capture・編集・streaming・video library UIは初期版の対象外です。GIF fallbackはfull desktop videoではなく、低frame-rateのterminal recordingです。Video Stop前にfpasotermが終了またはWebViewがcrashした場合、記録済みの先頭部分が残ってもvideo fileがfinalizeされないことがあります。可能な限りmenuから停止してください。
+
+## 容量上限
+
+`[logging].videoMaxBytes`は1本のvideo recordingの上限で、既定値は2 GiBです。読みやすいterminal text logだけに適用される`[logging].maxBytes`とは独立しています。保存先に十分な空き容量がある場合だけ増やしてください。
+
+```toml
+[logging]
+videoMaxBytes = 4294967296 # 4 GiB
+```
+
+上限に達するとfpasotermは新しいvideo chunkの受付を止め、それまでに書き込んだ有効なprefixを保存します。**Video Stop**でそのfileをfinalizeしてください。

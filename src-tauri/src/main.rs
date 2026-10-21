@@ -1,12 +1,13 @@
 #![cfg_attr(all(not(debug_assertions), windows), windows_subsystem = "windows")]
 
-#[cfg(windows)]
-use base64::Engine;
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine};
 use encoding_rs::{EUC_JP, SHIFT_JIS};
 use futures_util::{SinkExt, StreamExt};
+use gif::{Encoder as GifEncoder, Frame as GifFrame, Repeat as GifRepeat};
 #[cfg(all(unix, not(target_os = "macos")))]
 use gtk::{gdk, Clipboard};
 use hmac::{Hmac, Mac};
+use image::ImageFormat;
 use portable_pty::{native_pty_system, ChildKiller, CommandBuilder, MasterPty, PtySize};
 use rand::RngCore;
 use rustls::client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier};
@@ -33,6 +34,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+#[cfg(target_os = "linux")]
+use std::{ffi::CString, os::raw::c_void};
 #[cfg(target_os = "windows")]
 use std::{ptr, slice};
 use tauri::{
@@ -78,6 +81,453 @@ const WINDOWS_CF_UNICODETEXT: u32 = 13;
 
 const INSTANCE_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(500);
 const INSTANCE_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(3);
+
+// WebKitGTK exposes GStreamer at runtime but CanvasCaptureMediaStream does
+// not reliably advance frames for an xterm canvas on ChromeOS.  The terminal
+// GIF fallback has already proved that PNG frames are dependable, so Linux
+// writes those same frames through GStreamer's in-process appsrc -> VP8 ->
+// WebM pipeline.  `libloading` avoids a build-time dependency on distro
+// development packages; a missing runtime simply returns a normal recording
+// start error and the renderer falls back to GIF.
+#[cfg(target_os = "linux")]
+mod native_webm {
+    use super::*;
+    use libloading::Library;
+    use std::os::raw::{c_char, c_int};
+
+    type GstInitCheck =
+        unsafe extern "C" fn(*mut c_int, *mut *mut *mut c_char, *mut *mut c_void) -> c_int;
+    type GstParseLaunch = unsafe extern "C" fn(*const c_char, *mut *mut c_void) -> *mut c_void;
+    type GstBinGetByName = unsafe extern "C" fn(*mut c_void, *const c_char) -> *mut c_void;
+    type GstElementSetState = unsafe extern "C" fn(*mut c_void, c_int) -> c_int;
+    type GstObjectUnref = unsafe extern "C" fn(*mut c_void);
+    type GstBufferNewAllocate =
+        unsafe extern "C" fn(*mut c_void, usize, *mut c_void) -> *mut c_void;
+    type GstBufferFill = unsafe extern "C" fn(*mut c_void, usize, *const c_void, usize) -> usize;
+    type GstMiniObjectUnref = unsafe extern "C" fn(*mut c_void);
+    type GstAppSrcPushBuffer = unsafe extern "C" fn(*mut c_void, *mut c_void) -> c_int;
+    type GstAppSrcEndOfStream = unsafe extern "C" fn(*mut c_void) -> c_int;
+
+    const GST_STATE_NULL: c_int = 1;
+    const GST_STATE_PLAYING: c_int = 4;
+    const GST_STATE_CHANGE_FAILURE: c_int = 0;
+    const GST_FLOW_OK: c_int = 0;
+
+    #[derive(Clone, Copy)]
+    struct Functions {
+        init_check: GstInitCheck,
+        parse_launch: GstParseLaunch,
+        bin_get_by_name: GstBinGetByName,
+        element_set_state: GstElementSetState,
+        object_unref: GstObjectUnref,
+        buffer_new_allocate: GstBufferNewAllocate,
+        buffer_fill: GstBufferFill,
+        mini_object_unref: GstMiniObjectUnref,
+        appsrc_push_buffer: GstAppSrcPushBuffer,
+        appsrc_end_of_stream: GstAppSrcEndOfStream,
+    }
+
+    struct Runtime {
+        functions: Functions,
+        // GStreamer keeps global registries and worker threads. These shared
+        // handles deliberately live for the application lifetime instead of
+        // unloading libgstreamer as an individual recording is finalized.
+        _gstreamer: Library,
+        _gst_app: Library,
+    }
+
+    static RUNTIME: std::sync::OnceLock<Runtime> = std::sync::OnceLock::new();
+
+    fn load_symbol<T: Copy>(library: &Library, name: &[u8]) -> Result<T, String> {
+        // A copied function pointer remains valid while the process-lifetime
+        // Runtime below owns the Library handles.
+        unsafe {
+            library
+                .get::<T>(name)
+                .map(|symbol| *symbol)
+                .map_err(|error| {
+                    format!(
+                        "GStreamer symbol {} unavailable: {error}",
+                        String::from_utf8_lossy(name)
+                    )
+                })
+        }
+    }
+
+    fn escape_pipeline_value(value: &str) -> String {
+        value.replace('\\', "\\\\").replace('"', "\\\"")
+    }
+
+    fn runtime() -> Result<&'static Runtime, String> {
+        if let Some(runtime) = RUNTIME.get() {
+            return Ok(runtime);
+        }
+        let gstreamer = unsafe { Library::new("libgstreamer-1.0.so.0") }
+            .map_err(|error| format!("native WebM recording requires GStreamer: {error}"))?;
+        let gst_app = unsafe { Library::new("libgstapp-1.0.so.0") }
+            .map_err(|error| format!("native WebM recording requires GStreamer appsrc: {error}"))?;
+        let functions = Functions {
+            init_check: load_symbol(&gstreamer, b"gst_init_check\0")?,
+            parse_launch: load_symbol(&gstreamer, b"gst_parse_launch\0")?,
+            bin_get_by_name: load_symbol(&gstreamer, b"gst_bin_get_by_name\0")?,
+            element_set_state: load_symbol(&gstreamer, b"gst_element_set_state\0")?,
+            object_unref: load_symbol(&gstreamer, b"gst_object_unref\0")?,
+            buffer_new_allocate: load_symbol(&gstreamer, b"gst_buffer_new_allocate\0")?,
+            buffer_fill: load_symbol(&gstreamer, b"gst_buffer_fill\0")?,
+            mini_object_unref: load_symbol(&gstreamer, b"gst_mini_object_unref\0")?,
+            appsrc_push_buffer: load_symbol(&gst_app, b"gst_app_src_push_buffer\0")?,
+            appsrc_end_of_stream: load_symbol(&gst_app, b"gst_app_src_end_of_stream\0")?,
+        };
+        let mut argc = 0;
+        let mut argv: *mut *mut c_char = std::ptr::null_mut();
+        if unsafe { (functions.init_check)(&mut argc, &mut argv, std::ptr::null_mut()) } == 0 {
+            return Err("GStreamer initialization failed for native WebM recording".to_string());
+        }
+        let _ = RUNTIME.set(Runtime {
+            functions,
+            _gstreamer: gstreamer,
+            _gst_app: gst_app,
+        });
+        RUNTIME
+            .get()
+            .ok_or_else(|| "could not retain the GStreamer runtime".to_string())
+    }
+
+    pub struct NativeWebmWriter {
+        pipeline: *mut c_void,
+        appsrc: *mut c_void,
+        path: PathBuf,
+        functions: Functions,
+        finished: bool,
+    }
+
+    // GStreamer objects are internally synchronized. fpasoterm serializes
+    // recording commands behind one Mutex, and the handle is never cloned.
+    unsafe impl Send for NativeWebmWriter {}
+
+    impl NativeWebmWriter {
+        pub fn new(
+            path: &Path,
+            width: u32,
+            height: u32,
+            frames_per_second: u32,
+        ) -> Result<Self, String> {
+            let functions = runtime()?.functions;
+            if width == 0 || height == 0 || frames_per_second == 0 {
+                return Err(
+                    "native WebM recording dimensions and frame rate must be positive".to_string(),
+                );
+            }
+            let location = escape_pipeline_value(&path.display().to_string());
+            // Some reduced ChromeOS GStreamer builds register webmmux but
+            // reject VP8 caps at runtime. matroskamux accepts the same VP8
+            // stream reliably; finish() changes its EBML DocType to the
+            // WebM-constrained form after the muxer has closed the file.
+            let pipeline_description = format!(
+                "appsrc name=source is-live=true block=true format=time do-timestamp=true caps=video/x-raw,format=I420,width=(int){width},height=(int){height},framerate=(fraction){frames_per_second}/1 ! vp8enc deadline=1 cpu-used=8 keyframe-max-dist={frames_per_second} ! matroskamux streamable=false ! filesink location=\"{location}\" sync=false"
+            );
+            let description = CString::new(pipeline_description)
+                .map_err(|_| "native WebM recording path contains a NUL byte".to_string())?;
+            let pipeline =
+                unsafe { (functions.parse_launch)(description.as_ptr(), std::ptr::null_mut()) };
+            if pipeline.is_null() {
+                return Err("GStreamer could not create the native WebM pipeline".to_string());
+            }
+            let source_name = CString::new("source").expect("literal contains no NUL");
+            let appsrc = unsafe { (functions.bin_get_by_name)(pipeline, source_name.as_ptr()) };
+            if appsrc.is_null() {
+                unsafe {
+                    (functions.object_unref)(pipeline);
+                }
+                return Err("GStreamer native WebM pipeline has no appsrc".to_string());
+            }
+            if unsafe { (functions.element_set_state)(pipeline, GST_STATE_PLAYING) }
+                == GST_STATE_CHANGE_FAILURE
+            {
+                unsafe {
+                    (functions.object_unref)(appsrc);
+                    (functions.object_unref)(pipeline);
+                }
+                return Err("GStreamer could not start the native WebM pipeline".to_string());
+            }
+            Ok(Self {
+                pipeline,
+                appsrc,
+                path: path.to_path_buf(),
+                functions,
+                finished: false,
+            })
+        }
+
+        pub fn push_rgba(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+            if self.finished || self.appsrc.is_null() {
+                return Err("native WebM recording is already closed".to_string());
+            }
+            let i420 = rgba_to_i420(pixels, width, height)?;
+            let buffer = unsafe {
+                (self.functions.buffer_new_allocate)(
+                    std::ptr::null_mut(),
+                    i420.len(),
+                    std::ptr::null_mut(),
+                )
+            };
+            if buffer.is_null() {
+                return Err("GStreamer could not allocate a video frame".to_string());
+            }
+            let copied = unsafe {
+                (self.functions.buffer_fill)(buffer, 0, i420.as_ptr().cast::<c_void>(), i420.len())
+            };
+            if copied != i420.len() {
+                unsafe { (self.functions.mini_object_unref)(buffer) };
+                return Err("GStreamer could not populate a video frame".to_string());
+            }
+            // appsrc takes ownership of buffer regardless of the flow result.
+            if unsafe { (self.functions.appsrc_push_buffer)(self.appsrc, buffer) } != GST_FLOW_OK {
+                return Err("GStreamer rejected a native WebM video frame".to_string());
+            }
+            Ok(())
+        }
+
+        pub fn finish(&mut self) -> Result<(), String> {
+            if self.finished {
+                return Ok(());
+            }
+            self.finished = true;
+            if unsafe { (self.functions.appsrc_end_of_stream)(self.appsrc) } != GST_FLOW_OK {
+                self.release();
+                return Err("GStreamer could not finish the native WebM stream".to_string());
+            }
+            // gst_bus_timed_pop_filtered is not ABI-safe on the reduced
+            // ChromeOS GStreamer build despite its exported symbol. The
+            // filesink gives us a portable completion observation instead:
+            // wait until its output stabilizes after EOS, then transition to
+            // NULL to flush the muxer footer.
+            let mut previous_size = 0;
+            let mut stable_checks = 0;
+            for _ in 0..60 {
+                std::thread::sleep(Duration::from_millis(50));
+                let current_size = fs::metadata(&self.path)
+                    .map(|metadata| metadata.len())
+                    .unwrap_or(0);
+                if current_size > 0 && current_size == previous_size {
+                    stable_checks += 1;
+                    if stable_checks >= 3 {
+                        break;
+                    }
+                } else {
+                    stable_checks = 0;
+                }
+                previous_size = current_size;
+            }
+            self.release();
+            rewrite_matroska_doc_type_as_webm(&self.path)?;
+            if fs::metadata(&self.path)
+                .map(|metadata| metadata.len())
+                .unwrap_or(0)
+                == 0
+            {
+                return Err("GStreamer did not produce a native WebM recording".to_string());
+            }
+            Ok(())
+        }
+
+        fn release(&mut self) {
+            unsafe {
+                if !self.pipeline.is_null() {
+                    (self.functions.element_set_state)(self.pipeline, GST_STATE_NULL);
+                }
+                if !self.appsrc.is_null() {
+                    (self.functions.object_unref)(self.appsrc);
+                    self.appsrc = std::ptr::null_mut();
+                }
+                if !self.pipeline.is_null() {
+                    (self.functions.object_unref)(self.pipeline);
+                    self.pipeline = std::ptr::null_mut();
+                }
+            }
+        }
+    }
+
+    impl Drop for NativeWebmWriter {
+        fn drop(&mut self) {
+            self.release();
+        }
+    }
+
+    // `vp8enc` accepts I420 on all supported GStreamer builds. Converting the
+    // small terminal frame here removes a fragile videoconvert negotiation
+    // dependency seen on ChromeOS's reduced plugin installation.
+    fn rgba_to_i420(pixels: &[u8], width: u32, height: u32) -> Result<Vec<u8>, String> {
+        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+            return Err("native WebM recording needs even canvas dimensions".to_string());
+        }
+        let width = usize::try_from(width).map_err(|_| "native WebM canvas width is too large")?;
+        let height =
+            usize::try_from(height).map_err(|_| "native WebM canvas height is too large")?;
+        let rgba_len = width
+            .checked_mul(height)
+            .and_then(|pixels| pixels.checked_mul(4))
+            .ok_or_else(|| "native WebM canvas is too large".to_string())?;
+        if pixels.len() != rgba_len {
+            return Err("native WebM frame does not match its canvas dimensions".to_string());
+        }
+        // GStreamer applies a four-byte stride alignment to I420 planes. A
+        // tightly packed 2x2 fixture is six bytes, but GstVideo correctly
+        // expects 16 bytes (Y stride 4 × 2 plus U/V stride 4). Allocate and
+        // address the planes with that same layout for all terminal sizes.
+        let y_stride = (width + 3) & !3;
+        let uv_width = width / 2;
+        let uv_stride = (uv_width + 3) & !3;
+        let y_len = y_stride * height;
+        let uv_len = uv_stride * (height / 2);
+        let mut output = vec![0; y_len + uv_len * 2];
+        let (luma, chroma) = output.split_at_mut(y_len);
+        let (u_plane, v_plane) = chroma.split_at_mut(uv_len);
+        let to_y = |red: i32, green: i32, blue: i32| {
+            ((66 * red + 129 * green + 25 * blue + 128) >> 8).clamp(0, 255) as u8
+        };
+        let to_u = |red: i32, green: i32, blue: i32| {
+            ((-38 * red - 74 * green + 112 * blue + 128) >> 8).clamp(-128, 127) + 128
+        };
+        let to_v = |red: i32, green: i32, blue: i32| {
+            ((112 * red - 94 * green - 18 * blue + 128) >> 8).clamp(-128, 127) + 128
+        };
+        for y in 0..height {
+            for x in 0..width {
+                let offset = (y * width + x) * 4;
+                luma[y * y_stride + x] = to_y(
+                    i32::from(pixels[offset]),
+                    i32::from(pixels[offset + 1]),
+                    i32::from(pixels[offset + 2]),
+                );
+            }
+        }
+        for y in (0..height).step_by(2) {
+            for x in (0..width).step_by(2) {
+                let mut sum_u = 0;
+                let mut sum_v = 0;
+                for row in 0..2 {
+                    for column in 0..2 {
+                        let offset = ((y + row) * width + (x + column)) * 4;
+                        let red = i32::from(pixels[offset]);
+                        let green = i32::from(pixels[offset + 1]);
+                        let blue = i32::from(pixels[offset + 2]);
+                        sum_u += to_u(red, green, blue);
+                        sum_v += to_v(red, green, blue);
+                    }
+                }
+                let index = (y / 2) * uv_stride + x / 2;
+                u_plane[index] = ((sum_u + 2) / 4) as u8;
+                v_plane[index] = ((sum_v + 2) / 4) as u8;
+            }
+        }
+        Ok(output)
+    }
+
+    fn ebml_size(bytes: &[u8], offset: usize) -> Result<(usize, u64), String> {
+        let first = *bytes
+            .get(offset)
+            .ok_or_else(|| "native WebM output has a truncated EBML size".to_string())?;
+        let length = (first.leading_zeros() as usize) + 1;
+        if length > 8 || offset + length > bytes.len() {
+            return Err("native WebM output has an invalid EBML size".to_string());
+        }
+        let mut value = u64::from(first & ((1_u8 << (8 - length)) - 1));
+        for byte in &bytes[offset + 1..offset + length] {
+            value = (value << 8) | u64::from(*byte);
+        }
+        Ok((length, value))
+    }
+
+    fn write_ebml_size(
+        bytes: &mut [u8],
+        offset: usize,
+        length: usize,
+        value: u64,
+    ) -> Result<(), String> {
+        if length == 0 || length > 8 || value >= (1_u64 << (7 * length)) {
+            return Err("native WebM output cannot encode an EBML size".to_string());
+        }
+        for index in 0..length {
+            let shift = 8 * (length - index - 1);
+            bytes[offset + index] = ((value >> shift) & 0xff) as u8;
+        }
+        bytes[offset] |= 1_u8 << (8 - length);
+        Ok(())
+    }
+
+    fn ebml_id_length(first: u8) -> Result<usize, String> {
+        let length = (first.leading_zeros() as usize) + 1;
+        if length > 4 {
+            return Err("native WebM output has an invalid EBML element ID".to_string());
+        }
+        Ok(length)
+    }
+
+    // A VP8-only Matroska stream is WebM-compatible. Keep the reliable
+    // matroskamux payload, but set its EBML DocType to `webm` so consumers use
+    // the correct, standard container identity rather than an extension-only
+    // hint. GStreamer writes a short, finite EBML header before Segment.
+    fn rewrite_matroska_doc_type_as_webm(path: &Path) -> Result<(), String> {
+        let mut bytes = fs::read(path).map_err(|error| error.to_string())?;
+        if !bytes.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+            return Err("native WebM encoder did not write an EBML container".to_string());
+        }
+        let (header_size_length, header_size) = ebml_size(&bytes, 4)?;
+        let header_data_start = 4 + header_size_length;
+        let header_data_end = header_data_start
+            .checked_add(
+                usize::try_from(header_size).map_err(|_| "native WebM header is too large")?,
+            )
+            .ok_or_else(|| "native WebM header is too large".to_string())?;
+        if header_data_end > bytes.len() {
+            return Err("native WebM output has a truncated EBML header".to_string());
+        }
+        let mut cursor = header_data_start;
+        while cursor < header_data_end {
+            let id_length = ebml_id_length(bytes[cursor])?;
+            if cursor + id_length > header_data_end {
+                return Err("native WebM output has a truncated EBML element ID".to_string());
+            }
+            let id = bytes[cursor..cursor + id_length]
+                .iter()
+                .fold(0_u32, |value, byte| (value << 8) | u32::from(*byte));
+            let size_offset = cursor + id_length;
+            let (data_size_length, data_size) = ebml_size(&bytes, size_offset)?;
+            let data_start = size_offset + data_size_length;
+            let data_end = data_start
+                .checked_add(
+                    usize::try_from(data_size).map_err(|_| "native WebM element is too large")?,
+                )
+                .ok_or_else(|| "native WebM element is too large".to_string())?;
+            if data_end > header_data_end {
+                return Err("native WebM output has a truncated EBML element".to_string());
+            }
+            if id == 0x4282 {
+                let value = &bytes[data_start..data_end];
+                if !value.starts_with(b"matroska") || !value[8..].iter().all(|byte| *byte == 0) {
+                    return Err("native WebM muxer wrote an unexpected DocType".to_string());
+                }
+                let removed = value.len().saturating_sub(4);
+                write_ebml_size(&mut bytes, size_offset, data_size_length, 4)?;
+                bytes[data_start..data_start + 4].copy_from_slice(b"webm");
+                bytes.drain(data_start + 4..data_end);
+                write_ebml_size(
+                    &mut bytes,
+                    4,
+                    header_size_length,
+                    header_size
+                        .checked_sub(u64::try_from(removed).expect("removed bytes fit u64"))
+                        .ok_or_else(|| "native WebM header is too short".to_string())?,
+                )?;
+                fs::write(path, bytes).map_err(|error| error.to_string())?;
+                return Ok(());
+            }
+            cursor = data_end;
+        }
+        Err("native WebM muxer did not write an EBML DocType".to_string())
+    }
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -494,6 +944,52 @@ struct TerminalLogItem {
     modified_at: u128,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A completed WebM, MP4, or GIF recording selectable in the Video Show panel.
+// It intentionally has no `active` field: a partial recording is not exposed
+// until Video Stop has finalized its container.
+struct ScreenVideoRecordingItem {
+    path: String,
+    name: String,
+    bytes: u64,
+    modified_at: u128,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// One encoded MediaRecorder payload sent by the renderer. Terminal-canvas
+// WebKitGTK recordings use one final payload because its timesliced WebM
+// fragments cannot safely be concatenated into a standalone file.
+struct ScreenVideoRecordingChunk {
+    data_base64: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+// The browser-selected container controls only the safe filename extension;
+// MediaRecorder has already encoded the bytes before this request reaches us.
+struct ScreenVideoRecordingStartRequest {
+    container: String,
+    #[serde(default)]
+    width: Option<u32>,
+    #[serde(default)]
+    height: Option<u32>,
+    #[serde(default)]
+    frame_delay_centiseconds: Option<u16>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// Current screen-video recording state returned to the renderer.
+struct ScreenVideoRecordingStatus {
+    active: bool,
+    path: String,
+    bytes_written: u64,
+    max_bytes: u64,
+    message: String,
+}
+
 // Active terminal output log file and byte counter.
 struct TerminalLog {
     path: String,
@@ -502,6 +998,33 @@ struct TerminalLog {
     max_bytes: u64,
     decoder: TerminalOutputDecoder,
     normalizer: TerminalTextNormalizer,
+}
+
+// Active video file written either from WebView MediaRecorder chunks or from
+// the built-in PNG-to-GIF fallback. It is intentionally separate from
+// TerminalLog: text logs may be disabled or cleared without touching a
+// user-created screen recording.
+enum ScreenVideoRecordingWriter {
+    Media(File),
+    Gif {
+        encoder: GifEncoder<File>,
+        width: u16,
+        height: u16,
+        frame_delay_centiseconds: u16,
+    },
+    #[cfg(target_os = "linux")]
+    NativeWebm {
+        writer: native_webm::NativeWebmWriter,
+        width: u32,
+        height: u32,
+    },
+}
+
+struct ScreenVideoRecording {
+    path: String,
+    writer: ScreenVideoRecordingWriter,
+    bytes_written: u64,
+    max_bytes: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -548,6 +1071,8 @@ struct AppState {
     diagnostics: Arc<Mutex<VecDeque<String>>>,
     terminal_log: Arc<Mutex<Option<TerminalLog>>>,
     last_terminal_log_path: Arc<Mutex<Option<String>>>,
+    screen_video_recording: Arc<Mutex<Option<ScreenVideoRecording>>>,
+    last_screen_video_path: Arc<Mutex<Option<String>>>,
     source_id: String,
     started_at: u128,
     broadcast_listener_started: AtomicBool,
@@ -562,6 +1087,8 @@ impl Default for AppState {
             diagnostics: Arc::new(Mutex::new(VecDeque::new())),
             terminal_log: Arc::new(Mutex::new(None)),
             last_terminal_log_path: Arc::new(Mutex::new(None)),
+            screen_video_recording: Arc::new(Mutex::new(None)),
+            last_screen_video_path: Arc::new(Mutex::new(None)),
             source_id: format!("{}-{}", std::process::id(), now_millis()),
             started_at: now_millis(),
             broadcast_listener_started: AtomicBool::new(false),
@@ -854,6 +1381,14 @@ fn main() {
             terminal_log_clear,
             terminal_log_list,
             terminal_log_delete,
+            screen_video_recording_start,
+            screen_video_recording_append,
+            screen_video_recording_stop,
+            screen_video_recording_abort,
+            screen_video_recording_list,
+            screen_video_recording_show,
+            screen_video_recording_delete,
+            screen_video_recording_clear,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
@@ -3294,15 +3829,13 @@ fn migrate_legacy_terminal_line_height(runtime: &mut RuntimeConfig) {
     }
 }
 
-// Reserves Ctrl+Shift+p for a future command palette and normalizes former
-// single-letter defaults. Full user-defined shortcuts are left unchanged.
+// Retires terminal-log shortcuts so Ctrl+Shift+s/l remain available to terminal
+// applications, then normalizes other former single-letter defaults.
 fn migrate_legacy_log_keybindings(runtime: &mut RuntimeConfig) {
     let Some(keybindings) = runtime.config.keybindings.as_object_mut() else {
         return;
     };
     for (name, legacy, replacement) in [
-        ("logShow", "P", "l"),
-        ("logToggle", "S", "s"),
         ("copy", "C", "c"),
         ("paste", "V", "v"),
         ("menu", "M", "m"),
@@ -3320,12 +3853,8 @@ fn migrate_legacy_log_keybindings(runtime: &mut RuntimeConfig) {
             );
         }
     }
-    if keybindings
-        .get("logMenu")
-        .and_then(serde_json::Value::as_str)
-        == Some("L")
-    {
-        keybindings.remove("logMenu");
+    for name in ["logMenu", "logShow", "logToggle"] {
+        keybindings.remove(name);
     }
 }
 
@@ -3636,8 +4165,6 @@ fn default_runtime_config() -> RuntimeConfig {
             }),
             keybindings: serde_json::json!({
                 "prefix": "Mod+Shift",
-                "logToggle": "s",
-                "logShow": "l",
                 "copy": "c",
                 "paste": "v",
                 "menu": "m",
@@ -3665,7 +4192,8 @@ fn default_runtime_config() -> RuntimeConfig {
                 "enabled": true,
                 "directory": "",
                 "autoStart": false,
-                "maxBytes": 10485760
+                "maxBytes": 10485760,
+                "videoMaxBytes": 2147483648u64
             }),
             security: serde_json::json!({
                 "osc52": "trusted",
@@ -4170,6 +4698,7 @@ fn config_check_report() -> (String, bool) {
         "terminal.lineHeight",
         "terminal.scrollback",
         "logging.maxBytes",
+        "logging.videoMaxBytes",
     ] {
         if let Some(value) = toml_value_at(&config, key) {
             let positive = value
@@ -6891,9 +7420,9 @@ fn terminal_kill(state: State<AppState>) -> Result<(), String> {
 // PTY termios captured before the shell launched the foreground command. The
 // xterm.js display reset is performed by the renderer; writing ANSI reset bytes
 // into the PTY would make the interactive shell echo those bytes as text.
-fn restore_terminal_after_kill(session: &TerminalSession) -> Result<(), String> {
+fn restore_terminal_after_kill(_session: &TerminalSession) -> Result<(), String> {
     #[cfg(unix)]
-    if let (Some(fd), Some(termios)) = (session.master.as_raw_fd(), session.initial_termios) {
+    if let (Some(fd), Some(termios)) = (_session.master.as_raw_fd(), _session.initial_termios) {
         let result = unsafe { libc::tcsetattr(fd, libc::TCSANOW, &termios) };
         if result != 0 {
             return Err(std::io::Error::last_os_error().to_string());
@@ -7622,6 +8151,17 @@ fn logging_max_bytes() -> u64 {
         .unwrap_or(10_485_760)
 }
 
+// Reads the independent on-disk limit for a screen recording.  It is much
+// larger than terminal text logging because video data is inherently larger,
+// but it remains bounded so an unattended recording cannot consume a disk.
+fn video_recording_max_bytes() -> u64 {
+    logging_config()
+        .get("videoMaxBytes")
+        .and_then(|value| value.as_u64())
+        .filter(|value| *value > 0)
+        .unwrap_or(2 * 1024 * 1024 * 1024)
+}
+
 // Resolves the configured terminal log directory, defaulting to User/logs.
 fn terminal_log_directory() -> PathBuf {
     let configured = logging_config()
@@ -7642,6 +8182,162 @@ fn default_terminal_log_path() -> PathBuf {
         log_file_component(&title),
         now_millis()
     ))
+}
+
+// Builds a unique WebM name next to terminal logs.  A process ID prevents two
+// fpasoterm windows started in the same millisecond from selecting the same
+// path, while create_new below still protects against a remaining collision.
+fn default_screen_video_recording_path(sequence: u16, extension: &str) -> PathBuf {
+    let title = runtime_config().config.window.title;
+    terminal_log_directory().join(screen_video_recording_file_name(
+        &title,
+        std::process::id(),
+        now_millis(),
+        sequence,
+        extension,
+    ))
+}
+
+// Creates the portable file-name component independently of the filesystem so
+// it can be tested without touching a user's configured log directory.
+fn screen_video_recording_file_name(
+    title: &str,
+    process_id: u32,
+    timestamp: u128,
+    sequence: u16,
+    extension: &str,
+) -> String {
+    let suffix = if sequence == 0 {
+        String::new()
+    } else {
+        format!("-{sequence}")
+    };
+    format!(
+        "video-{}-{}-{}{}.{}",
+        log_file_component(title),
+        process_id,
+        timestamp,
+        suffix,
+        extension,
+    )
+}
+
+fn screen_video_recording_extension(container: &str) -> Result<&'static str, String> {
+    match container {
+        "webm" | "webm-gstreamer" => Ok("webm"),
+        "mp4" => Ok("mp4"),
+        "gif" => Ok("gif"),
+        _ => Err(format!("unsupported screen video container {container:?}")),
+    }
+}
+
+// Accept only files that this application creates beside terminal logs. A
+// renderer-selected path is canonicalized and kept under that directory before
+// Video Show can hand it to an OS viewer.
+fn is_screen_video_recording_file_name(name: &str) -> bool {
+    name.starts_with("video-")
+        && [".webm", ".mp4", ".gif"]
+            .iter()
+            .any(|extension| name.ends_with(extension))
+}
+
+// Opens a new recording file without ever replacing an existing recording.
+fn create_screen_video_recording_file(container: &str) -> Result<(PathBuf, File), String> {
+    let extension = screen_video_recording_extension(container)?;
+    let directory = terminal_log_directory();
+    fs::create_dir_all(&directory).map_err(|error| error.to_string())?;
+    for sequence in 0..=100 {
+        let path = default_screen_video_recording_path(sequence, extension);
+        match OpenOptions::new().write(true).create_new(true).open(&path) {
+            Ok(file) => return Ok((path, file)),
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
+            Err(error) => return Err(error.to_string()),
+        }
+    }
+    Err("could not allocate a unique screen video recording path".to_string())
+}
+
+fn gif_recording_geometry(
+    request: &ScreenVideoRecordingStartRequest,
+) -> Result<(u16, u16, u16), String> {
+    let width = request
+        .width
+        .ok_or_else(|| "GIF recording requires a canvas width".to_string())?;
+    let height = request
+        .height
+        .ok_or_else(|| "GIF recording requires a canvas height".to_string())?;
+    let width = u16::try_from(width)
+        .map_err(|_| "GIF recording canvas width exceeds 65535 pixels".to_string())?;
+    let height = u16::try_from(height)
+        .map_err(|_| "GIF recording canvas height exceeds 65535 pixels".to_string())?;
+    if width == 0 || height == 0 {
+        return Err("GIF recording canvas dimensions must be positive".to_string());
+    }
+    let frame_delay_centiseconds = request
+        .frame_delay_centiseconds
+        .unwrap_or(20)
+        .clamp(1, 6000);
+    Ok((width, height, frame_delay_centiseconds))
+}
+
+#[cfg(target_os = "linux")]
+fn native_webm_recording_geometry(
+    request: &ScreenVideoRecordingStartRequest,
+) -> Result<(u32, u32, u32), String> {
+    let width = request
+        .width
+        .ok_or_else(|| "native WebM recording requires a canvas width".to_string())?;
+    let height = request
+        .height
+        .ok_or_else(|| "native WebM recording requires a canvas height".to_string())?;
+    if width == 0 || height == 0 {
+        return Err("native WebM recording canvas dimensions must be positive".to_string());
+    }
+    let frame_delay_centiseconds = u32::from(
+        request
+            .frame_delay_centiseconds
+            .unwrap_or(20)
+            .clamp(1, 6000),
+    );
+    // The renderer's fixed PNG capture interval is authoritative. Clamp to
+    // a usable video cadence if an older frontend sends an unusual value.
+    let frames_per_second = (100 / frame_delay_centiseconds).clamp(1, 60);
+    Ok((width, height, frames_per_second))
+}
+
+fn screen_video_recording_writer(
+    request: &ScreenVideoRecordingStartRequest,
+    _path: &Path,
+    file: File,
+) -> Result<ScreenVideoRecordingWriter, String> {
+    #[cfg(target_os = "linux")]
+    if request.container == "webm-gstreamer" {
+        let (width, height, frames_per_second) = native_webm_recording_geometry(request)?;
+        // create_new above reserves the destination first. GStreamer opens
+        // that same empty file itself, so release this handle before building
+        // filesink rather than allowing two independent writers.
+        drop(file);
+        return Ok(ScreenVideoRecordingWriter::NativeWebm {
+            writer: native_webm::NativeWebmWriter::new(_path, width, height, frames_per_second)?,
+            width,
+            height,
+        });
+    }
+    if request.container != "gif" {
+        return Ok(ScreenVideoRecordingWriter::Media(file));
+    }
+    let (width, height, frame_delay_centiseconds) = gif_recording_geometry(request)?;
+    let mut encoder =
+        GifEncoder::new(file, width, height, &[]).map_err(|error| error.to_string())?;
+    encoder
+        .set_repeat(GifRepeat::Infinite)
+        .map_err(|error| error.to_string())?;
+    Ok(ScreenVideoRecordingWriter::Gif {
+        encoder,
+        width,
+        height,
+        frame_delay_centiseconds,
+    })
 }
 
 // Converts a window title into a portable, visible log-file component.
@@ -7797,6 +8493,475 @@ fn terminal_log_stop(state: State<AppState>) -> Result<TerminalLogStatus, String
         path: String::new(),
         bytes_written: 0,
         message: "terminal output logging was not active".to_string(),
+    })
+}
+
+#[tauri::command]
+// Allocates the native video file before renderer recording starts. The GIF
+// path is a built-in PNG-frame encoder for WebViews without MediaRecorder.
+// It never requests capture permission itself.
+fn screen_video_recording_start(
+    state: State<AppState>,
+    request: ScreenVideoRecordingStartRequest,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    let mut guard = state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if guard.is_some() {
+        return Err("screen video recording is already active".to_string());
+    }
+
+    // Validate terminal-frame geometry before allocating the destination so a rejected
+    // renderer request never leaves an empty recording file behind.
+    if request.container == "gif" {
+        gif_recording_geometry(&request)?;
+    }
+    #[cfg(target_os = "linux")]
+    if request.container == "webm-gstreamer" {
+        native_webm_recording_geometry(&request)?;
+    }
+    let (path, file) = create_screen_video_recording_file(&request.container)?;
+    let writer = match screen_video_recording_writer(&request, &path, file) {
+        Ok(writer) => writer,
+        Err(error) => {
+            let _ = fs::remove_file(&path);
+            return Err(error);
+        }
+    };
+    let path_text = path.display().to_string();
+    let max_bytes = video_recording_max_bytes();
+    *guard = Some(ScreenVideoRecording {
+        path: path_text.clone(),
+        writer,
+        bytes_written: 0,
+        max_bytes,
+    });
+    Ok(ScreenVideoRecordingStatus {
+        active: true,
+        path: path_text,
+        bytes_written: 0,
+        max_bytes,
+        message: "screen video recording started".to_string(),
+    })
+}
+
+fn append_screen_video_recording_bytes(
+    recording: &mut ScreenVideoRecording,
+    bytes: &[u8],
+) -> Result<(), String> {
+    let remaining = recording.max_bytes.saturating_sub(recording.bytes_written);
+    if bytes.len() as u64 > remaining {
+        return Err(format!(
+            "screen video recording reached its {} byte limit; stop recording or increase logging.videoMaxBytes",
+            recording.max_bytes
+        ));
+    }
+    match &mut recording.writer {
+        ScreenVideoRecordingWriter::Media(file) => {
+            file.write_all(bytes)
+                .and_then(|()| file.flush())
+                .map_err(|error| error.to_string())?;
+            recording.bytes_written += bytes.len() as u64;
+        }
+        ScreenVideoRecordingWriter::Gif {
+            encoder,
+            width,
+            height,
+            frame_delay_centiseconds,
+        } => {
+            let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)
+                .map_err(|error| format!("invalid GIF recording PNG frame: {error}"))?
+                .to_rgba8();
+            if image.width() != u32::from(*width) || image.height() != u32::from(*height) {
+                return Err(format!(
+                    "GIF recording frame changed from {}x{} to {}x{} pixels",
+                    width,
+                    height,
+                    image.width(),
+                    image.height()
+                ));
+            }
+            let mut pixels = image.into_raw();
+            let mut frame = GifFrame::from_rgba_speed(*width, *height, &mut pixels, 10);
+            frame.delay = *frame_delay_centiseconds;
+            encoder
+                .write_frame(&frame)
+                .map_err(|error| error.to_string())?;
+            encoder
+                .get_mut()
+                .flush()
+                .map_err(|error| error.to_string())?;
+            recording.bytes_written = encoder
+                .get_ref()
+                .metadata()
+                .map_err(|error| error.to_string())?
+                .len();
+        }
+        #[cfg(target_os = "linux")]
+        ScreenVideoRecordingWriter::NativeWebm {
+            writer,
+            width,
+            height,
+        } => {
+            let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)
+                .map_err(|error| format!("invalid native WebM recording PNG frame: {error}"))?
+                .to_rgba8();
+            if image.width() != *width || image.height() != *height {
+                return Err(format!(
+                    "native WebM recording frame changed from {}x{} to {}x{} pixels",
+                    width,
+                    height,
+                    image.width(),
+                    image.height()
+                ));
+            }
+            writer.push_rgba(&image.into_raw(), *width, *height)?;
+            // filesink is buffered while GStreamer is encoding. Count input
+            // bytes here for the configured safety limit; the exact output
+            // size is returned after EOS in screen_video_recording_stop.
+            recording.bytes_written += bytes.len() as u64;
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+// Appends one MediaRecorder payload or one PNG frame from the built-in
+// terminal-surface GIF fallback. Base64 keeps binary transport stable across
+// every Tauri WebView; payloads are serialized by the renderer.
+fn screen_video_recording_append(
+    state: State<AppState>,
+    chunk: ScreenVideoRecordingChunk,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    let bytes = BASE64_STANDARD
+        .decode(chunk.data_base64.as_bytes())
+        .map_err(|error| format!("invalid screen video recording chunk: {error}"))?;
+    if bytes.is_empty() {
+        return Err("screen video recording chunk was empty".to_string());
+    }
+
+    let mut guard = state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?;
+    let recording = guard
+        .as_mut()
+        .ok_or_else(|| "screen video recording is not active".to_string())?;
+    append_screen_video_recording_bytes(recording, &bytes)?;
+    Ok(ScreenVideoRecordingStatus {
+        active: true,
+        path: recording.path.clone(),
+        bytes_written: recording.bytes_written,
+        max_bytes: recording.max_bytes,
+        message: "screen video recording data saved".to_string(),
+    })
+}
+
+#[tauri::command]
+// Flushes and closes the current video file. Stopping is deliberately
+// idempotent because a user can select Stop while a capture is closing.
+fn screen_video_recording_stop(
+    state: State<AppState>,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    let mut guard = state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?;
+    if let Some(recording) = guard.take() {
+        match recording.writer {
+            ScreenVideoRecordingWriter::Media(mut file) => {
+                file.flush().map_err(|error| error.to_string())?;
+            }
+            ScreenVideoRecordingWriter::Gif { encoder, .. } => {
+                let mut file = encoder.into_inner().map_err(|error| error.to_string())?;
+                file.flush().map_err(|error| error.to_string())?;
+            }
+            #[cfg(target_os = "linux")]
+            ScreenVideoRecordingWriter::NativeWebm { mut writer, .. } => {
+                writer.finish()?;
+            }
+        }
+        let bytes_written = fs::metadata(&recording.path)
+            .map(|metadata| metadata.len())
+            .unwrap_or(recording.bytes_written);
+        let status = ScreenVideoRecordingStatus {
+            active: false,
+            path: recording.path,
+            bytes_written,
+            max_bytes: recording.max_bytes,
+            message: "screen video recording saved".to_string(),
+        };
+        if let Ok(mut last_path) = state.last_screen_video_path.lock() {
+            *last_path = Some(status.path.clone());
+        }
+        return Ok(status);
+    }
+    Ok(ScreenVideoRecordingStatus {
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        max_bytes: video_recording_max_bytes(),
+        message: "screen video recording was not active".to_string(),
+    })
+}
+
+#[tauri::command]
+// Discards a file that could not be started (for example when the WebView
+// rejects MediaRecorder after the native path was allocated).  A partial file
+// after real capture is intentionally saved by Stop instead of being erased.
+fn screen_video_recording_abort(state: State<AppState>) -> Result<(), String> {
+    let recording = state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?
+        .take();
+    let Some(recording) = recording else {
+        return Ok(());
+    };
+    drop(recording.writer);
+    match fs::remove_file(&recording.path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+// Finds the newest completed video recording in the configured log directory.
+// It is deliberately separate from terminal_log_items because text-log actions
+// must not expose or delete binary recordings.
+fn latest_screen_video_recording_path() -> Result<Option<PathBuf>, String> {
+    let directory = terminal_log_directory();
+    if !directory.exists() {
+        return Ok(None);
+    }
+
+    let mut latest: Option<(SystemTime, PathBuf)> = None;
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default();
+        if !is_screen_video_recording_file_name(name) || !path.is_file() {
+            continue;
+        }
+        let modified = entry
+            .metadata()
+            .and_then(|metadata| metadata.modified())
+            .unwrap_or(UNIX_EPOCH);
+        if latest
+            .as_ref()
+            .map(|(latest_modified, _)| modified > *latest_modified)
+            .unwrap_or(true)
+        {
+            latest = Some((modified, path));
+        }
+    }
+    Ok(latest.map(|(_, path)| path))
+}
+
+// Returns saved recordings newest first for the Video Show selector. This is
+// separate from terminal_log_items: log cleanup must never list or remove
+// binary recordings.
+fn screen_video_recording_items() -> Result<Vec<ScreenVideoRecordingItem>, String> {
+    let directory = terminal_log_directory();
+    if !directory.exists() {
+        return Ok(Vec::new());
+    }
+    let mut items = Vec::new();
+    for entry in fs::read_dir(&directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        let name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        if !is_screen_video_recording_file_name(&name) || !path.is_file() {
+            continue;
+        }
+        let metadata = entry.metadata().map_err(|error| error.to_string())?;
+        let modified_at = metadata
+            .modified()
+            .unwrap_or(UNIX_EPOCH)
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis();
+        items.push(ScreenVideoRecordingItem {
+            path: path.display().to_string(),
+            name,
+            bytes: metadata.len(),
+            modified_at,
+        });
+    }
+    items.sort_by(|left, right| right.modified_at.cmp(&left.modified_at));
+    Ok(items)
+}
+
+// Resolves a renderer-selected Video Show item. Canonical paths must remain
+// inside the configured log directory, which prevents a crafted renderer IPC
+// request from turning the OS viewer into an arbitrary-file opener.
+fn selected_screen_video_recording_path(
+    path_request: Option<String>,
+) -> Result<Option<PathBuf>, String> {
+    let Some(path_text) = path_request
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+    else {
+        return Ok(None);
+    };
+    let requested = expand_sync_path(&path_text);
+    let name = requested
+        .file_name()
+        .and_then(|name| name.to_str())
+        .unwrap_or_default();
+    if !is_screen_video_recording_file_name(name) {
+        return Err("selected path is not a screen video recording".to_string());
+    }
+    let directory = fs::canonicalize(terminal_log_directory())
+        .map_err(|error| format!("could not resolve video recording directory: {error}"))?;
+    let path = fs::canonicalize(&requested)
+        .map_err(|error| format!("screen video recording file was not found: {error}"))?;
+    if !path.starts_with(&directory) || !path.is_file() {
+        return Err("selected screen video recording is outside the logging directory".to_string());
+    }
+    Ok(Some(path))
+}
+
+#[tauri::command]
+// Lists finalized binary recordings for the renderer's Video Show panel.
+fn screen_video_recording_list(
+    state: State<AppState>,
+) -> Result<Vec<ScreenVideoRecordingItem>, String> {
+    if state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err("stop the active screen video recording before listing it".to_string());
+    }
+    screen_video_recording_items()
+}
+
+// Opens the last completed recording in the OS default associated application.
+// Unlike terminal_log_show, a binary video is never decoded into the renderer.
+#[tauri::command]
+fn screen_video_recording_show(
+    state: State<AppState>,
+    request: Option<TerminalLogPathRequest>,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    if state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err("stop the active screen video recording before opening it".to_string());
+    }
+    let requested_path =
+        selected_screen_video_recording_path(request.and_then(|value| value.path))?;
+    let tracked_path = state
+        .last_screen_video_path
+        .lock()
+        .ok()
+        .and_then(|path| path.clone())
+        .map(PathBuf::from)
+        .filter(|path| path.is_file());
+    let path = match requested_path
+        .or(tracked_path)
+        .or(latest_screen_video_recording_path()?)
+    {
+        Some(path) => path,
+        None => return Err("no completed screen video recording was found".to_string()),
+    };
+    let bytes_written = fs::metadata(&path)
+        .map_err(|error| error.to_string())?
+        .len();
+    open_local_video_file(&path)?;
+    let path = path.display().to_string();
+    if let Ok(mut last_path) = state.last_screen_video_path.lock() {
+        *last_path = Some(path.clone());
+    }
+    Ok(ScreenVideoRecordingStatus {
+        active: false,
+        path,
+        bytes_written,
+        max_bytes: video_recording_max_bytes(),
+        message: "opened screen video recording in the default application".to_string(),
+    })
+}
+
+#[tauri::command]
+// Deletes one finalized recording selected in Video Show.  The selected-path
+// resolver canonicalizes it under logging.directory before deletion, so a
+// crafted renderer request cannot remove an arbitrary local file.
+fn screen_video_recording_delete(
+    state: State<AppState>,
+    request: Option<TerminalLogPathRequest>,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    if state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err("stop the active screen video recording before deleting it".to_string());
+    }
+    let path = selected_screen_video_recording_path(request.and_then(|value| value.path))?
+        .ok_or_else(|| "screen video recording path is required".to_string())?;
+    let path_text = path.display().to_string();
+    fs::remove_file(&path).map_err(|error| error.to_string())?;
+    if let Ok(mut last_path) = state.last_screen_video_path.lock() {
+        if last_path.as_deref() == Some(path_text.as_str()) {
+            *last_path = None;
+        }
+    }
+    Ok(ScreenVideoRecordingStatus {
+        active: false,
+        path: path_text,
+        bytes_written: 0,
+        max_bytes: video_recording_max_bytes(),
+        message: "selected screen video recording deleted".to_string(),
+    })
+}
+
+#[tauri::command]
+// Deletes every finalized recording shown by Video Show. The item list and the
+// selected-path resolver both enforce the configured logging directory and
+// supported video filename pattern; readable terminal logs are never touched.
+fn screen_video_recording_clear(
+    state: State<AppState>,
+) -> Result<ScreenVideoRecordingStatus, String> {
+    if state
+        .screen_video_recording
+        .lock()
+        .map_err(|error| error.to_string())?
+        .is_some()
+    {
+        return Err(
+            "stop the active screen video recording before deleting recordings".to_string(),
+        );
+    }
+    let items = screen_video_recording_items()?;
+    let mut deleted = 0usize;
+    for item in items {
+        let path = selected_screen_video_recording_path(Some(item.path))?
+            .ok_or_else(|| "screen video recording path is required".to_string())?;
+        fs::remove_file(path).map_err(|error| error.to_string())?;
+        deleted += 1;
+    }
+    if let Ok(mut last_path) = state.last_screen_video_path.lock() {
+        *last_path = None;
+    }
+    Ok(ScreenVideoRecordingStatus {
+        active: false,
+        path: String::new(),
+        bytes_written: 0,
+        max_bytes: video_recording_max_bytes(),
+        message: format!("deleted {deleted} completed screen video recording(s)"),
     })
 }
 
@@ -8785,6 +9950,62 @@ fn open_external_url(url: String) -> Result<(), String> {
             .stderr(Stdio::null())
             .spawn()
             .map_err(|error| format!("could not open URL with xdg-open: {error}"))?;
+        Ok(())
+    }
+}
+
+// Opens a completed recording only after an explicit Video Show menu click.
+// A selected path has already been canonicalized under fpasoterm's log
+// directory, rather than being accepted directly from terminal output.
+fn open_local_video_file(path: &Path) -> Result<(), String> {
+    if !path.is_file() {
+        return Err("screen video recording file was not found".to_string());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        let operation = windows_wide("open");
+        let target = windows_wide(&path.to_string_lossy());
+        let result = unsafe {
+            ShellExecuteW(
+                ptr::null_mut(),
+                operation.as_ptr(),
+                target.as_ptr(),
+                ptr::null(),
+                ptr::null(),
+                1,
+            )
+        };
+        if (result as isize) <= 32 {
+            return Err(format!(
+                "Windows could not open the video (ShellExecute error {})",
+                result as isize
+            ));
+        }
+        return Ok(());
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not open video with macOS open command: {error}"))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        Command::new("xdg-open")
+            .arg(path)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|error| format!("could not open video with xdg-open: {error}"))?;
         Ok(())
     }
 }
@@ -10786,6 +12007,172 @@ maxSourceBytes = 8388608
     }
 
     #[test]
+    fn screen_video_recording_names_are_unique_for_supported_containers() {
+        assert_eq!(
+            screen_video_recording_file_name("work window", 42, 123, 0, "webm"),
+            "video-work_window-42-123.webm"
+        );
+        assert_eq!(
+            screen_video_recording_file_name("work window", 42, 123, 2, "mp4"),
+            "video-work_window-42-123-2.mp4"
+        );
+        assert_eq!(
+            screen_video_recording_file_name("work window", 42, 123, 2, "webm"),
+            "video-work_window-42-123-2.webm"
+        );
+        assert_eq!(
+            screen_video_recording_file_name("work window", 42, 123, 3, "gif"),
+            "video-work_window-42-123-3.gif"
+        );
+        assert_eq!(screen_video_recording_extension("mp4"), Ok("mp4"));
+        assert_eq!(screen_video_recording_extension("gif"), Ok("gif"));
+        assert!(is_screen_video_recording_file_name(
+            "video-fpasoterm-42-123.gif"
+        ));
+        assert!(is_screen_video_recording_file_name(
+            "video-fpasoterm-42-123.webm"
+        ));
+        assert!(!is_screen_video_recording_file_name(
+            "terminal-fpasoterm-42.log"
+        ));
+        assert!(!is_screen_video_recording_file_name(
+            "video-fpasoterm-42-123.txt"
+        ));
+        assert!(screen_video_recording_extension("avi").is_err());
+    }
+
+    #[test]
+    fn gif_recording_geometry_requires_positive_u16_dimensions() {
+        let valid = ScreenVideoRecordingStartRequest {
+            container: "gif".to_string(),
+            width: Some(640),
+            height: Some(480),
+            frame_delay_centiseconds: Some(20),
+        };
+        assert_eq!(gif_recording_geometry(&valid), Ok((640, 480, 20)));
+
+        let missing_width = ScreenVideoRecordingStartRequest {
+            width: None,
+            ..valid.clone()
+        };
+        assert!(gif_recording_geometry(&missing_width).is_err());
+
+        let oversized = ScreenVideoRecordingStartRequest {
+            width: Some(u32::from(u16::MAX) + 1),
+            ..valid
+        };
+        assert!(gif_recording_geometry(&oversized).is_err());
+    }
+
+    #[test]
+    fn gif_recording_writes_a_valid_animated_gif_from_a_png_frame() {
+        let path = env::temp_dir().join(format!(
+            "fpasoterm-screen-video-test-{}-{}.gif",
+            std::process::id(),
+            now_millis()
+        ));
+        let request = ScreenVideoRecordingStartRequest {
+            container: "gif".to_string(),
+            width: Some(2),
+            height: Some(2),
+            frame_delay_centiseconds: Some(20),
+        };
+        let file = File::create(&path).expect("create GIF fixture");
+        let mut recording = ScreenVideoRecording {
+            path: path.display().to_string(),
+            writer: screen_video_recording_writer(&request, &path, file)
+                .expect("create GIF encoder"),
+            bytes_written: 0,
+            max_bytes: 1_000_000,
+        };
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([40, 120, 220, 255]),
+        ));
+        let mut encoded_png = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded_png, ImageFormat::Png)
+            .expect("encode PNG fixture");
+        append_screen_video_recording_bytes(&mut recording, &encoded_png.into_inner())
+            .expect("append GIF frame");
+        assert!(recording.bytes_written > 0);
+        match recording.writer {
+            ScreenVideoRecordingWriter::Gif { encoder, .. } => {
+                encoder.into_inner().expect("finish GIF encoder");
+            }
+            ScreenVideoRecordingWriter::Media(_) => panic!("expected GIF encoder"),
+            #[cfg(target_os = "linux")]
+            ScreenVideoRecordingWriter::NativeWebm { .. } => panic!("expected GIF encoder"),
+        }
+        let output = fs::read(&path).expect("read GIF fixture");
+        assert!(output.starts_with(b"GIF89a"));
+        let decoder = gif::DecodeOptions::new();
+        let reader = decoder
+            .read_info(std::io::Cursor::new(&output))
+            .expect("read GIF loop extension");
+        assert_eq!(reader.repeat(), GifRepeat::Infinite);
+        let _ = fs::remove_file(path);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn native_webm_writer_muxes_a_png_frame_when_gstreamer_plugins_are_available() {
+        let path = env::temp_dir().join(format!(
+            "fpasoterm-screen-video-test-{}-{}.webm",
+            std::process::id(),
+            now_millis()
+        ));
+        let request = ScreenVideoRecordingStartRequest {
+            container: "webm-gstreamer".to_string(),
+            width: Some(2),
+            height: Some(2),
+            frame_delay_centiseconds: Some(20),
+        };
+        let file = File::create(&path).expect("reserve WebM fixture");
+        let writer = match screen_video_recording_writer(&request, &path, file) {
+            Ok(writer) => writer,
+            // Minimal build images may carry WebKitGTK without the optional
+            // VP8/WebM plugin. The production UI explicitly falls back to
+            // GIF in that supported configuration.
+            Err(error) => {
+                eprintln!("native WebM test skipped: {error}");
+                let _ = fs::remove_file(path);
+                return;
+            }
+        };
+        let mut recording = ScreenVideoRecording {
+            path: path.display().to_string(),
+            writer,
+            bytes_written: 0,
+            max_bytes: 1_000_000,
+        };
+        let image = image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            2,
+            2,
+            image::Rgba([40, 120, 220, 255]),
+        ));
+        let mut encoded_png = std::io::Cursor::new(Vec::new());
+        image
+            .write_to(&mut encoded_png, ImageFormat::Png)
+            .expect("encode PNG fixture");
+        append_screen_video_recording_bytes(&mut recording, &encoded_png.into_inner())
+            .expect("append native WebM frame");
+        match recording.writer {
+            ScreenVideoRecordingWriter::NativeWebm { mut writer, .. } => {
+                writer.finish().expect("finish native WebM");
+            }
+            _ => panic!("expected native WebM encoder"),
+        }
+        let output = fs::read(&path).expect("read WebM fixture");
+        assert!(output.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]));
+        assert!(output
+            .windows(7)
+            .any(|value| value == [0x42, 0x82, 0x84, b'w', b'e', b'b', b'm']));
+        let _ = fs::remove_file(path);
+    }
+
+    #[test]
     fn intel_macos_uses_compact_default_font_size() {
         assert_eq!(terminal_font_size_for("macos", "x86_64"), 12);
         assert_eq!(terminal_font_size_for("macos", "aarch64"), 14);
@@ -10985,18 +12372,22 @@ maxSourceBytes = 8388608
         );
         assert!(config["terminal"].get("images").is_none());
         assert_eq!(config["keybindings"]["prefix"].as_str(), Some("Mod+Shift"));
-        assert_eq!(config["keybindings"]["logShow"].as_str(), Some("l"));
-        assert_eq!(config["keybindings"]["logToggle"].as_str(), Some("s"));
+        assert!(config["keybindings"].get("logShow").is_none());
+        assert!(config["keybindings"].get("logToggle").is_none());
         assert!(config["keybindings"].get("logMenu").is_none());
         assert_eq!(config["keybindings"]["newWindow"].as_str(), Some("n"));
         assert_eq!(config["sync"]["enabled"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commands"].as_bool(), Some(false));
         assert_eq!(config["sync"]["commandSecret"].as_str(), Some(""));
         assert_eq!(config["logging"]["enabled"].as_bool(), Some(true));
+        assert_eq!(
+            config["logging"]["videoMaxBytes"].as_integer(),
+            Some(2_147_483_648)
+        );
     }
 
     #[test]
-    fn legacy_keybindings_use_lowercase_defaults() {
+    fn retired_log_keybindings_are_removed() {
         let mut runtime = default_runtime_config();
         runtime.config.keybindings = serde_json::json!({
             "logMenu": "L",
@@ -11015,8 +12406,8 @@ maxSourceBytes = 8388608
 
         migrate_legacy_log_keybindings(&mut runtime);
 
-        assert_eq!(runtime.config.keybindings["logShow"].as_str(), Some("l"));
-        assert_eq!(runtime.config.keybindings["logToggle"].as_str(), Some("s"));
+        assert!(runtime.config.keybindings.get("logShow").is_none());
+        assert!(runtime.config.keybindings.get("logToggle").is_none());
         assert_eq!(runtime.config.keybindings["copy"].as_str(), Some("c"));
         assert_eq!(runtime.config.keybindings["paste"].as_str(), Some("v"));
         assert_eq!(runtime.config.keybindings["menu"].as_str(), Some("m"));

@@ -234,7 +234,7 @@ fpasoterm --broadcast "hostname" --broadcast-sync
 
 ## Terminal Output Logs
 
-sync folder の diagnostics と terminal output logging は別機能です。hamburger menu に `Log Start (^s)` / `Log Stop (^s)` と `Log Show (^l)` を表示します。`Ctrl+Shift+s` で terminal output のlocal log fileへの記録を開始または停止し、`Ctrl+Shift+l` でcaptured `terminal-*.log` の一覧から表示対象を選択する画面を開きます。`Ctrl+Shift+p` は将来のcommand palette用に未割り当てです。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。保存される log file は読みやすさのため一般的な ANSI/control sequence、OSC sequence、CR/control character を除去または改行へ正規化します。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
+sync folder の diagnostics と terminal output logging は別機能です。hamburger menu に `Log Start` / `Log Stop` と `Log Show` を表示します。これらのmenu操作にはapplication-wide shortcutを設けないため、`Ctrl+Shift+s` と `Ctrl+Shift+l` はterminal applicationで利用できます。log panel では選択した停止済み log の削除ができ、`Delete All` は log panel 内の確認で承認された場合だけ active log を空にして、設定済み log directory の停止済み `terminal-*.log` を全て削除します。保存される log file は読みやすさのため一般的な ANSI/control sequence、OSC sequence、CR/control character を除去または改行へ正規化します。既定では `~/.config/fpasoterm/User/logs` 配下へ保存します。
 
 `Log Show` では、検索欄と `Search` ボタンで表示中の log text の次の一致箇所を選択し、その位置へ scroll します。`Search` の繰り返し、または `N` で全ての一致箇所を順番に進み、末尾の後は先頭に戻ります。`P` は前の一致箇所へ戻ります。log text area に focus がある場合は、`j` で次、`k` で前の一致箇所へ移動します。矢印キーは通常の text area scroll 用に残します。counter は現在の一致番号を表示します。表示された log text を選択して `Ctrl+Shift+c` を押すと、terminal selection copy と同じ clipboard 経路で選択範囲をコピーします。
 

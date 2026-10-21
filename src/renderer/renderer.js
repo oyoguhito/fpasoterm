@@ -8,6 +8,7 @@ const terminalCapabilityPreviewElement = document.getElementById('terminal-capab
 const diagnosticsPathElement = document.getElementById('diagnostics-path');
 const closeDiagnosticsButton = document.getElementById('close-diagnostics');
 const terminalLogSelectElement = document.getElementById('terminal-log-select');
+const screenVideoSelectElement = document.getElementById('screen-video-select');
 const terminalLogSearchElement = document.getElementById('terminal-log-search');
 const terminalLogSearchNextButton = document.getElementById('terminal-log-search-next');
 const terminalLogSearchStatusElement = document.getElementById('terminal-log-search-status');
@@ -18,6 +19,9 @@ const pluginCatalogSearchElement = document.getElementById('plugin-catalog-searc
 const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
 const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
 const terminalLogShowSelectedButton = document.getElementById('terminal-log-show-selected');
+const screenVideoOpenSelectedButton = document.getElementById('screen-video-open-selected');
+const screenVideoDeleteSelectedButton = document.getElementById('screen-video-delete-selected');
+const screenVideoDeleteAllButton = document.getElementById('screen-video-delete-all');
 const terminalLogDeleteSelectedButton = document.getElementById('terminal-log-delete-selected');
 const terminalLogDeleteAllButton = document.getElementById('terminal-log-delete-all');
 const checkForUpdatesButton = document.getElementById('check-for-updates');
@@ -54,12 +58,15 @@ const terminalGraphicsZoom50Button = document.getElementById('terminal-graphics-
 const terminalGraphicsZoom100Button = document.getElementById('terminal-graphics-zoom-100');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
+const screenVideoStatusElement = document.getElementById('screen-video-status');
 const sshfsMountStatusElement = document.getElementById('sshfs-mount-status');
 const imeStatusElement = document.getElementById('ime-status');
 const logMenuToggleButton = document.getElementById('log-menu-toggle');
 const logMenuItems = document.getElementById('log-menu-items');
 const terminalLogToggleButton = document.getElementById('terminal-log-toggle');
 const terminalLogShowButton = document.getElementById('terminal-log-show');
+const screenVideoToggleButton = document.getElementById('screen-video-toggle');
+const screenVideoShowButton = document.getElementById('screen-video-show');
 const syncMenuToggleButton = document.getElementById('sync-menu-toggle');
 const syncMenuItems = document.getElementById('sync-menu-items');
 const syncStatusButton = document.getElementById('sync-status');
@@ -231,8 +238,6 @@ const fallbackConfig = {
   },
   keybindings: {
     prefix: 'Mod+Shift',
-    logToggle: 's',
-    logShow: 'l',
     copy: 'c',
     paste: 'v',
     menu: 'm',
@@ -261,6 +266,7 @@ const fallbackConfig = {
     directory: '',
     autoStart: false,
     maxBytes: 10485760,
+    videoMaxBytes: 2147483648,
   },
   security: {
     osc52: 'trusted',
@@ -331,6 +337,24 @@ let terminalLogSearchState = {
 };
 let terminalLogConfirmResolver = null;
 let terminalLogConfirmReturnFocus = null;
+// Screen video capture is intentionally separate from terminal text logging.
+// MediaRecorder payloads are serialized by recordingWriteChain so native file
+// writes remain ordered even when Blob conversion is asynchronous.
+let screenVideoRecorder = null;
+let screenVideoWriteChain = Promise.resolve();
+let screenVideoStopping = false;
+let screenVideoWriteError = null;
+let screenVideoGifFrameQueued = false;
+// Counts every non-empty MediaRecorder event.  A few WebKitGTK builds deliver
+// the terminal stop event just before their final dataavailable task; the
+// counter lets finalization wait for that last queued chunk.
+let screenVideoChunkSequence = 0;
+// The terminal-canvas stream supplies a final redraw before a user-requested
+// stop so output that appeared immediately before Video Stop is encoded too.
+let screenVideoFlushFrame = null;
+let screenVideoStarting = false;
+let screenVideoFeedback = '';
+let screenVideoFeedbackTimer = null;
 
 function setTerminalGraphicsZoomVisible(visible) {
   if (terminalGraphicsHideTimer !== null) {
@@ -472,8 +496,6 @@ function keybindingPrefixLabel() {
 // Keeps menu labels and accessibility metadata aligned with config.toml.
 function applyKeybindingLabels() {
   const items = [
-    [terminalLogToggleButton, 'logToggle', 'Log Start'],
-    [terminalLogShowButton, 'logShow', 'Log Show'],
     [terminalBroadcastButton, 'broadcast', 'Broadcast'],
     [terminalKillButton, 'kill', 'Kill'],
     [terminalResetButton, 'terminalReset', 'Display Reset'],
@@ -532,6 +554,18 @@ function installTauriApiAdapter() {
     showTerminalLog: (path) => invoke('terminal_log_show', { request: { path: path || null } }),
     clearTerminalLog: () => invoke('terminal_log_clear'),
     deleteTerminalLog: (path) => invoke('terminal_log_delete', { request: { path: path || null } }),
+    startScreenVideoRecording: (container, width = null, height = null, frameDelayCentiseconds = null) => invoke('screen_video_recording_start', {
+      request: { container, width, height, frameDelayCentiseconds },
+    }),
+    appendScreenVideoRecording: (dataBase64) => invoke('screen_video_recording_append', {
+      chunk: { dataBase64 },
+    }),
+    stopScreenVideoRecording: () => invoke('screen_video_recording_stop'),
+    abortScreenVideoRecording: () => invoke('screen_video_recording_abort'),
+    listScreenVideoRecordings: () => invoke('screen_video_recording_list'),
+    showScreenVideoRecording: (path) => invoke('screen_video_recording_show', { request: { path: path || null } }),
+    deleteScreenVideoRecording: (path) => invoke('screen_video_recording_delete', { request: { path: path || null } }),
+    clearScreenVideoRecordings: () => invoke('screen_video_recording_clear'),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
@@ -1008,6 +1042,7 @@ function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   setDiagnosticsFilterVisible(false);
   setPluginCatalogSearchVisible(false);
+  setScreenVideoPickerVisible(false);
   setTerminalEncodingControlsVisible(false);
   if (checkForUpdatesButton) {
     checkForUpdatesButton.hidden = true;
@@ -3505,7 +3540,7 @@ async function refreshTerminalLogControl() {
   const status = await window.fpasoterm.terminalLogStatus();
   terminalLogToggleButton.hidden = status.enabled === false;
   terminalLogShowButton.hidden = status.enabled === false;
-  terminalLogToggleButton.textContent = `${status.active ? 'Log Stop' : 'Log Start'} (${keybindingActionLabel('logToggle')})`;
+  terminalLogToggleButton.textContent = status.active ? 'Log Stop' : 'Log Start';
   terminalLogToggleButton.dataset.active = status.active ? 'true' : 'false';
   terminalLogStatusElement.hidden = !status.active;
 }
@@ -3730,6 +3765,7 @@ function diagnosticsPanelFocusItems() {
   }
   return [
     terminalLogSelectElement,
+    screenVideoSelectElement,
     terminalLogSearchElement,
     terminalLogSearchNextButton,
     diagnosticsFilterElement,
@@ -3737,6 +3773,9 @@ function diagnosticsPanelFocusItems() {
     pluginCatalogSearchElement,
     pluginCatalogUpdatesOnlyButton,
     terminalLogShowSelectedButton,
+    screenVideoOpenSelectedButton,
+    screenVideoDeleteSelectedButton,
+    screenVideoDeleteAllButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
     checkForUpdatesButton,
@@ -3767,6 +3806,17 @@ function focusTerminalLogPanel() {
   }
   const preferred = terminalLogSelectElement && !terminalLogSelectElement.hidden
     ? terminalLogSelectElement
+    : closeDiagnosticsButton;
+  preferred?.focus({ preventScroll: true });
+}
+
+// Focuses the recording selector after explicitly opening Video Show.
+function focusScreenVideoPanel() {
+  if (!diagnosticsPanel || diagnosticsPanel.hidden) {
+    return;
+  }
+  const preferred = screenVideoSelectElement && !screenVideoSelectElement.hidden
+    ? screenVideoSelectElement
     : closeDiagnosticsButton;
   preferred?.focus({ preventScroll: true });
 }
@@ -3982,7 +4032,7 @@ function showTerminalOutputLogFromMenu() {
   showTerminalOutputLog().catch((error) => {
     terminalLogShowButton.textContent = 'Error';
     setTimeout(() => {
-      terminalLogShowButton.textContent = 'Log Show (^l)';
+      terminalLogShowButton.textContent = 'Log Show';
     }, 1400);
     showDiagnostic(`terminal log show failed: ${error}`);
   }).finally(() => setWindowMenuOpen(false));
@@ -4286,6 +4336,843 @@ async function stopTerminalOutputLog() {
   return status;
 }
 
+// Chooses a supported video container explicitly so the native side can use
+// a matching file extension. WebKit-based views often provide an MP4 recorder
+// but no WebM recorder, while Chromium normally provides VP8/VP9 WebM.
+function screenVideoFormat() {
+  if (typeof MediaRecorder === 'undefined' || typeof MediaRecorder.isTypeSupported !== 'function') {
+    return null;
+  }
+  return [
+    { mimeType: 'video/webm;codecs=vp9', container: 'webm' },
+    { mimeType: 'video/webm;codecs=vp8', container: 'webm' },
+    { mimeType: 'video/webm', container: 'webm' },
+    { mimeType: 'video/mp4;codecs=avc1.42E01E', container: 'mp4' },
+    { mimeType: 'video/mp4', container: 'mp4' },
+  ].find((candidate) => MediaRecorder.isTypeSupported(candidate.mimeType)) || null;
+}
+
+// Converts one bounded binary chunk to a stable IPC-safe representation.
+function screenVideoBlobToBase64(blob) {
+  const encode = (buffer) => {
+    const bytes = new Uint8Array(buffer);
+    const step = 0x8000;
+    let binary = '';
+    for (let offset = 0; offset < bytes.length; offset += step) {
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + step));
+    }
+    return btoa(binary);
+  };
+  if (typeof blob?.arrayBuffer === 'function') {
+    return blob.arrayBuffer().then(encode);
+  }
+  if (typeof FileReader !== 'undefined') {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onerror = () => reject(reader.error || new Error('could not read video frame blob'));
+      reader.onload = () => resolve(encode(reader.result));
+      reader.readAsArrayBuffer(blob);
+    });
+  }
+  return Promise.reject(new Error('this WebView cannot read a recorded video frame'));
+}
+
+// Releases every capture track.  This also turns off the OS sharing indicator
+// when a display capture was used, and stops the canvas compositor when the
+// embedded WebView had to use the terminal-surface fallback.
+function stopScreenVideoTracks(stream, cleanup = null) {
+  cleanup?.();
+  for (const track of stream?.getTracks?.() || []) {
+    track.stop();
+  }
+}
+
+function setScreenVideoFeedback(message) {
+  screenVideoFeedback = message;
+  if (screenVideoFeedbackTimer !== null) {
+    clearTimeout(screenVideoFeedbackTimer);
+  }
+  screenVideoFeedbackTimer = window.setTimeout(() => {
+    screenVideoFeedback = '';
+    screenVideoFeedbackTimer = null;
+    refreshScreenVideoControl();
+  }, 4500);
+}
+
+// Keeps the titlebar status and the menu action truthful while a capture is
+// active or its final WebM chunks are still being written.
+function refreshScreenVideoControl() {
+  if (!screenVideoToggleButton || !screenVideoStatusElement) {
+    return;
+  }
+  const active = Boolean(screenVideoRecorder && screenVideoRecorder.state !== 'inactive');
+  const saving = screenVideoStopping;
+  const starting = screenVideoStarting;
+  screenVideoToggleButton.disabled = saving || starting;
+  if (screenVideoShowButton) {
+    screenVideoShowButton.disabled = active || saving || starting;
+  }
+  screenVideoToggleButton.textContent = saving
+    ? 'Video Saving…'
+    : starting
+      ? 'Video Starting…'
+      : active
+        ? 'Video Stop'
+        : 'Video Start';
+  screenVideoToggleButton.setAttribute(
+    'aria-label',
+    saving
+      ? 'Saving screen video recording'
+      : starting
+        ? 'Starting screen video recording'
+        : active
+          ? 'Stop screen video recording'
+          : 'Start screen video recording',
+  );
+  screenVideoStatusElement.hidden = !active && !saving && !starting && !screenVideoFeedback;
+  screenVideoStatusElement.textContent = screenVideoFeedback
+    || (saving ? 'Saving video' : starting ? 'Preparing video' : 'Recording');
+}
+
+// Returns only actually visible xterm canvas layers. In particular, do not
+// turn an opacity of 0 into 1: WebKitGTK can retain a hidden, opaque backing
+// canvas behind the text layer, which otherwise composites as a black frame.
+function visibleTerminalCanvasLayers() {
+  if (!terminalElement) {
+    return [];
+  }
+  return [...terminalElement.querySelectorAll('canvas')].filter((source) => {
+    if (!source.width || !source.height) {
+      return false;
+    }
+    const style = window.getComputedStyle(source);
+    const opacity = Number.parseFloat(style.opacity);
+    const rect = source.getBoundingClientRect();
+    return style.display !== 'none'
+      && style.visibility !== 'hidden'
+      && (!Number.isFinite(opacity) || opacity > 0.01)
+      && rect.width > 0
+      && rect.height > 0;
+  });
+}
+
+// Tests a bounded sample rather than reading every pixel on every capture
+// frame. It detects the all-dark frame produced by some WebKitGTK canvas
+// layers while keeping the 30fps MediaRecorder fallback responsive.
+function captureCanvasHasLegiblePixels(context, canvas) {
+  try {
+    const width = Math.max(1, canvas.width);
+    const height = Math.max(1, canvas.height);
+    const pixels = context.getImageData(0, 0, width, height).data;
+    const xStep = Math.max(1, Math.floor(width / 180));
+    const yStep = Math.max(1, Math.floor(height / 120));
+    for (let y = 0; y < height; y += yStep) {
+      for (let x = 0; x < width; x += xStep) {
+        const offset = (y * width + x) * 4;
+        const red = pixels[offset];
+        const green = pixels[offset + 1];
+        const blue = pixels[offset + 2];
+        if (pixels[offset + 3] > 0 && (Math.max(red, green, blue) > 70
+          || Math.max(red, green, blue) - Math.min(red, green, blue) > 24)) {
+          return true;
+        }
+      }
+    }
+  } catch (_) {
+    // Reading a canvas can fail transiently while a WebView renderer is
+    // recreated. Preserve the normal canvas composition in that case.
+    return true;
+  }
+  return false;
+}
+
+// Last-resort rasterizer for WebViews whose visible xterm backing canvases are
+// blank when copied into another canvas. It uses xterm's visible buffer rather
+// than terminal output history, so GIF frames remain useful instead of black.
+// Normal canvas layers are always preferred because they preserve colors,
+// selections, images, and exact glyph shaping.
+function drawTerminalBufferTextFallback(context, terminalRect) {
+  const buffer = term?.buffer?.active;
+  const cols = Number(term?.cols || 0);
+  const rows = Number(term?.rows || 0);
+  if (!buffer || cols <= 0 || rows <= 0) {
+    return false;
+  }
+  const terminalConfig = appConfig?.terminal || {};
+  const cellHeight = terminalRect.height / rows;
+  const fontSize = Math.max(7, Math.min(
+    Number(terminalConfig.fontSize) || cellHeight * 0.78,
+    cellHeight * 0.9,
+  ));
+  const fontFamily = String(terminalConfig.fontFamily || fallbackConfig.terminal.fontFamily);
+  const foreground = String(terminalConfig.theme?.foreground || fallbackConfig.terminal.theme.foreground);
+  const firstRow = Number.isFinite(buffer.viewportY) ? buffer.viewportY : (buffer.baseY || 0);
+  context.save();
+  context.globalAlpha = 1;
+  context.fillStyle = foreground;
+  context.font = `${fontSize}px ${fontFamily}`;
+  context.textBaseline = 'alphabetic';
+  for (let row = 0; row < rows; row += 1) {
+    const line = buffer.getLine(firstRow + row);
+    const text = line?.translateToString(true) || '';
+    if (!text) {
+      continue;
+    }
+    const baseline = (row + 1) * cellHeight - Math.max(1, (cellHeight - fontSize) / 2);
+    context.fillText(text, 0, baseline, terminalRect.width);
+  }
+  context.restore();
+  return true;
+}
+
+// Composites the canvases xterm already renders into an offscreen canvas. It
+// is intentionally not an OS-screen capture: only the fpasoterm terminal view
+// is recorded, so it needs no permission prompt and cannot capture other apps.
+function createTerminalCanvasSurface(fixedGeometry = false) {
+  if (!terminalElement) {
+    throw new Error('the terminal view is not available for video capture');
+  }
+  const captureCanvas = document.createElement('canvas');
+  const context = captureCanvas.getContext('2d', { alpha: false });
+  if (!context) {
+    throw new Error('this WebView cannot create a terminal video canvas');
+  }
+
+  let initialized = false;
+  const drawFrame = ({ preferBufferText = false } = {}) => {
+    const terminalRect = terminalElement.getBoundingClientRect();
+    const scale = Math.max(1, Math.min(2, window.devicePixelRatio || 1));
+    const rawWidth = Math.max(1, Math.round(terminalRect.width * scale));
+    const rawHeight = Math.max(1, Math.round(terminalRect.height * scale));
+    // The Linux native WebM VP8 encoder consumes planar 4:2:0 pixels, which
+    // require even dimensions. Fixed-geometry raster recordings can safely
+    // crop one trailing pixel; non-recording canvas-stream capture is kept
+    // untouched for platform MediaRecorder compatibility.
+    const width = fixedGeometry ? Math.max(2, rawWidth - (rawWidth % 2)) : rawWidth;
+    const height = fixedGeometry ? Math.max(2, rawHeight - (rawHeight % 2)) : rawHeight;
+    if ((!fixedGeometry || !initialized)
+        && (captureCanvas.width !== width || captureCanvas.height !== height)) {
+      captureCanvas.width = width;
+      captureCanvas.height = height;
+    }
+    if (!captureCanvas.width || !captureCanvas.height) {
+      captureCanvas.width = width;
+      captureCanvas.height = height;
+    }
+    initialized = true;
+    context.save();
+    context.fillStyle = String(appConfig?.terminal?.theme?.background || '#101216');
+    context.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
+    context.scale(
+      captureCanvas.width / Math.max(1, terminalRect.width),
+      captureCanvas.height / Math.max(1, terminalRect.height),
+    );
+    if (!preferBufferText) {
+      for (const source of visibleTerminalCanvasLayers()) {
+        const sourceRect = source.getBoundingClientRect();
+        const left = sourceRect.left - terminalRect.left;
+        const top = sourceRect.top - terminalRect.top;
+        if (sourceRect.right <= terminalRect.left || sourceRect.bottom <= terminalRect.top
+            || left >= terminalRect.width || top >= terminalRect.height) {
+          continue;
+        }
+        try {
+          const opacity = Number.parseFloat(window.getComputedStyle(source).opacity);
+          context.globalAlpha = Number.isFinite(opacity) ? opacity : 1;
+          context.drawImage(source, left, top, sourceRect.width, sourceRect.height);
+        } catch (_) {
+          // A transiently recreated renderer canvas can be skipped for one frame.
+        }
+      }
+    }
+    context.restore();
+    if (preferBufferText || !captureCanvasHasLegiblePixels(context, captureCanvas)) {
+      context.save();
+      context.scale(
+        captureCanvas.width / Math.max(1, terminalRect.width),
+        captureCanvas.height / Math.max(1, terminalRect.height),
+      );
+      drawTerminalBufferTextFallback(context, terminalRect);
+      context.restore();
+    }
+  };
+  drawFrame();
+  const timer = window.setInterval(drawFrame, 1000 / 30);
+  return {
+    canvas: captureCanvas,
+    drawFrame,
+    cleanup: () => window.clearInterval(timer),
+    source: 'terminal canvas',
+  };
+}
+
+function canvasPngBase64(canvas) {
+  if (typeof canvas?.toBlob === 'function') {
+    return new Promise((resolve, reject) => {
+      canvas.toBlob((blob) => {
+        if (blob) {
+          screenVideoBlobToBase64(blob).then(resolve, reject);
+        } else {
+          reject(new Error('terminal canvas PNG encoding returned no frame'));
+        }
+      }, 'image/png');
+    });
+  }
+  // Older WebKitGTK builds can omit toBlob while still implementing the
+  // synchronous PNG serializer. Keep this path as the final recording
+  // fallback; it has the same canvas-only privacy boundary as toBlob.
+  if (typeof canvas?.toDataURL === 'function') {
+    try {
+      const value = canvas.toDataURL('image/png');
+      const marker = 'data:image/png;base64,';
+      if (value.startsWith(marker) && value.length > marker.length) {
+        return Promise.resolve(value.slice(marker.length));
+      }
+      return Promise.reject(new Error('terminal canvas PNG data URL was invalid'));
+    } catch (error) {
+      return Promise.reject(new Error(`terminal canvas PNG encoding failed: ${error}`));
+    }
+  }
+  return Promise.reject(new Error('this WebView cannot encode a terminal canvas as PNG'));
+}
+
+// WebKitGTK builds used on Linux/ChromeOS can omit getDisplayMedia while still
+// exposing canvas.captureStream and MediaRecorder. Use the canvas as a stream
+// on those builds.
+function createTerminalCanvasVideoCapture() {
+  const capture = createTerminalCanvasSurface(false);
+  if (typeof capture.canvas.captureStream !== 'function') {
+    capture.cleanup();
+    throw new Error('this WebView cannot stream a terminal canvas to MediaRecorder');
+  }
+  // WebKitGTK can accept a nonzero captureStream rate but emit only its first
+  // canvas frame.  Prefer explicit frame requests when the track supports
+  // them, so a terminal recording continues to receive refreshed frames for
+  // its complete lifetime. Engines without requestFrame retain the standard
+  // automatic 30fps canvas stream.
+  const stream = capture.canvas.captureStream(0);
+  const videoTrack = stream.getVideoTracks?.()[0];
+  if (typeof videoTrack?.requestFrame === 'function') {
+    const requestFrame = (preferBufferText = false) => {
+      // Draw immediately before asking the track for a frame. WebKitGTK does
+      // not consistently notice an offscreen canvas mutation made by another
+      // timer, so coupling them here keeps terminal updates in the stream.
+      capture.drawFrame({ preferBufferText });
+      try {
+        videoTrack.requestFrame();
+      } catch (_) {
+        // The track may have stopped while the recorder is finalizing.
+      }
+    };
+    requestFrame();
+    const frameTimer = window.setInterval(requestFrame, 1000 / 20);
+    return {
+      ...capture,
+      stream,
+      flushFrame: () => new Promise((resolve) => {
+        // The xterm render canvas may lag its live buffer by one paint. Force
+        // the exact terminal buffer into the final image and keep it alive for
+        // several capture frames so output just printed before Video Stop is
+        // visible in the completed recording.
+        requestFrame(true);
+        window.setTimeout(() => {
+          requestFrame(true);
+          window.setTimeout(() => {
+            requestFrame(true);
+            resolve();
+          }, 120);
+        }, 120);
+      }),
+      cleanup: () => {
+        clearInterval(frameTimer);
+        capture.cleanup();
+      },
+    };
+  }
+  // captureStream(0) disables automatic frame production, so replace it with
+  // an automatic stream for engines that implement no manual frame API.
+  for (const track of stream.getTracks?.() || []) {
+    track.stop();
+  }
+  return {
+    ...capture,
+    stream: capture.canvas.captureStream(30),
+    flushFrame: () => new Promise((resolve) => {
+      capture.drawFrame({ preferBufferText: true });
+      window.requestAnimationFrame(() => {
+        capture.drawFrame({ preferBufferText: true });
+        window.setTimeout(() => {
+          capture.drawFrame({ preferBufferText: true });
+          resolve();
+        }, 180);
+      });
+    }),
+  };
+}
+
+// Queues native writes in event order.  This avoids both a memory-sized final
+// Blob and out-of-order writes when Blob.arrayBuffer resolves at different
+// times for two MediaRecorder events.
+function appendScreenVideoChunk(recorder, blob) {
+  if (!blob || blob.size === 0) {
+    return screenVideoWriteChain;
+  }
+  screenVideoChunkSequence += 1;
+  screenVideoWriteChain = screenVideoWriteChain
+    .then(async () => {
+      if (screenVideoWriteError) {
+        return;
+      }
+      const dataBase64 = await screenVideoBlobToBase64(blob);
+      await window.fpasoterm.appendScreenVideoRecording(dataBase64);
+    })
+    .catch((error) => {
+      if (!screenVideoWriteError) {
+        screenVideoWriteError = error;
+        showDiagnostic(`screen video recording write failed: ${error}`);
+      }
+      if (screenVideoRecorder === recorder && recorder.state !== 'inactive') {
+        screenVideoStopping = true;
+        refreshScreenVideoControl();
+        try {
+          recorder.stop();
+        } catch (_) {
+          // The onstop handler will finalize an already-stopping recorder.
+        }
+      }
+    });
+  return screenVideoWriteChain;
+}
+
+// A WebView without a reliable canvas MediaRecorder can still provide
+// canvas.toBlob. Queue PNG captures at a deliberately modest 5fps; the Rust
+// backend turns them into an animated GIF everywhere, or a native WebM on
+// ChromeOS/Linux. Neither route requires an external recorder executable.
+function appendTerminalRasterFrame(recorder, canvas, label) {
+  // Do not accumulate snapshots when an older PNG conversion or native GIF
+  // write is still in flight. Dropping an intermediate frame keeps memory
+  // bounded and preserves interaction responsiveness on slower WebViews.
+  if (screenVideoGifFrameQueued || screenVideoWriteError) {
+    return;
+  }
+  screenVideoGifFrameQueued = true;
+  screenVideoWriteChain = screenVideoWriteChain
+    .then(async () => {
+      if (screenVideoWriteError) {
+        return;
+      }
+      const dataBase64 = await canvasPngBase64(canvas);
+      await window.fpasoterm.appendScreenVideoRecording(dataBase64);
+    })
+    .catch((error) => {
+      if (!screenVideoWriteError) {
+        screenVideoWriteError = error;
+        showDiagnostic(`terminal ${label} recording write failed: ${error}`);
+        setScreenVideoFeedback('Video recording failed');
+      }
+      if (screenVideoRecorder === recorder && recorder.state !== 'inactive') {
+        screenVideoStopping = true;
+        refreshScreenVideoControl();
+        recorder.stop();
+      }
+    })
+    .finally(() => {
+      screenVideoGifFrameQueued = false;
+    });
+}
+
+// A rejected picker can mean an explicit user cancellation, which must not
+// silently start another capture. WebKitGTK otherwise maps missing portals or
+// devices inconsistently, so every other failure falls back to the terminal
+// surface requested by the original Video Start action.
+function displayCaptureIsUnavailable(error) {
+  const name = String(error?.name || '');
+  const message = String(error?.message || '').toLowerCase();
+  if (name === 'AbortError') {
+    return false;
+  }
+  return !(name === 'NotAllowedError'
+    && /(cancel|denied|permission)/.test(message));
+}
+
+async function startTerminalRasterRecording(container, label) {
+  if (screenVideoFeedbackTimer !== null) {
+    clearTimeout(screenVideoFeedbackTimer);
+    screenVideoFeedbackTimer = null;
+  }
+  screenVideoFeedback = '';
+  screenVideoFlushFrame = null;
+  screenVideoStarting = true;
+  refreshScreenVideoControl();
+  let capture = null;
+  let recorder = null;
+  try {
+    // Fixed geometry gives every raster frame the same size. On terminal
+    // resize the live terminal is scaled into that recording canvas instead
+    // of making the native encoder reject a frame-size change.
+    capture = createTerminalCanvasSurface(true);
+    const status = await window.fpasoterm.startScreenVideoRecording(
+      container,
+      capture.canvas.width,
+      capture.canvas.height,
+      20,
+    );
+    let timer = null;
+    recorder = {
+      state: 'recording',
+      onstop: null,
+      requestData: () => appendTerminalRasterFrame(recorder, capture.canvas, label),
+      stop: () => {
+        if (recorder.state === 'inactive') {
+          return;
+        }
+        recorder.state = 'inactive';
+        if (timer !== null) {
+          clearInterval(timer);
+          timer = null;
+        }
+        recorder.onstop?.();
+      },
+    };
+    screenVideoRecorder = recorder;
+    screenVideoWriteChain = Promise.resolve();
+    screenVideoWriteError = null;
+    screenVideoGifFrameQueued = false;
+    screenVideoStopping = false;
+    recorder.onstop = () => {
+      finalizeScreenVideoRecording(recorder, null, capture.cleanup).catch((error) => {
+        showDiagnostic(`terminal ${label} recording stop failed: ${error}`);
+      });
+    };
+    recorder.requestData();
+    timer = window.setInterval(() => recorder.requestData(), 200);
+    screenVideoStarting = false;
+    refreshScreenVideoControl();
+    showDiagnostic(`terminal ${label} recording started path=${status.path} maxBytes=${status.maxBytes}`);
+    return status;
+  } catch (error) {
+    capture?.cleanup();
+    screenVideoStarting = false;
+    screenVideoStopping = false;
+    if (screenVideoRecorder === recorder) {
+      screenVideoRecorder = null;
+    }
+    await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
+    throw error;
+  } finally {
+    if (screenVideoStarting) {
+      screenVideoStarting = false;
+      refreshScreenVideoControl();
+    }
+  }
+}
+
+function startTerminalGifRecording() {
+  return startTerminalRasterRecording('gif', 'GIF');
+}
+
+// WebKitGTK's CanvasCaptureMediaStream can freeze on the first xterm canvas
+// paint even when MediaRecorder reports a valid WebM. ChromeOS/Linux instead
+// sends the proven PNG snapshots to the in-process GStreamer WebM encoder.
+// The native command is intentionally attempted only on Linux; macOS and
+// Windows retain their browser/MediaRecorder path.
+function shouldUseNativeTerminalWebmRecording() {
+  const platform = `${navigator.userAgent || ''} ${navigator.platform || ''}`;
+  return /linux/i.test(platform);
+}
+
+async function startTerminalNativeWebmRecording() {
+  try {
+    return await startTerminalRasterRecording('webm-gstreamer', 'native WebM');
+  } catch (error) {
+    // A minimal Linux image can omit the GStreamer appsrc/VP8 plugins. GIF is
+    // still a complete recording in that case and makes the fallback explicit.
+    showDiagnostic(`native WebM recording unavailable; using GIF fallback: ${error}`);
+    return startTerminalGifRecording();
+  }
+}
+
+function startTerminalFallbackRecording() {
+  return shouldUseNativeTerminalWebmRecording()
+    ? startTerminalNativeWebmRecording()
+    : startTerminalGifRecording();
+}
+
+// Saves the end of a recording after every queued chunk has reached the
+// native file.  A write failure still preserves any valid prefix for recovery.
+async function finalizeScreenVideoRecording(recorder, stream, cleanup) {
+  let status = null;
+  try {
+    await screenVideoWriteChain;
+    status = await window.fpasoterm.stopScreenVideoRecording();
+    const detail = `path=${status.path || '(none)'} bytes=${status.bytesWritten}`;
+    if (screenVideoWriteError) {
+      showDiagnostic(`screen video recording saved partial file ${detail}: ${screenVideoWriteError}`);
+    } else {
+      showDiagnostic(`screen video recording saved ${detail}`);
+    }
+  } catch (error) {
+    showDiagnostic(`screen video recording finalization failed: ${error}`);
+  } finally {
+    stopScreenVideoTracks(stream, cleanup);
+    if (screenVideoRecorder === recorder) {
+      screenVideoRecorder = null;
+      screenVideoWriteChain = Promise.resolve();
+      screenVideoStopping = false;
+      screenVideoWriteError = null;
+      screenVideoGifFrameQueued = false;
+      screenVideoChunkSequence = 0;
+      screenVideoFlushFrame = null;
+      refreshScreenVideoControl();
+    }
+  }
+  return status;
+}
+
+// Web standards queue the final dataavailable event before stop.  Some older
+// WebKitGTK builds reverse those two callbacks for a canvas stream, however.
+// Wait for two quiet turns before closing the native file, then await the
+// write chain. This preserves the last WebM cluster instead of truncating a
+// recording at its first timeslice.
+function finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup) {
+  let observedSequence = screenVideoChunkSequence;
+  let quietChecks = 0;
+  const settle = () => {
+    if (screenVideoRecorder !== recorder) {
+      return;
+    }
+    if (screenVideoChunkSequence !== observedSequence) {
+      observedSequence = screenVideoChunkSequence;
+      quietChecks = 0;
+    } else {
+      quietChecks += 1;
+    }
+    if (quietChecks < 2) {
+      window.setTimeout(settle, 75);
+      return;
+    }
+    finalizeScreenVideoRecording(recorder, stream, cleanup).catch((error) => {
+      showDiagnostic(`screen video recording stop failed: ${error}`);
+    });
+  };
+  window.setTimeout(settle, 75);
+}
+
+// Starts a capture from a direct menu click.  We prefer OS-authorized display
+// capture where its WebView API exists.  A terminal-canvas fallback keeps the
+// feature usable in WebKitGTK/ChromeOS builds that do not expose that API.
+async function startScreenVideoRecording() {
+  if (screenVideoRecorder || screenVideoStopping || screenVideoStarting) {
+    throw new Error('screen video recording is already active');
+  }
+  if (!window.fpasoterm?.startScreenVideoRecording
+      || !window.fpasoterm?.appendScreenVideoRecording
+      || !window.fpasoterm?.stopScreenVideoRecording) {
+    throw new Error('native screen video recording support is unavailable');
+  }
+  const format = screenVideoFormat();
+  // Some WebKitGTK builds expose neither MediaRecorder nor canvas.captureStream.
+  // They can nevertheless encode the canvas to PNG, which is enough for the
+  // built-in native GIF fallback below.
+  if (!format) {
+    return startTerminalFallbackRecording();
+  }
+  const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
+  const supportsCanvasStream = typeof HTMLCanvasElement !== 'undefined'
+    && typeof HTMLCanvasElement.prototype?.captureStream === 'function';
+  if (typeof getDisplayMedia !== 'function' && !supportsCanvasStream) {
+    return startTerminalFallbackRecording();
+  }
+  if (screenVideoFeedbackTimer !== null) {
+    clearTimeout(screenVideoFeedbackTimer);
+    screenVideoFeedbackTimer = null;
+  }
+  screenVideoFeedback = '';
+  screenVideoStarting = true;
+  refreshScreenVideoControl();
+  let stream = null;
+  let cleanup = null;
+  let flushFrame = null;
+  let source = 'display';
+  try {
+    if (typeof getDisplayMedia === 'function') {
+      // This call must stay before the first await: browser engines require its
+      // permission picker to begin in the user-activation scope of Video Start.
+      try {
+        stream = await getDisplayMedia.call(navigator.mediaDevices, {
+          video: { frameRate: { ideal: 30, max: 30 } },
+          audio: false,
+        });
+      } catch (error) {
+        if (displayCaptureIsUnavailable(error)) {
+          if (shouldUseNativeTerminalWebmRecording()) {
+            showDiagnostic(
+              `screen capture unavailable; using native terminal WebM recording: ${error}`,
+            );
+            screenVideoStarting = false;
+            refreshScreenVideoControl();
+            return startTerminalNativeWebmRecording();
+          }
+          // A missing ScreenCast portal must not discard MediaRecorder.  In
+          // particular, WebKitGTK on ChromeOS can reject getDisplayMedia yet
+          // still encode a terminal canvas as WebM.  Preserve the preferred
+          // video container whenever that capability exists; GIF is only the
+          // last fallback for a WebView without a usable video encoder.
+          showDiagnostic(
+            `screen capture unavailable; trying terminal canvas ${format.container.toUpperCase()} recording: ${error}`,
+          );
+          try {
+            const fallback = createTerminalCanvasVideoCapture();
+            stream = fallback.stream;
+            cleanup = fallback.cleanup;
+            flushFrame = fallback.flushFrame || null;
+            source = fallback.source;
+          } catch (fallbackError) {
+            showDiagnostic(
+              `terminal canvas ${format.container.toUpperCase()} capture unavailable; using GIF fallback: ${fallbackError}`,
+            );
+            screenVideoStarting = false;
+            refreshScreenVideoControl();
+            return startTerminalFallbackRecording();
+          }
+        } else {
+          throw error;
+        }
+      }
+      if (!stream.getVideoTracks().length) {
+        stopScreenVideoTracks(stream);
+        throw new Error('screen capture returned no video track');
+      }
+    } else {
+      const fallback = createTerminalCanvasVideoCapture();
+      stream = fallback.stream;
+      cleanup = fallback.cleanup;
+      flushFrame = fallback.flushFrame || null;
+      source = fallback.source;
+    }
+
+    let recorder;
+    try {
+      recorder = new MediaRecorder(stream, { mimeType: format.mimeType, videoBitsPerSecond: 4_000_000 });
+    } catch (error) {
+      // A canvas stream alone does not guarantee that its WebView can encode
+      // the selected container.  Fall back to native GIF assembly instead of
+      // surfacing Video unavailable when PNG canvas frames are supported.
+      stopScreenVideoTracks(stream, cleanup);
+      stream = null;
+      cleanup = null;
+      showDiagnostic(
+        `could not create a ${format.container.toUpperCase()} MediaRecorder; using GIF fallback: ${error}`,
+      );
+      screenVideoStarting = false;
+      refreshScreenVideoControl();
+      return startTerminalFallbackRecording();
+    }
+
+    const status = await window.fpasoterm.startScreenVideoRecording(format.container);
+    screenVideoRecorder = recorder;
+    screenVideoWriteChain = Promise.resolve();
+    screenVideoWriteError = null;
+    screenVideoStopping = false;
+    screenVideoChunkSequence = 0;
+    screenVideoFlushFrame = flushFrame;
+    recorder.ondataavailable = (event) => appendScreenVideoChunk(recorder, event.data);
+    recorder.onerror = (event) => {
+      screenVideoWriteError ||= event.error || new Error('MediaRecorder reported an unknown error');
+      showDiagnostic(`screen video recorder error: ${screenVideoWriteError}`);
+    };
+    recorder.onstop = () => {
+      finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup);
+    };
+    for (const track of stream.getVideoTracks()) {
+      track.addEventListener('ended', () => {
+        if (screenVideoRecorder === recorder && recorder.state !== 'inactive') {
+          screenVideoStopping = true;
+          refreshScreenVideoControl();
+          recorder.stop();
+        }
+      }, { once: true });
+    }
+    if (source === 'terminal canvas') {
+      // WebKitGTK can produce a complete WebM document for each timeslice.
+      // Appending those documents lets a player see only the first fragment.
+      // A single final Blob is a valid self-contained WebM, so use it for the
+      // canvas fallback even though it temporarily buffers one recording in
+      // the WebView until Video Stop.
+      recorder.start();
+    } else {
+      // OS-authorized display capture uses bounded chunks to avoid retaining a
+      // long desktop recording in WebView memory.
+      recorder.start(1000);
+    }
+    screenVideoStarting = false;
+    refreshScreenVideoControl();
+    showDiagnostic(`screen video recording started source=${source} container=${format.container} path=${status.path} maxBytes=${status.maxBytes}`);
+    return status;
+  } catch (error) {
+    stopScreenVideoTracks(stream, cleanup);
+    screenVideoStarting = false;
+    screenVideoStopping = false;
+    if (screenVideoRecorder) {
+      screenVideoRecorder = null;
+    }
+    screenVideoFlushFrame = null;
+    await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
+    throw error;
+  } finally {
+    if (screenVideoStarting) {
+      screenVideoStarting = false;
+      refreshScreenVideoControl();
+    }
+  }
+}
+
+// Requests a final chunk and lets the recorder's onstop handler do the native
+// flush.  The button remains disabled until that handler completes.
+async function stopScreenVideoRecording() {
+  const recorder = screenVideoRecorder;
+  if (!recorder) {
+    return Promise.resolve(null);
+  }
+  if (recorder.state === 'inactive') {
+    return Promise.resolve(null);
+  }
+  screenVideoStopping = true;
+  refreshScreenVideoControl();
+  try {
+    await screenVideoFlushFrame?.();
+    // `stop()` itself is required to emit the terminal dataavailable event.
+    // Calling requestData immediately beforehand triggers a WebKitGTK ordering
+    // race in which the native destination can be finalized before the actual
+    // final cluster reaches the renderer.
+    recorder.stop();
+  } catch (error) {
+    return Promise.reject(error);
+  }
+  return Promise.resolve(null);
+}
+
+// Starts/stops video from the one explicit Log menu action.  It deliberately
+// has no terminal shortcut so terminal programs retain their key bindings.
+function toggleScreenVideoRecording() {
+  const action = screenVideoRecorder && !screenVideoStopping
+    ? stopScreenVideoRecording()
+    : startScreenVideoRecording();
+  action.catch((error) => {
+    showDiagnostic(`screen video recording failed: ${error}`);
+    setScreenVideoFeedback('Video unavailable');
+    refreshScreenVideoControl();
+  }).finally(() => setWindowMenuOpen(false));
+}
+
+// Opens the Video Show panel. Binary recordings are intentionally not decoded
+// into the text area; the selected file is opened through the OS viewer only
+// after the user presses Open Selected.
+async function showScreenVideoRecording() {
+  await refreshScreenVideoList();
+  renderScreenVideoViewer();
+}
+
 // Shows or hides the log picker controls in the diagnostics toolbar.
 function setTerminalLogPickerVisible(visible) {
   for (const element of [
@@ -4296,6 +5183,22 @@ function setTerminalLogPickerVisible(visible) {
     terminalLogShowSelectedButton,
     terminalLogDeleteSelectedButton,
     terminalLogDeleteAllButton,
+  ]) {
+    if (element) {
+      element.hidden = !visible;
+    }
+  }
+}
+
+// Shows the recording selector only for the Video Show panel. It shares the
+// accessible Diagnostics surface with Log Show, but binary files are never
+// decoded as text and retain their own explicit Open Selected action.
+function setScreenVideoPickerVisible(visible) {
+  for (const element of [
+    screenVideoSelectElement,
+    screenVideoOpenSelectedButton,
+    screenVideoDeleteSelectedButton,
+    screenVideoDeleteAllButton,
   ]) {
     if (element) {
       element.hidden = !visible;
@@ -4415,8 +5318,7 @@ async function showKeyboardShortcutsHelp() {
     `fpasoterm ${version}`,
     `Config: ${activeConfigPath || 'unknown'}`,
     '',
-    `${keybindingLabel('logToggle')}  Start or stop terminal output logging`,
-    `${keybindingLabel('logShow')}  Show terminal output logs`,
+    'Log Start / Log Stop / Log Show  Available from the titlebar Log menu (no keyboard shortcut)',
     `${keybindingLabel('copy')}  Copy selected terminal or log text`,
     `${keybindingLabel('paste')}  Paste clipboard text into the terminal`,
     `${keybindingLabel('menu')}  Open or close the window menu`,
@@ -4499,6 +5401,148 @@ function terminalLogOptionLabel(item) {
   return `${item.active ? '[active] ' : ''}${item.name || item.path} (${kib} KiB)`;
 }
 
+// Formats a finalized recording without pretending that binary video is a
+// terminal-output log. The extension makes the external-viewer expectation
+// clear for GIF, WebM, and MP4 entries alike.
+function screenVideoOptionLabel(item) {
+  const size = Number(item.bytes || 0);
+  const kib = Math.max(1, Math.ceil(size / 1024));
+  return `${item.name || item.path} (${kib} KiB)`;
+}
+
+// Reloads completed recordings and preserves the current selector value.
+async function refreshScreenVideoList(selectedPath = '') {
+  if (!window.fpasoterm?.listScreenVideoRecordings || !screenVideoSelectElement) {
+    throw new Error('native screen video list support is unavailable');
+  }
+  const items = await window.fpasoterm.listScreenVideoRecordings();
+  const previous = selectedPath || screenVideoSelectElement.value || '';
+  screenVideoSelectElement.replaceChildren();
+  for (const item of items) {
+    const option = document.createElement('option');
+    option.value = item.path;
+    option.textContent = screenVideoOptionLabel(item);
+    screenVideoSelectElement.appendChild(option);
+  }
+  if (items.some((item) => item.path === previous)) {
+    screenVideoSelectElement.value = previous;
+  }
+  return items;
+}
+
+// Uses the shared panel in the same style as Log Show while keeping the media
+// itself in the platform-associated viewer selected by the user.
+function renderScreenVideoViewer() {
+  diagnosticsPanelMode = 'screen-video';
+  setTerminalLogPickerVisible(false);
+  showDiagnosticsTextArea();
+  setScreenVideoPickerVisible(true);
+  if (diagnosticsTitleElement) {
+    diagnosticsTitleElement.textContent = 'Screen Video';
+  }
+  const path = screenVideoSelectElement?.value || '';
+  const hasRecordings = (screenVideoSelectElement?.options?.length || 0) > 0;
+  diagnosticsElement.value = path
+    ? `Select a completed screen recording and choose Open Selected.\n\npath: ${path}`
+    : 'No completed screen video recordings were found. Use Log → Video Start, then Video Stop before opening Video Show.';
+  diagnosticsElement.scrollTop = 0;
+  diagnosticsPathElement.textContent = path;
+  if (screenVideoOpenSelectedButton) {
+    screenVideoOpenSelectedButton.disabled = !path;
+  }
+  if (screenVideoDeleteSelectedButton) {
+    screenVideoDeleteSelectedButton.disabled = !path;
+  }
+  if (screenVideoDeleteAllButton) {
+    screenVideoDeleteAllButton.disabled = !hasRecordings;
+  }
+  showDiagnosticsPanel();
+  focusScreenVideoPanel();
+}
+
+// Opens exactly the currently listed recording in the OS default associated
+// application. The Rust command revalidates the directory and filename.
+async function openSelectedScreenVideoRecording() {
+  const path = screenVideoSelectElement?.value || '';
+  if (!path) {
+    throw new Error('no completed screen video recording was selected');
+  }
+  if (!window.fpasoterm?.showScreenVideoRecording) {
+    throw new Error('native screen video show support is unavailable');
+  }
+  const status = await window.fpasoterm.showScreenVideoRecording(path);
+  setScreenVideoFeedback('Video opened');
+  diagnosticsElement.value = `${status.message}\npath: ${status.path}\nbytes: ${status.bytesWritten}`;
+  diagnosticsPathElement.textContent = status.path;
+  showDiagnostic(`screen video recording opened path=${status.path} bytes=${status.bytesWritten}`);
+  return status;
+}
+
+// Deletes one finalized binary recording after an explicit in-panel
+// confirmation. The backend revalidates both filename and logging-directory
+// containment, mirroring the safe Open Selected path.
+async function deleteSelectedScreenVideoRecording() {
+  const path = screenVideoSelectElement?.value || '';
+  if (!path) {
+    showDiagnostic('screen video delete skipped: no recording selected');
+    return null;
+  }
+  const confirmed = await confirmTerminalLogAction(
+    `Delete the selected screen video recording?\n\n${path}\n\nThis cannot be undone.`,
+    screenVideoDeleteSelectedButton,
+  );
+  if (!confirmed) {
+    showDiagnostic('screen video delete canceled');
+    restoreLogPanelFocus(screenVideoDeleteSelectedButton, { repeat: true });
+    return null;
+  }
+  if (!window.fpasoterm?.deleteScreenVideoRecording) {
+    throw new Error('native screen video delete support is unavailable');
+  }
+  const status = await window.fpasoterm.deleteScreenVideoRecording(path);
+  await refreshScreenVideoList();
+  renderScreenVideoViewer();
+  const remainingPath = screenVideoSelectElement?.value || '';
+  diagnosticsElement.value = remainingPath
+    ? `${status.message}\npath: ${status.path}\n\nSelect another recording and choose Open Selected or Delete Selected.`
+    : `${status.message}\npath: ${status.path}\n\nNo completed screen video recordings remain.`;
+  diagnosticsPathElement.textContent = remainingPath;
+  showDiagnostic(`screen video recording deleted path=${status.path}`);
+  restoreLogPanelFocus(remainingPath ? screenVideoSelectElement : closeDiagnosticsButton, { repeat: true });
+  return status;
+}
+
+// Removes all finalized recordings only after an explicit confirmation. Active
+// capture is rejected by the native command, and terminal text logs are never
+// part of this operation.
+async function clearScreenVideoRecordings() {
+  const count = screenVideoSelectElement?.options?.length || 0;
+  if (count === 0) {
+    showDiagnostic('screen video clear skipped: no completed recordings');
+    return null;
+  }
+  const confirmed = await confirmTerminalLogAction(
+    `Delete all ${count} completed screen video recording${count === 1 ? '' : 's'}?\n\nThis cannot be undone. Terminal text logs will not be removed.`,
+    screenVideoDeleteAllButton,
+  );
+  if (!confirmed) {
+    showDiagnostic('screen video clear canceled');
+    restoreLogPanelFocus(screenVideoDeleteAllButton, { repeat: true });
+    return null;
+  }
+  if (!window.fpasoterm?.clearScreenVideoRecordings) {
+    throw new Error('native screen video clear support is unavailable');
+  }
+  const status = await window.fpasoterm.clearScreenVideoRecordings();
+  await refreshScreenVideoList();
+  renderScreenVideoViewer();
+  diagnosticsElement.value = `${status.message}\n\nNo completed screen video recordings remain.`;
+  diagnosticsPathElement.textContent = '';
+  showDiagnostic(`screen video recordings cleared: ${status.message}`);
+  restoreLogPanelFocus(closeDiagnosticsButton, { repeat: true });
+  return status;
+}
+
 // Reloads the selector dropdown and keeps the previous selection when possible.
 async function refreshTerminalLogList(selectedPath = '') {
   const items = await window.fpasoterm.listTerminalLogs();
@@ -4532,7 +5576,7 @@ function renderTerminalLogPreview(preview) {
     lines.push(`path: ${preview.path}`);
   }
   if (preview.bytes === 0) {
-    lines.push(`No terminal output has been captured yet. Use Log Start/Stop or ${keybindingLabel('logToggle')}, run commands, then use Log Show or ${keybindingLabel('logShow')}.`);
+    lines.push('No terminal output has been captured yet. Use Log Start/Stop from the titlebar Log menu, run commands, then use Log Show.');
   }
   if (preview.truncated) {
     lines.push('The log is truncated in this view; showing the latest part only.');
@@ -4634,6 +5678,19 @@ terminalLogShowButton.addEventListener('click', () => {
   showTerminalOutputLogFromMenu();
 });
 
+screenVideoToggleButton.addEventListener('click', () => {
+  toggleScreenVideoRecording();
+});
+
+screenVideoShowButton?.addEventListener('click', () => {
+  showScreenVideoRecording()
+    .catch((error) => {
+      showDiagnostic(`screen video show failed: ${error}`);
+      setScreenVideoFeedback(String(error).includes('no completed') ? 'No video found' : 'Video unavailable');
+    })
+    .finally(() => setWindowMenuOpen(false));
+});
+
 syncStatusButton.addEventListener('click', () => {
   showSyncStatus().catch((error) => showDiagnostic(`sync status failed: ${error}`));
 });
@@ -4728,6 +5785,33 @@ terminalLogShowSelectedButton.addEventListener('click', () => {
   showTerminalOutputLog(terminalLogSelectElement?.value || '').catch((error) => {
     showDiagnostic(`terminal log selected show failed: ${error}`);
   });
+});
+
+screenVideoOpenSelectedButton?.addEventListener('click', () => {
+  openSelectedScreenVideoRecording().catch((error) => {
+    showDiagnostic(`screen video selected open failed: ${error}`);
+    setScreenVideoFeedback(String(error).includes('no completed') ? 'No video found' : 'Video unavailable');
+  });
+});
+
+screenVideoDeleteSelectedButton?.addEventListener('click', () => {
+  deleteSelectedScreenVideoRecording().catch((error) => {
+    showDiagnostic(`screen video selected delete failed: ${error}`);
+    setScreenVideoFeedback('Video delete failed');
+  });
+});
+
+screenVideoDeleteAllButton?.addEventListener('click', () => {
+  clearScreenVideoRecordings().catch((error) => {
+    showDiagnostic(`screen video clear failed: ${error}`);
+    setScreenVideoFeedback('Video delete failed');
+  });
+});
+
+screenVideoSelectElement?.addEventListener('change', () => {
+  if (diagnosticsPanelMode === 'screen-video') {
+    renderScreenVideoViewer();
+  }
 });
 
 terminalLogSearchNextButton.addEventListener('click', () => {
@@ -5029,16 +6113,6 @@ document.addEventListener('keydown', (event) => {
     return;
   }
 
-  if (matchesKeybinding(event, 'logToggle')) {
-    event.preventDefault();
-    toggleTerminalOutputLog();
-    return;
-  }
-
-  if (matchesKeybinding(event, 'logShow')) {
-    event.preventDefault();
-    showTerminalOutputLogFromMenu();
-  }
 }, true);
 
 diagnosticsPanel.addEventListener('keydown', (event) => {
@@ -5737,6 +6811,7 @@ async function initialize() {
   pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();
   await refreshTerminalLogControl();
+  refreshScreenVideoControl();
   await refreshSshfsMountStatus();
   window.setInterval(refreshSshfsMountStatus, 5000);
   if (debugKeys) {
