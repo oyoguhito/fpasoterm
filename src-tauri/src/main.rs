@@ -529,6 +529,191 @@ mod native_webm {
     }
 }
 
+// Intel macOS WKWebView can encode a valid MP4 whose CanvasCapture source is
+// entirely black. The renderer already has a dependable terminal PNG path, so
+// route those frames into AVFoundation instead of WebView MediaRecorder. The
+// Objective-C bridge is compiled only on macOS and uses no bundled runtime.
+#[cfg(target_os = "macos")]
+mod native_mp4 {
+    use super::*;
+    use std::ffi::{CStr, CString};
+    use std::os::raw::{c_char, c_int};
+
+    #[repr(C)]
+    struct WriterHandle {
+        _private: [u8; 0],
+    }
+
+    unsafe extern "C" {
+        fn fpasoterm_macos_mp4_writer_create(
+            path: *const c_char,
+            width: u32,
+            height: u32,
+            frames_per_second: u32,
+            out_error: *mut *mut c_char,
+        ) -> *mut WriterHandle;
+        fn fpasoterm_macos_mp4_writer_append(
+            writer: *mut WriterHandle,
+            pixels: *const u8,
+            length: usize,
+            frame_index: u64,
+            out_error: *mut *mut c_char,
+        ) -> c_int;
+        fn fpasoterm_macos_mp4_writer_finish(
+            writer: *mut WriterHandle,
+            out_error: *mut *mut c_char,
+        ) -> c_int;
+        fn fpasoterm_macos_mp4_writer_destroy(writer: *mut WriterHandle);
+        fn fpasoterm_macos_mp4_error_free(message: *mut c_char);
+    }
+
+    fn take_error(message: *mut c_char, fallback: &str) -> String {
+        if message.is_null() {
+            return fallback.to_string();
+        }
+        let value = unsafe { CStr::from_ptr(message) }
+            .to_string_lossy()
+            .into_owned();
+        unsafe {
+            fpasoterm_macos_mp4_error_free(message);
+        }
+        if value.is_empty() {
+            fallback.to_string()
+        } else {
+            value
+        }
+    }
+
+    pub struct NativeMp4Writer {
+        writer: *mut WriterHandle,
+        width: u32,
+        height: u32,
+        frame_index: u64,
+        finished: bool,
+    }
+
+    // AVFoundation serializes the writer internally. fpasoterm additionally
+    // guards a recording with one Mutex and does not clone this handle.
+    unsafe impl Send for NativeMp4Writer {}
+
+    impl NativeMp4Writer {
+        pub fn new(
+            path: &Path,
+            width: u32,
+            height: u32,
+            frames_per_second: u32,
+        ) -> Result<Self, String> {
+            if width == 0
+                || height == 0
+                || width % 2 != 0
+                || height % 2 != 0
+                || frames_per_second == 0
+            {
+                return Err(
+                    "native MP4 recording dimensions must be positive even values and frame rate must be positive"
+                        .to_string(),
+                );
+            }
+            let path = CString::new(path.to_string_lossy().as_bytes())
+                .map_err(|_| "native MP4 recording path contains a NUL byte".to_string())?;
+            let mut error = std::ptr::null_mut();
+            let writer = unsafe {
+                fpasoterm_macos_mp4_writer_create(
+                    path.as_ptr(),
+                    width,
+                    height,
+                    frames_per_second,
+                    &mut error,
+                )
+            };
+            if writer.is_null() {
+                return Err(take_error(
+                    error,
+                    "AVFoundation could not start native MP4 recording",
+                ));
+            }
+            Ok(Self {
+                writer,
+                width,
+                height,
+                frame_index: 0,
+                finished: false,
+            })
+        }
+
+        pub fn push_rgba(&mut self, pixels: &[u8], width: u32, height: u32) -> Result<(), String> {
+            if self.finished || self.writer.is_null() {
+                return Err("native MP4 recording is already closed".to_string());
+            }
+            if width != self.width || height != self.height {
+                return Err(format!(
+                    "native MP4 recording frame changed from {}x{} to {}x{} pixels",
+                    self.width, self.height, width, height
+                ));
+            }
+            let expected = usize::try_from(width)
+                .ok()
+                .and_then(|width| {
+                    usize::try_from(height)
+                        .ok()
+                        .and_then(|height| width.checked_mul(height))
+                })
+                .and_then(|pixels| pixels.checked_mul(4))
+                .ok_or_else(|| "native MP4 recording frame is too large".to_string())?;
+            if pixels.len() != expected {
+                return Err(
+                    "native MP4 recording frame does not match its canvas dimensions".to_string(),
+                );
+            }
+            let mut error = std::ptr::null_mut();
+            let appended = unsafe {
+                fpasoterm_macos_mp4_writer_append(
+                    self.writer,
+                    pixels.as_ptr(),
+                    pixels.len(),
+                    self.frame_index,
+                    &mut error,
+                )
+            };
+            if appended == 0 {
+                return Err(take_error(
+                    error,
+                    "AVFoundation could not append a native MP4 frame",
+                ));
+            }
+            self.frame_index = self.frame_index.saturating_add(1);
+            Ok(())
+        }
+
+        pub fn finish(&mut self) -> Result<(), String> {
+            if self.finished {
+                return Ok(());
+            }
+            self.finished = true;
+            let mut error = std::ptr::null_mut();
+            let completed = unsafe { fpasoterm_macos_mp4_writer_finish(self.writer, &mut error) };
+            if completed == 0 {
+                return Err(take_error(
+                    error,
+                    "AVFoundation could not finalize native MP4 recording",
+                ));
+            }
+            Ok(())
+        }
+    }
+
+    impl Drop for NativeMp4Writer {
+        fn drop(&mut self) {
+            if !self.writer.is_null() {
+                unsafe {
+                    fpasoterm_macos_mp4_writer_destroy(self.writer);
+                }
+                self.writer = std::ptr::null_mut();
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 // Complete runtime configuration shared with the renderer.
@@ -990,6 +1175,17 @@ struct ScreenVideoRecordingStatus {
     message: String,
 }
 
+// A small, non-sensitive runtime fact used where WebView user-agent strings
+// cannot distinguish Intel macOS from Apple Silicon (both commonly report
+// MacIntel). Keeping it native avoids browser-UA heuristics in video fallback
+// decisions.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimePlatform {
+    os: String,
+    architecture: String,
+}
+
 // Active terminal output log file and byte counter.
 struct TerminalLog {
     path: String,
@@ -1000,10 +1196,10 @@ struct TerminalLog {
     normalizer: TerminalTextNormalizer,
 }
 
-// Active video file written either from WebView MediaRecorder chunks or from
-// the built-in PNG-to-GIF fallback. It is intentionally separate from
-// TerminalLog: text logs may be disabled or cleared without touching a
-// user-created screen recording.
+// Active video file written from WebView MediaRecorder chunks, native terminal
+// PNG frames, or the built-in PNG-to-GIF fallback. It is intentionally
+// separate from TerminalLog: text logs may be disabled or cleared without
+// touching a user-created screen recording.
 enum ScreenVideoRecordingWriter {
     Media(File),
     Gif {
@@ -1015,6 +1211,12 @@ enum ScreenVideoRecordingWriter {
     #[cfg(target_os = "linux")]
     NativeWebm {
         writer: native_webm::NativeWebmWriter,
+        width: u32,
+        height: u32,
+    },
+    #[cfg(target_os = "macos")]
+    NativeMp4 {
+        writer: native_mp4::NativeMp4Writer,
         width: u32,
         height: u32,
     },
@@ -1389,6 +1591,7 @@ fn main() {
             screen_video_recording_show,
             screen_video_recording_delete,
             screen_video_recording_clear,
+            runtime_platform,
             diagnostics_copy,
             diagnostics_path,
             diagnostics_log,
@@ -1431,12 +1634,20 @@ fn main() {
         .expect("failed to run fpasoterm");
 }
 
-// Both the direct rustls dependency and a transitive dependency enable a
-// crypto provider.  Select aws-lc-rs once, before any ClientConfig builder is
-// used, so RDP bridge tasks cannot panic when rustls sees both features.
+// Both the direct rustls dependency and a transitive dependency enable the
+// ring crypto provider. Select it once before any ClientConfig builder is
+// used, so RDP bridge tasks cannot panic when rustls sees multiple providers.
 fn install_default_rustls_crypto_provider() {
     if rustls::crypto::CryptoProvider::get_default().is_none() {
-        let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
+        let _ = rustls::crypto::ring::default_provider().install_default();
+    }
+}
+
+#[tauri::command]
+fn runtime_platform() -> RuntimePlatform {
+    RuntimePlatform {
+        os: std::env::consts::OS.to_string(),
+        architecture: std::env::consts::ARCH.to_string(),
     }
 }
 
@@ -8225,7 +8436,7 @@ fn screen_video_recording_file_name(
 fn screen_video_recording_extension(container: &str) -> Result<&'static str, String> {
     match container {
         "webm" | "webm-gstreamer" => Ok("webm"),
-        "mp4" => Ok("mp4"),
+        "mp4" | "mp4-avfoundation" => Ok("mp4"),
         "gif" => Ok("gif"),
         _ => Err(format!("unsupported screen video container {container:?}")),
     }
@@ -8305,6 +8516,28 @@ fn native_webm_recording_geometry(
     Ok((width, height, frames_per_second))
 }
 
+#[cfg(target_os = "macos")]
+fn native_mp4_recording_geometry(
+    request: &ScreenVideoRecordingStartRequest,
+) -> Result<(u32, u32, u32), String> {
+    let width = request
+        .width
+        .ok_or_else(|| "native MP4 recording requires a canvas width".to_string())?;
+    let height = request
+        .height
+        .ok_or_else(|| "native MP4 recording requires a canvas height".to_string())?;
+    if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+        return Err("native MP4 recording needs positive even canvas dimensions".to_string());
+    }
+    let frame_delay_centiseconds = u32::from(
+        request
+            .frame_delay_centiseconds
+            .unwrap_or(20)
+            .clamp(1, 6000),
+    );
+    Ok((width, height, (100 / frame_delay_centiseconds).clamp(1, 60)))
+}
+
 fn screen_video_recording_writer(
     request: &ScreenVideoRecordingStartRequest,
     _path: &Path,
@@ -8319,6 +8552,19 @@ fn screen_video_recording_writer(
         drop(file);
         return Ok(ScreenVideoRecordingWriter::NativeWebm {
             writer: native_webm::NativeWebmWriter::new(_path, width, height, frames_per_second)?,
+            width,
+            height,
+        });
+    }
+    #[cfg(target_os = "macos")]
+    if request.container == "mp4-avfoundation" {
+        let (width, height, frames_per_second) = native_mp4_recording_geometry(request)?;
+        // AVAssetWriter must create its own output path. `create_new` above
+        // reserved the unique name, and the Objective-C bridge removes only
+        // that empty reservation immediately before opening the writer.
+        drop(file);
+        return Ok(ScreenVideoRecordingWriter::NativeMp4 {
+            writer: native_mp4::NativeMp4Writer::new(_path, width, height, frames_per_second)?,
             width,
             height,
         });
@@ -8521,6 +8767,10 @@ fn screen_video_recording_start(
     if request.container == "webm-gstreamer" {
         native_webm_recording_geometry(&request)?;
     }
+    #[cfg(target_os = "macos")]
+    if request.container == "mp4-avfoundation" {
+        native_mp4_recording_geometry(&request)?;
+    }
     let (path, file) = create_screen_video_recording_file(&request.container)?;
     let writer = match screen_video_recording_writer(&request, &path, file) {
         Ok(writer) => writer,
@@ -8622,6 +8872,29 @@ fn append_screen_video_recording_bytes(
             // size is returned after EOS in screen_video_recording_stop.
             recording.bytes_written += bytes.len() as u64;
         }
+        #[cfg(target_os = "macos")]
+        ScreenVideoRecordingWriter::NativeMp4 {
+            writer,
+            width,
+            height,
+        } => {
+            let image = image::load_from_memory_with_format(bytes, ImageFormat::Png)
+                .map_err(|error| format!("invalid native MP4 recording PNG frame: {error}"))?
+                .to_rgba8();
+            if image.width() != *width || image.height() != *height {
+                return Err(format!(
+                    "native MP4 recording frame changed from {}x{} to {}x{} pixels",
+                    width,
+                    height,
+                    image.width(),
+                    image.height()
+                ));
+            }
+            writer.push_rgba(&image.into_raw(), *width, *height)?;
+            // H.264 output is buffered by AVFoundation. Count bounded input
+            // bytes here; stop returns the final on-disk MP4 size.
+            recording.bytes_written += bytes.len() as u64;
+        }
     }
     Ok(())
 }
@@ -8679,6 +8952,10 @@ fn screen_video_recording_stop(
             }
             #[cfg(target_os = "linux")]
             ScreenVideoRecordingWriter::NativeWebm { mut writer, .. } => {
+                writer.finish()?;
+            }
+            #[cfg(target_os = "macos")]
+            ScreenVideoRecordingWriter::NativeMp4 { mut writer, .. } => {
                 writer.finish()?;
             }
         }
@@ -10496,7 +10773,7 @@ async fn connect_rdp_clean_path_target(
         .map_err(|_| "timed out sending RDP X.224 request".to_string())?
         .map_err(|error| format!("could not send RDP X.224 request: {error}"))?;
     let x224_response = read_rdp_x224_response(&mut stream).await?;
-    let provider = rustls::crypto::aws_lc_rs::default_provider();
+    let provider = rustls::crypto::ring::default_provider();
     let verifier = RdpCleanPathCertificateVerifier {
         supported: provider.signature_verification_algorithms,
     };
@@ -12025,6 +12302,10 @@ maxSourceBytes = 8388608
             "video-work_window-42-123-3.gif"
         );
         assert_eq!(screen_video_recording_extension("mp4"), Ok("mp4"));
+        assert_eq!(
+            screen_video_recording_extension("mp4-avfoundation"),
+            Ok("mp4")
+        );
         assert_eq!(screen_video_recording_extension("gif"), Ok("gif"));
         assert!(is_screen_video_recording_file_name(
             "video-fpasoterm-42-123.gif"
@@ -12104,6 +12385,8 @@ maxSourceBytes = 8388608
             ScreenVideoRecordingWriter::Media(_) => panic!("expected GIF encoder"),
             #[cfg(target_os = "linux")]
             ScreenVideoRecordingWriter::NativeWebm { .. } => panic!("expected GIF encoder"),
+            #[cfg(target_os = "macos")]
+            ScreenVideoRecordingWriter::NativeMp4 { .. } => panic!("expected GIF encoder"),
         }
         let output = fs::read(&path).expect("read GIF fixture");
         assert!(output.starts_with(b"GIF89a"));
