@@ -1,6 +1,6 @@
 [package]
 name = "fpasoterm"
-version = "1.6.14"
+version = "1.6.15"
 description = "Cross-platform terminal with Japanese IME support."
 authors = ["oyoguhito"]
 edition = "2021"
@@ -22,16 +22,22 @@ incremental = true
 debug = 0
 
 [build-dependencies]
+cc = "1"
 tauri-build = { version = "2.5.2", features = [] }
 
 [dependencies]
 base64 = "0.22"
 encoding_rs = "0.8"
 futures-util = "0.3"
+gif = "0.14"
 hmac = "0.12"
+image = { version = "0.25", default-features = false, features = ["png"] }
 portable-pty = "0.9.0"
 rand = "0.8"
-rustls = "0.23"
+# Use rustls' portable ring provider rather than aws-lc-rs. Besides avoiding
+# the macOS x64 compact-unwind linker warning emitted by aws-lc assembly, this
+# keeps the explicit provider used by the RDP bridge aligned with ureq.
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
 rustls-native-certs = "0.8"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
@@ -39,7 +45,7 @@ sha2 = "0.10"
 tauri = { version = "2.9.2", features = ["image-png", "macos-private-api", "protocol-asset"] }
 tauri-plugin-notification = "=2.3.3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
-tokio-rustls = "0.26"
+tokio-rustls = { version = "0.26", default-features = false, features = ["logging", "tls12", "ring"] }
 tokio-tungstenite = "0.24"
 toml = "0.9.8"
 ureq = "2.12.1"
@@ -49,6 +55,12 @@ libc = "0.2"
 
 [target.'cfg(all(unix, not(target_os = "macos")))'.dependencies]
 gtk = "0.18"
+
+# ChromeOS/Linux already ships the GStreamer runtime needed by WebKitGTK.  Use
+# its appsrc + WebM pipeline for terminal PNG-frame recordings, rather than
+# relying on WebKit's CanvasCaptureMediaStream implementation.
+[target.'cfg(target_os = "linux")'.dependencies]
+libloading = "=0.7.4"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_NetworkManagement_WNet", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_DataExchange", "Win32_System_Diagnostics_ToolHelp", "Win32_System_Memory", "Win32_System_Threading", "Win32_UI_Shell", "Win32_UI_WindowsAndMessaging"] }

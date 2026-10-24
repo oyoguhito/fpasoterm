@@ -1977,7 +1977,7 @@ function updateConfig(options) {
   console.log(`updated ${targetPath}`);
   console.log(`added ${missing.length} default setting(s)`);
   if (migrated) {
-    console.log('migrated Log Show from Ctrl+Shift+P to Ctrl+Shift+l');
+    console.log('removed retired Log Start/Log Show shortcuts; use the titlebar Log menu');
   }
   if (backupPath) {
     console.log(`backed up previous config ${backupPath}`);
@@ -2331,6 +2331,7 @@ async function setupSync(options) {
         directory: logDirectory,
         autoStart: currentLogging.autoStart ?? false,
         maxBytes: currentLogging.maxBytes ?? 10485760,
+        videoMaxBytes: currentLogging.videoMaxBytes ?? 2147483648,
       },
     }, targetPath);
 

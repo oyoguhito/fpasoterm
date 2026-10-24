@@ -524,10 +524,25 @@ Run `fpasoterm --setup-sync` for an interactive first-time setup.
 On Windows source checkouts, run `node .\bin\fpasoterm --setup-sync`.
 Use `fpasoterm --sync-status` to inspect folder health and channels, or
 `fpasoterm --sync-clean` to remove only expired sync command files.
-Terminal output logs can be written from the hamburger menu with `Log Start (^s)` /
-`Log Stop (^s)` or `Ctrl+Shift+s`, and inspected with `Log Show (^l)` or `Ctrl+Shift+l`.
+Terminal output logs can be written from the hamburger menu with `Log Start` /
+`Log Stop` and inspected with `Log Show`. These actions intentionally have no
+application-wide keyboard shortcut, leaving `Ctrl+Shift+s` and `Ctrl+Shift+l`
+available to terminal applications.
 `Log Show` displays the active log or the last log closed by `Log Stop`. Point
 `logging.directory` at the same synced folder when you want those logs shared.
+`Log → Video Start` / `Video Stop` is a separate, built-in video-recording
+feature. Where the platform picker is available, it records the screen or
+window you select; otherwise it records only the rendered fpasoterm terminal
+surface. It saves video-only WebM or MP4 when the WebView supports
+`MediaRecorder`. On Linux/ChromeOS terminal fallback, it instead uses the
+in-process GStreamer runtime to encode reliable PNG snapshots as WebM; GIF is
+used only when that runtime path is unavailable. It has no keyboard shortcut
+and never records automatically. See
+[Screen video recording](docs/video-recording.en.md)
+for permissions, the `videoMaxBytes` limit, platform limitations, and the
+`Log → Video Show` panel, which lists completed recordings and can open or,
+after confirmation, delete the selected GIF/WebM/MP4 or delete all completed
+video recordings. Text logs are unaffected.
 The log panel includes a search field and `Search` button for selecting and
 scrolling to the next matching string in the displayed log. `N` moves to the
 next match, `P` moves to the previous match, and `j` / `k` provide the same
