@@ -92,8 +92,6 @@ const defaultConfig = Object.freeze({
   },
   keybindings: {
     prefix: 'Mod+Shift',
-    logToggle: 's',
-    logShow: 'l',
     copy: 'c',
     paste: 'v',
     menu: 'm',
@@ -128,6 +126,8 @@ const defaultConfig = Object.freeze({
     directory: '',
     autoStart: false,
     maxBytes: 10485760,
+    // Screen-recording WebM files have a separate, intentionally higher cap.
+    videoMaxBytes: 2147483648,
   },
   security: {
     // OSC 52 is emitted by trusted terminal tools such as tmux and herdr.
@@ -197,11 +197,11 @@ function migrateLegacyLogKeybindings(config) {
     return config;
   }
   const legacyBindings = {
-    logShow: ['P', 'l'], logToggle: ['S', 's'], copy: ['C', 'c'], paste: ['V', 'v'],
+    copy: ['C', 'c'], paste: ['V', 'v'],
     menu: ['M', 'm'], help: ['H', 'h'], newWindow: ['N', 'n'], broadcast: ['B', 'b'],
     kill: ['K', 'k'], tile: ['T', 't'], closeAll: ['X', 'x'],
   };
-  const needsMigration = keybindings.logMenu === 'L'
+  const needsMigration = ['logMenu', 'logShow', 'logToggle'].some((name) => Object.hasOwn(keybindings, name))
     || keybindings.terminalReset === 'u'
     || keybindings.terminalReset === 'Ctrl+Alt+u'
     || Object.entries(legacyBindings).some(([name, [legacy]]) => keybindings[name] === legacy);
@@ -214,8 +214,8 @@ function migrateLegacyLogKeybindings(config) {
       migrated.keybindings[name] = replacement;
     }
   }
-  if (migrated.keybindings.logMenu === 'L') {
-    delete migrated.keybindings.logMenu;
+  for (const name of ['logMenu', 'logShow', 'logToggle']) {
+    delete migrated.keybindings[name];
   }
   // Prior defaults conflict with GTK Unicode/IME input or were less convenient
   // on Chromebook keyboards. Preserve all other user-selected values.
@@ -327,8 +327,6 @@ brightWhite = "#ffffff"
 # "Ctrl+Alt+KeyN". Use KeyN-style values for physical-key bindings.
 [keybindings]
 prefix = "Mod+Shift"
-logToggle = "s"
-logShow = "l"
 copy = "c"
 paste = "v"
 menu = "m"
@@ -371,6 +369,7 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
+videoMaxBytes = 2147483648
 
 # OSC safety controls. OSC 52 can change the OS clipboard, so disable it when
 # terminal output is untrusted. OSC 7/133 only update local diagnostics.
@@ -597,6 +596,7 @@ function validateUserConfig(targetPath = configPath(), profileName = process.env
     ['terminal.lineHeight', userConfig.terminal?.lineHeight],
     ['terminal.scrollback', userConfig.terminal?.scrollback],
     ['logging.maxBytes', userConfig.logging?.maxBytes],
+    ['logging.videoMaxBytes', userConfig.logging?.videoMaxBytes],
   ]) {
     if (value !== undefined && (typeof value !== 'number' || !Number.isFinite(value) || value <= 0)) {
       result.warnings.push(`${key} should be a positive number`);

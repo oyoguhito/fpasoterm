@@ -76,8 +76,6 @@ repeatedTextWindowMs = 140
 # "Ctrl+Alt+KeyN". KeyN-style values bind by physical keyboard position.
 [keybindings]
 prefix = "Mod+Shift"
-logToggle = "s"
-logShow = "l"
 copy = "c"
 paste = "v"
 menu = "m"
@@ -109,6 +107,8 @@ enabled = true
 directory = ""
 autoStart = false
 maxBytes = 10485760
+# Maximum size of one Video Start / Video Stop WebM recording (2 GiB).
+videoMaxBytes = 2147483648
 
 # OSC safety controls. OSC 52 can change the OS clipboard, so disable it when
 # terminal output is untrusted. OSC 7/133 only update local diagnostics.

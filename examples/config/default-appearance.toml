@@ -22,8 +22,6 @@ selectionBackground = "#35506b"
 
 [keybindings]
 prefix = "Mod+Shift"
-logToggle = "s"
-logShow = "l"
 copy = "c"
 paste = "v"
 menu = "m"

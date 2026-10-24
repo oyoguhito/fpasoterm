@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.6.15
+
+- Added a built-in screen-video recording workflow with Video Start/Stop and
+  Video Show, including safe selected/all recording deletion controls.
+- Added a ChromeOS/Linux terminal-surface WebM path that sends reliable PNG
+  snapshots to the in-process GStreamer VP8/WebM encoder, with an animated GIF
+  fallback when the required runtime plugins are unavailable.
+- On Intel macOS, record the same terminal PNG frames through the system
+  AVFoundation H.264/MP4 writer instead of WKWebView CanvasCapture, while
+  retaining the normal WebM MediaRecorder path on Apple Silicon.
+- Improved diagnostic-panel focus behavior, terminal graphics cleanup, and
+  plugin catalog update discovery and batch updates.
+
 ## 1.6.14
 
 - Enabled bounded SIXEL DCS graphics by default through the retained

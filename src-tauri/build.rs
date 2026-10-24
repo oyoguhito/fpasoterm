@@ -137,5 +137,21 @@ fn main() {
         "cargo:rustc-env=FPASOTERM_BUILD_COMMIT={}",
         build_commit(repository_root)
     );
+    #[cfg(target_os = "macos")]
+    {
+        // Keep Intel macOS recording independent of WKWebView's unreliable
+        // CanvasCaptureMediaStream. This bridge sends trusted RGBA terminal
+        // frames to the OS AVFoundation H.264/MP4 writer; it is not built on
+        // Linux, Windows, or macOS arm64's normal WebM path.
+        println!("cargo:rerun-if-changed=src/macos_video.m");
+        cc::Build::new()
+            .file("src/macos_video.m")
+            .flag("-fobjc-arc")
+            .flag("-fblocks")
+            .compile("fpasoterm_macos_video");
+        for framework in ["AVFoundation", "CoreMedia", "CoreVideo", "Foundation"] {
+            println!("cargo:rustc-link-lib=framework={framework}");
+        }
+    }
     tauri_build::build();
 }

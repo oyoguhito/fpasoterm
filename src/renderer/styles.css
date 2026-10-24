@@ -95,6 +95,7 @@ body {
 }
 
 #terminal-log-status,
+#screen-video-status,
 #sshfs-mount-status {
   margin-left: 6px;
   color: #f5d76e;
@@ -103,6 +104,7 @@ body {
 }
 
 #terminal-log-status[hidden],
+#screen-video-status[hidden],
 #sshfs-mount-status[hidden] {
   display: none;
 }
@@ -854,7 +856,8 @@ body {
   flex-wrap: wrap;
 }
 
-#terminal-log-select {
+#terminal-log-select,
+#screen-video-select {
   max-width: min(260px, 28vw);
   height: 22px;
   min-width: 120px;
@@ -898,6 +901,9 @@ body {
 }
 
 #terminal-log-show-selected,
+#screen-video-open-selected,
+#screen-video-delete-selected,
+#screen-video-delete-all,
 #terminal-log-search-next,
 #diagnostics-filter-apply,
 #plugin-catalog-updates-only,
