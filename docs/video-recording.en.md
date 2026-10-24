@@ -58,26 +58,37 @@ the GStreamer runtime already used by WebKitGTK: `appsrc → VP8 → WebM` at
 which a syntactically valid WebM contains only stale terminal paints. It needs
 no `gst-launch`, ffmpeg, Chromium, or separate recorder installation. A
 minimal Linux image without the GStreamer appsrc/VP8/WebM plugins falls back to
-the built-in animated GIF writer. macOS and Windows retain the browser canvas
-MediaRecorder fallback. PNG is an internal frame format, never the completed
-recording file. **Video unavailable** is shown only when neither the selected
-platform path nor PNG canvas frames can be created.
+the built-in animated GIF writer. Apple Silicon macOS has been observed to
+produce a valid WebM through its normal WebView `MediaRecorder` path. Intel
+macOS WKWebView can instead report MP4 support but encode an all-black
+CanvasCapture movie. Only on Intel macOS, fpasoterm avoids that bad path and
+sends verified terminal-surface PNG frames to the built-in macOS AVFoundation
+H.264/MP4 writer. It records only the fpasoterm terminal and does not open a
+screen/window picker. If AVFoundation cannot initialize, it falls back to the
+built-in animated GIF writer. Windows retains the browser canvas MediaRecorder
+fallback. PNG is an internal frame format, never the completed recording file.
+**Video unavailable** is shown only when the applicable platform path cannot
+create PNG canvas frames.
 
 Some WebKitGTK builds produce a complete WebM document for each MediaRecorder
 timeslice; concatenating those documents makes many players stop at the first
 fragment. The Linux/ChromeOS terminal fallback does not concatenate those
 payloads: it streams PNG snapshots directly into one native WebM muxer. The
-macOS/Windows terminal-surface MediaRecorder fallback buffers one recording
-until **Video Stop** and writes its single final payload. Use moderate
-recording durations on memory-constrained systems. OS-picker screen/window
-captures continue to stream bounded chunks.
+Windows and Apple Silicon macOS terminal-surface MediaRecorder fallbacks buffer
+one recording until **Video Stop** and write a single final payload. Intel
+macOS writes bounded terminal PNG frames to AVFoundation's H.264 MP4 encoder;
+only an AVFoundation setup failure falls back to GIF. Use moderate recording
+durations on memory-constrained systems. OS-picker screen/window captures
+continue to stream bounded chunks where that path is used.
 
-On macOS, grant the fpasoterm application Screen Recording permission in
-**System Settings → Privacy & Security → Screen & System Audio Recording** if
-the system requests it. On Linux and ChromeOS, availability depends on the
-installed WebKitGTK/WebView and portal setup. Windows WebView2 availability
-depends on the installed runtime and its screen-capture support. Test the
-picker on each target platform before relying on recording in a workflow.
+On Intel macOS, the current built-in recording route is terminal-only and
+needs no Screen Recording permission. Use the system screen recorder when a
+full desktop or another application's window is required. Apple Silicon macOS
+continues to use normal WebView media capture and may request Screen Recording
+permission. On Linux and ChromeOS, availability depends on the installed
+WebKitGTK/WebView and portal setup. Windows WebView2 availability depends on
+the installed runtime and its screen-capture support. Test the picker on each
+target platform before relying on recording in a workflow.
 
 Audio, microphone capture, automatic capture, editing, streaming, and a
 video-library UI are out of scope for this first version. GIF fallback files

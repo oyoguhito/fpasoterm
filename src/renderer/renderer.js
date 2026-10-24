@@ -355,6 +355,8 @@ let screenVideoFlushFrame = null;
 let screenVideoStarting = false;
 let screenVideoFeedback = '';
 let screenVideoFeedbackTimer = null;
+let screenVideoRuntimePlatformPromise = null;
+let screenVideoRuntimePlatformInfo = null;
 
 function setTerminalGraphicsZoomVisible(visible) {
   if (terminalGraphicsHideTimer !== null) {
@@ -566,6 +568,7 @@ function installTauriApiAdapter() {
     showScreenVideoRecording: (path) => invoke('screen_video_recording_show', { request: { path: path || null } }),
     deleteScreenVideoRecording: (path) => invoke('screen_video_recording_delete', { request: { path: path || null } }),
     clearScreenVideoRecordings: () => invoke('screen_video_recording_clear'),
+    runtimePlatform: () => invoke('runtime_platform'),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
@@ -4881,6 +4884,34 @@ function shouldUseNativeTerminalWebmRecording() {
   return /linux/i.test(platform);
 }
 
+// The browser UA reports `MacIntel` for both Intel and Apple Silicon, so ask
+// the trusted native runtime for the actual architecture while the application
+// starts. Do not await this from Video Start: getDisplayMedia must execute in
+// the original user-activation task or the operating-system picker is denied.
+function primeScreenVideoRuntimePlatform() {
+  if (screenVideoRuntimePlatformPromise === null) {
+    screenVideoRuntimePlatformPromise = Promise.resolve(
+      window.fpasoterm?.runtimePlatform?.(),
+    ).then((platform) => {
+      screenVideoRuntimePlatformInfo = platform || null;
+      return screenVideoRuntimePlatformInfo;
+    }).catch(() => null);
+  }
+  return screenVideoRuntimePlatformPromise;
+}
+
+// Intel macOS WKWebView can advertise an MP4 MediaRecorder while its
+// CanvasCapture stream produces an entirely black movie. Apple Silicon has
+// been observed to produce a valid WebM through the ordinary MediaRecorder
+// path, so this workaround must be x86_64-specific rather than applying to
+// every macOS runtime. A PNG snapshot has a reliable pixel path and macOS
+// AVFoundation can turn it into a playable H.264 MP4 without canvas capture.
+function shouldUseReliableMacTerminalRasterRecording() {
+  return isMacPlatform()
+    && screenVideoRuntimePlatformInfo?.os === 'macos'
+    && screenVideoRuntimePlatformInfo.architecture === 'x86_64';
+}
+
 async function startTerminalNativeWebmRecording() {
   try {
     return await startTerminalRasterRecording('webm-gstreamer', 'native WebM');
@@ -4892,7 +4923,22 @@ async function startTerminalNativeWebmRecording() {
   }
 }
 
+// AVFoundation is present on every supported macOS installation. It consumes
+// the same trusted PNG terminal frames as the GIF fallback, but writes H.264
+// into an MP4 container without depending on WKWebView MediaRecorder.
+async function startTerminalNativeMp4Recording() {
+  try {
+    return await startTerminalRasterRecording('mp4-avfoundation', 'native MP4');
+  } catch (error) {
+    showDiagnostic(`native MP4 recording unavailable; using GIF fallback: ${error}`);
+    return startTerminalGifRecording();
+  }
+}
+
 function startTerminalFallbackRecording() {
+  if (shouldUseReliableMacTerminalRasterRecording()) {
+    return startTerminalNativeMp4Recording();
+  }
   return shouldUseNativeTerminalWebmRecording()
     ? startTerminalNativeWebmRecording()
     : startTerminalGifRecording();
@@ -4969,6 +5015,13 @@ async function startScreenVideoRecording() {
       || !window.fpasoterm?.appendScreenVideoRecording
       || !window.fpasoterm?.stopScreenVideoRecording) {
     throw new Error('native screen video recording support is unavailable');
+  }
+  // Do this before probing MediaRecorder or getDisplayMedia. WKWebView's MP4
+  // CanvasCapture path can complete successfully while all encoded pixels are
+  // black; a later fallback cannot repair the already-written movie.
+  if (shouldUseReliableMacTerminalRasterRecording()) {
+    showDiagnostic('Intel macOS WKWebView video capture uses PNG/AVFoundation terminal frames to avoid blank MP4 recordings');
+    return startTerminalNativeMp4Recording();
   }
   const format = screenVideoFormat();
   // Some WebKitGTK builds expose neither MediaRecorder nor canvas.captureStream.
@@ -6807,6 +6860,7 @@ async function initialize() {
     showTerminalError('fpasoterm backend API is not available. Start the app through the Tauri runtime.');
     return;
   }
+  primeScreenVideoRuntimePlatform();
   await loadRuntimeConfig();
   pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();

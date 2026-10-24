@@ -7,6 +7,9 @@
 - Added a ChromeOS/Linux terminal-surface WebM path that sends reliable PNG
   snapshots to the in-process GStreamer VP8/WebM encoder, with an animated GIF
   fallback when the required runtime plugins are unavailable.
+- On Intel macOS, record the same terminal PNG frames through the system
+  AVFoundation H.264/MP4 writer instead of WKWebView CanvasCapture, while
+  retaining the normal WebM MediaRecorder path on Apple Silicon.
 - Improved diagnostic-panel focus behavior, terminal graphics cleanup, and
   plugin catalog update discovery and batch updates.
 
