@@ -1325,6 +1325,10 @@ fn cli_help_text() -> String {
         "Use this local fpasoterm-plugins checkout or its ports directory.",
     )
     .replace(
+        "or its ports directory.\n      --plugin-install-file",
+        "or its ports directory.\n      --plugin-tcp-target <host:port|tcp://host:port>\n                                Set the one RDP or noVNC port target while installing it.\n      --plugin-install-file",
+    )
+    .replace(
         "      --force                   Replace an existing file during a plugin install.",
         "      --plugin-update-all       Update installed official public plugins with newer catalog versions.\n      --force                   Replace an existing file during a plugin install.",
     );
@@ -1710,6 +1714,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-disable",
         "--plugin-install",
         "--plugin-ports-dir",
+        "--plugin-tcp-target",
         "--plugin-install-file",
         "--plugin-run",
         "--plugin-args",
@@ -1821,11 +1826,17 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         return Err("use only one of --plugin-install or --plugin-install-file".to_string());
     }
     if plugin_install_count == 0
-        && args
-            .iter()
-            .any(|argument| argument == "--force" || argument == "--enable")
+        && args.iter().any(|argument| {
+            argument == "--force"
+                || argument == "--enable"
+                || argument == "--plugin-tcp-target"
+                || argument.starts_with("--plugin-tcp-target=")
+        })
     {
-        return Err("--force and --enable require a --plugin-install command".to_string());
+        return Err(
+            "--force, --enable, and --plugin-tcp-target require a --plugin-install command"
+                .to_string(),
+        );
     }
     if args.iter().any(|argument| {
         argument == "--plugin-ports-dir" || argument.starts_with("--plugin-ports-dir=")
@@ -5583,6 +5594,135 @@ fn public_plugin_version_at_least(current: &str, required: &str) -> bool {
     }
 }
 
+const RDP_LOCAL_BRIDGE_PORT_ID: &str = "integration/rdp-local-bridge";
+const NOVNC_LOCAL_BRIDGE_PORT_ID: &str = "integration/novnc-local-bridge";
+const PLUGIN_TCP_TARGET_HEADER: &str = "// @fpasoterm-plugin allowed-tcp-targets:";
+
+fn plugin_tcp_target_port_supported(id: &str) -> bool {
+    matches!(id, RDP_LOCAL_BRIDGE_PORT_ID | NOVNC_LOCAL_BRIDGE_PORT_ID)
+}
+
+// Accept the short host:port spelling for the common case, but persist and
+// compare the explicit canonical URI that the native bridge enforces.
+fn normalize_plugin_tcp_target(value: &str, option: &str) -> Result<PluginTcpTarget, String> {
+    let value = value.trim();
+    let candidate = if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("tcp://{value}")
+    };
+    parse_plugin_tcp_target(&candidate)
+        .ok_or_else(|| format!("{option} must be host:port, tcp://host:port, or tls://host:port"))
+}
+
+// Reads the one exact capability target baked into a generated RDP/noVNC
+// source. Reconfiguration refuses a source with zero or multiple declarations
+// rather than guessing which network capability a plugin intended to receive.
+fn plugin_tcp_target_from_source(
+    source: &str,
+    id: &str,
+) -> Result<(String, PluginTcpTarget), String> {
+    let values = source
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(PLUGIN_TCP_TARGET_HEADER))
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if values.len() != 1 {
+        return Err(format!(
+            "{id} must declare exactly one allowed-tcp-targets value"
+        ));
+    }
+    let raw = values[0].to_string();
+    let target = normalize_plugin_tcp_target(&raw, &format!("{id} source target"))?;
+    if raw != target.canonical() {
+        return Err(format!(
+            "{id} source target must be a canonical tcp://host:port or tls://host:port value"
+        ));
+    }
+    Ok((raw, target))
+}
+
+fn replace_exactly_once(
+    source: String,
+    needle: &str,
+    replacement: &str,
+    label: &str,
+) -> Result<String, String> {
+    if source.matches(needle).count() != 1 {
+        return Err(format!(
+            "{label} does not contain exactly one expected target declaration"
+        ));
+    }
+    Ok(source.replacen(needle, replacement, 1))
+}
+
+// Keeps the source's declared native capability and its JavaScript bridge call
+// synchronized. The generated sources differ only in their bridge expression.
+fn configure_plugin_tcp_target_source(
+    source: String,
+    id: &str,
+    target: &PluginTcpTarget,
+) -> Result<String, String> {
+    if !plugin_tcp_target_port_supported(id) {
+        return Ok(source);
+    }
+    if id == RDP_LOCAL_BRIDGE_PORT_ID && target.protocol != "tcp" {
+        return Err(
+            "--plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port"
+                .to_string(),
+        );
+    }
+    let (previous, _) = plugin_tcp_target_from_source(&source, id)?;
+    let target_text = target.canonical();
+    let source = replace_exactly_once(
+        source,
+        &format!("{PLUGIN_TCP_TARGET_HEADER} {previous}"),
+        &format!("{PLUGIN_TCP_TARGET_HEADER} {target_text}"),
+        id,
+    )?;
+    let previous_json = serde_json::to_string(&previous).map_err(|error| error.to_string())?;
+    let target_json = serde_json::to_string(&target_text).map_err(|error| error.to_string())?;
+    if id == RDP_LOCAL_BRIDGE_PORT_ID {
+        for keyword in ["var", "let", "const"] {
+            let needle = format!("{keyword} target = {previous_json};");
+            if source.contains(&needle) {
+                return replace_exactly_once(
+                    source,
+                    &needle,
+                    &format!("{keyword} target = {target_json};"),
+                    id,
+                );
+            }
+        }
+        return Err(format!(
+            "{id} source target does not match its allowed-tcp-targets declaration"
+        ));
+    }
+    replace_exactly_once(
+        source,
+        &format!("openVncBridge({{ target: {previous_json} }})"),
+        &format!("openVncBridge({{ target: {target_json} }})"),
+        id,
+    )
+}
+
+fn installed_plugin_tcp_target(
+    config_path: &str,
+    port: &PublicPluginPort,
+) -> Result<Option<PluginTcpTarget>, String> {
+    if !plugin_tcp_target_port_supported(&port.id) {
+        return Ok(None);
+    }
+    let source_path = Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(public_plugin_local_name(&port.install_path));
+    let source = fs::read_to_string(&source_path)
+        .map_err(|error| format!("could not read installed {} target: {error}", port.id))?;
+    plugin_tcp_target_from_source(&source, &format!("installed {}", port.id))
+        .map(|(_, target)| Some(target))
+}
+
 // Writes one verified plugin source into User/plugins without following symlinked destinations.
 fn install_plugin_source(
     config_path: &str,
@@ -5692,8 +5832,13 @@ fn install_public_plugin_catalog_entry(
     entry: &PublicPluginCatalogEntry,
     use_previous: bool,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let (port, source) = download_public_plugin_catalog_entry(entry, use_previous)?;
+    let source = match plugin_tcp_target {
+        Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+        None => source,
+    };
     install_plugin_source(config_path, &port, source, force)
 }
 
@@ -5702,6 +5847,7 @@ fn install_public_plugin_port(
     config_path: &str,
     selector: &str,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let (requested_id, use_previous) = selector
         .strip_suffix("@previous")
@@ -5713,7 +5859,7 @@ fn install_public_plugin_port(
         .iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
-    install_public_plugin_catalog_entry(config_path, entry, use_previous, force)
+    install_public_plugin_catalog_entry(config_path, entry, use_previous, force, plugin_tcp_target)
 }
 
 // Updates only local files that live at an official catalog install path and
@@ -5758,6 +5904,11 @@ fn update_all_public_plugin_ports(
 
     let mut updated = Vec::new();
     for (entry, previous_version, port, source) in downloads {
+        let target = installed_plugin_tcp_target(config_path, &port)?;
+        let source = match target.as_ref() {
+            Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+            None => source,
+        };
         let installed = install_plugin_source(config_path, &port, source, true)?;
         updated.push((entry.id, previous_version, entry.version, installed));
     }
@@ -5806,6 +5957,7 @@ fn install_local_plugin_port(
     selector: &str,
     ports_directory: Option<String>,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let id = validate_public_plugin_port_id(selector)?;
     let ports_root = local_plugin_ports_directory(ports_directory)?;
@@ -5829,6 +5981,10 @@ fn install_local_plugin_port(
         port.source_limit,
         "local plugin source",
     )?;
+    let source = match plugin_tcp_target {
+        Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+        None => source,
+    };
     install_plugin_source(config_path, &port, source, force)
 }
 
@@ -6121,6 +6277,37 @@ fn plugin_cli() {
     }
     let public_ports = cli_option_values_any(&["--plugin-install"]);
     let local_files = cli_option_values_any(&["--plugin-install-file"]);
+    let plugin_tcp_target = match cli_option_value("--plugin-tcp-target") {
+        Some(value) => Some(normalize_plugin_tcp_target(&value, "--plugin-tcp-target")).transpose(),
+        None => Ok(None),
+    };
+    let plugin_tcp_target = match plugin_tcp_target {
+        Ok(value) => value,
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    };
+    if let Some(target) = plugin_tcp_target.as_ref() {
+        let requested = public_ports
+            .iter()
+            .flat_map(|value| value.split(','))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.strip_suffix("@previous").unwrap_or(value))
+            .collect::<Vec<_>>();
+        if !local_files.is_empty()
+            || requested.len() != 1
+            || !plugin_tcp_target_port_supported(requested[0])
+        {
+            print_cli_error("fpasoterm: --plugin-tcp-target requires exactly one supported --plugin-install port: integration/rdp-local-bridge or integration/novnc-local-bridge\n");
+            std::process::exit(2);
+        }
+        if requested[0] == RDP_LOCAL_BRIDGE_PORT_ID && target.protocol != "tcp" {
+            print_cli_error("fpasoterm: --plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port\n");
+            std::process::exit(2);
+        }
+    }
     if !public_ports.is_empty() || !local_files.is_empty() {
         let force = cli_has_flag(&["--force"]);
         let enable = cli_has_flag(&["--enable"]);
@@ -6143,9 +6330,15 @@ fn plugin_cli() {
                         selector,
                         cli_option_value("--plugin-ports-dir"),
                         force,
+                        plugin_tcp_target.as_ref(),
                     )
                 } else if !public_ports.is_empty() {
-                    install_public_plugin_port(&config_path, selector, force)
+                    install_public_plugin_port(
+                        &config_path,
+                        selector,
+                        force,
+                        plugin_tcp_target.as_ref(),
+                    )
                 } else {
                     install_local_plugin_file(&config_path, selector, force)
                 };
@@ -12138,7 +12331,10 @@ mod tests {
         );
         assert_eq!(
             validate_direct_cli_args(&["--enable".to_string()]),
-            Err("--force and --enable require a --plugin-install command".to_string())
+            Err(
+                "--force, --enable, and --plugin-tcp-target require a --plugin-install command"
+                    .to_string()
+            )
         );
     }
 
@@ -12588,6 +12784,48 @@ maxSourceBytes = 8388608
         let mut wrong_request = request.clone();
         wrong_request[mismatched..mismatched + b"192.0.2.25".len()].copy_from_slice(b"192.0.2.26");
         assert!(parse_rdp_clean_path_request(&wrong_request, &target).is_err());
+    }
+
+    #[test]
+    fn configured_rdp_and_novnc_sources_keep_program_and_capability_target_in_sync() {
+        let rdp_source = concat!(
+            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:53389\n",
+            "var target = \"tcp://127.0.0.1:53389\";\n"
+        );
+        let rdp_target =
+            normalize_plugin_tcp_target("192.0.2.25:3389", "test").expect("RDP target");
+        let rdp = configure_plugin_tcp_target_source(
+            rdp_source.to_string(),
+            RDP_LOCAL_BRIDGE_PORT_ID,
+            &rdp_target,
+        )
+        .expect("configured RDP source");
+        assert!(rdp.contains("allowed-tcp-targets: tcp://192.0.2.25:3389"));
+        assert!(rdp.contains("var target = \"tcp://192.0.2.25:3389\";"));
+
+        let novnc_source = concat!(
+            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900\n",
+            "const bridge = api.openVncBridge({ target: \"tcp://127.0.0.1:5900\" });\n"
+        );
+        let novnc_target =
+            normalize_plugin_tcp_target("tcp://192.0.2.10:5900", "test").expect("noVNC target");
+        let novnc = configure_plugin_tcp_target_source(
+            novnc_source.to_string(),
+            NOVNC_LOCAL_BRIDGE_PORT_ID,
+            &novnc_target,
+        )
+        .expect("configured noVNC source");
+        assert!(novnc.contains("allowed-tcp-targets: tcp://192.0.2.10:5900"));
+        assert!(novnc.contains("openVncBridge({ target: \"tcp://192.0.2.10:5900\" })"));
+
+        let tls_target =
+            normalize_plugin_tcp_target("tls://192.0.2.25:3389", "test").expect("TLS target parse");
+        assert!(configure_plugin_tcp_target_source(
+            rdp_source.to_string(),
+            RDP_LOCAL_BRIDGE_PORT_ID,
+            &tls_target,
+        )
+        .is_err());
     }
 
     #[test]

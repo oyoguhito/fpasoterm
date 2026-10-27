@@ -141,6 +141,20 @@ fpasoterm --plugin-uninstall appearance/teal
 
 最初のcommandは指定portのsourceだけを`User/plugins`へcopyし、reviewできるよう無効のままにします。`--enable`を明示した場合だけ`plugins.enabled`へ追加します。既存fileは`--force`を指定しない限り置き換えません。installerは固定の公式repositoryにHTTPSで接続し、port/source path、manifest metadata、source size、期待するfpasoterm plugin headerを検証します。download後もpluginはrendererで動作するため、有効化前に内容を確認して信頼できるものだけを使用してください。
 
+### RDP / noVNC の接続先をinstall時に指定
+
+RDP local bridge と noVNC local bridge は、それぞれ一つの明示的なTCP接続先を必要とします。公開portに埋め込まれたplaceholderをinstallした後でportを再buildする必要はありません。どちらか一つのportをinstallするcommandへ`--plugin-tcp-target`を指定してください。`host:port`だけを指定した場合は`tcp://host:port`として扱います。
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+installerはreview済みplugin sourceの`allowed-tcp-targets`宣言とbridge callの両方へ同じ接続先を書き込みます。native bridgeはこの宣言と一致する接続先だけを受け付けるため、このoptionでpluginに任意のTCP接続権限を与えることはありません。RDPは現在`tcp://`だけを受け付けます。noVNCはVNC service自身がTLSを使う場合に`tls://`も指定できます。既存のinstall先を変更する場合は同じcommandに`--force`を加えます。`--plugin-update-all`は設定済みRDP/noVNC targetを保持し、catalogのplaceholderへ戻しません。複数port、無関係なport、`--plugin-install-file`との併用は接続先を曖昧にするためerrorになります。
+
 ### local checkout / fileからのinstall
 
 clone、review、開発中のlocal portは、`npm run ports install` を使わずfpasoterm本体CLIからinstallできます。

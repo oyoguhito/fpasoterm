@@ -204,6 +204,31 @@ the fixed official repository, validates port/source paths, manifest metadata,
 source size, and the expected fpasoterm plugin header. Downloaded plugins still
 run in the renderer, so review and trust them before enabling them.
 
+### RDP and noVNC target at install time
+
+The RDP and noVNC local-bridge ports each require one explicit TCP destination.
+Do not install their published placeholder target and then rebuild a port just
+to set a host. Supply `--plugin-tcp-target` while installing exactly one of
+those ports instead. A bare `host:port` means `tcp://host:port`:
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+The installer writes the exact target both into the reviewed plugin's
+`allowed-tcp-targets` declaration and its bridge call. The native bridge still
+requires that same declared destination, so this option does not grant a
+plugin arbitrary TCP access. RDP currently accepts only `tcp://`; noVNC also
+accepts `tls://` when the VNC service itself uses TLS. To change an existing
+installation, repeat the command with `--force`. `--plugin-update-all`
+preserves the currently configured RDP/noVNC target rather than reverting it
+to a catalog placeholder. The option rejects multiple ports, unrelated ports,
+and `--plugin-install-file` to keep the target choice unambiguous.
+
 ### Local checkout or file install
 
 To install a port you have cloned, reviewed, or are developing locally, use
