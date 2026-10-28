@@ -1318,7 +1318,11 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 fn cli_help_text() -> String {
     let text = HELP_TEXT.replace(
         "      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n",
-        "      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugins-list            Alias for --plugin-list.\n",
+        "      --plugin-list             List installed User/plugins, or local ports with --plugin-ports-dir.\n      --plugins-list            Alias for --plugin-list.\n",
+    )
+    .replace(
+        "      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n",
+        "      --plugin-info <file>      Show an installed plugin, or a local port with --plugin-ports-dir.\n",
     )
     .replace(
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
@@ -1326,11 +1330,11 @@ fn cli_help_text() -> String {
     )
     .replace(
         "Use this local fpasoterm-plugins checkout.",
-        "Use this local fpasoterm-plugins checkout or its ports directory.",
+        "Use this local checkout or its ports directory with --plugin-install, --plugin-list, or --plugin-info.",
     )
     .replace(
-        "or its ports directory.\n      --plugin-install-file",
-        "or its ports directory.\n      --plugin-tcp-target <host:port|tcp://host:port>\n                                Set the one RDP or noVNC port target while installing it.\n      --plugin-install-file",
+        "or --plugin-info.\n      --plugin-install-file",
+        "or --plugin-info.\n      --plugin-tcp-target <host:port|tcp://host:port>\n                                Set the one RDP or noVNC port target while installing it.\n      --plugin-install-file",
     )
     .replace(
         "      --force                   Replace an existing file during a plugin install.",
@@ -1864,13 +1868,19 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
                 .to_string(),
         );
     }
-    if args.iter().any(|argument| {
+    let local_ports_requested = args.iter().any(|argument| {
         argument == "--plugin-ports-dir" || argument.starts_with("--plugin-ports-dir=")
-    }) && !args
-        .iter()
-        .any(|argument| argument == "--plugin-install" || argument.starts_with("--plugin-install="))
-    {
-        return Err("--plugin-ports-dir requires --plugin-install <category/name>".to_string());
+    });
+    let local_ports_operation = args.iter().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--plugin-list" | "--plugins-list" | "--plugin-info"
+        ) || argument.starts_with("--plugin-info=")
+            || argument == "--plugin-install"
+            || argument.starts_with("--plugin-install=")
+    });
+    if local_ports_requested && !local_ports_operation {
+        return Err("--plugin-ports-dir requires --plugin-install <category/name>, --plugin-list, or --plugin-info <category/name>".to_string());
     }
     let has_plugin_uninstall = args.iter().any(|argument| {
         argument == "--plugin-uninstall" || argument.starts_with("--plugin-uninstall=")
@@ -5977,6 +5987,138 @@ fn read_local_plugin_file(path: &Path, limit: u64, label: &str) -> Result<String
         .map_err(|error| format!("could not read {label} {}: {error}", path.display()))
 }
 
+// Review metadata is deliberately read from checked-in manifests and source
+// headers only. `--plugin-list --plugin-ports-dir` must not install, execute,
+// or transpile a plugin merely to show what a checkout contains.
+struct LocalPluginPortReview {
+    port: PublicPluginPort,
+    source_path: PathBuf,
+    metadata: PluginMetadata,
+    tcp_targets: Vec<String>,
+    compatible: bool,
+}
+
+fn discover_local_plugin_port_ids(ports_root: &Path) -> Result<Vec<String>, String> {
+    fn visit(root: &Path, directory: &Path, ids: &mut Vec<String>) -> Result<(), String> {
+        for entry in fs::read_dir(directory)
+            .map_err(|error| {
+                format!(
+                    "could not list local ports {}: {error}",
+                    directory.display()
+                )
+            })?
+            .flatten()
+        {
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("could not inspect local port entry: {error}"))?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("port.toml").exists() {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    let id = relative.to_string_lossy().replace('\\', "/");
+                    if validate_public_plugin_port_id(&id).is_ok() {
+                        ids.push(id);
+                    }
+                }
+            }
+            visit(root, &path, ids)?;
+        }
+        Ok(())
+    }
+
+    let mut ids = Vec::new();
+    visit(ports_root, ports_root, &mut ids)?;
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+fn local_plugin_port_review(
+    ports_root: &Path,
+    selector: &str,
+) -> Result<LocalPluginPortReview, String> {
+    let id = validate_public_plugin_port_id(selector)?;
+    let port_directory = ports_root.join(&id);
+    let manifest = read_local_plugin_file(
+        &port_directory.join("port.toml"),
+        PUBLIC_PLUGIN_MANIFEST_LIMIT,
+        "local port manifest",
+    )?;
+    let port = parse_public_plugin_manifest(&id, &manifest)?;
+    let source_path = port_directory.join(&port.source);
+    let source = read_local_plugin_file(&source_path, port.source_limit, "local plugin source")?;
+    Ok(LocalPluginPortReview {
+        compatible: public_plugin_version_at_least(
+            env!("CARGO_PKG_VERSION"),
+            &port.min_fpasoterm_version,
+        ),
+        metadata: plugin_metadata(&source),
+        tcp_targets: plugin_allowed_tcp_targets(&source),
+        port,
+        source_path,
+    })
+}
+
+fn print_local_plugin_port_list_cli(ports_directory: Option<String>) -> Result<(), String> {
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let ids = discover_local_plugin_port_ids(&ports_root)?;
+    print_cli_text(&format!("Local plugin ports ({}):\n", ports_root.display()));
+    if ids.is_empty() {
+        print_cli_text("  (none found)\n");
+        return Ok(());
+    }
+    for id in ids {
+        match local_plugin_port_review(&ports_root, &id) {
+            Ok(review) => {
+                let target_summary = if review.tcp_targets.is_empty() {
+                    String::new()
+                } else {
+                    format!("; TCP target {}", review.tcp_targets.join(", "))
+                };
+                let compatibility = if review.compatible {
+                    "compatible".to_string()
+                } else {
+                    format!(
+                        "requires fpasoterm >= {}",
+                        review.port.min_fpasoterm_version
+                    )
+                };
+                print_cli_text(&format!(
+                    "  {} [version {}; {compatibility}; source {}{target_summary}]\n",
+                    review.port.id, review.port.version, review.port.source
+                ));
+            }
+            Err(error) => print_cli_text(&format!("  {id} [invalid: {error}]\n")),
+        }
+    }
+    Ok(())
+}
+
+fn print_local_plugin_port_info_cli(
+    ports_directory: Option<String>,
+    selector: &str,
+) -> Result<(), String> {
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let review = local_plugin_port_review(&ports_root, selector)?;
+    print_cli_text(&format!(
+        "Port: {}\nVersion: {}\nRequires fpasoterm: >= {} ({})\nSource: {}\nInstall path: plugins/{}\nDescription: {}\n",
+        review.port.id,
+        review.port.version,
+        review.port.min_fpasoterm_version,
+        if review.compatible { "compatible" } else { "not compatible" },
+        review.source_path.display(),
+        review.port.install_path,
+        review.metadata.description,
+    ));
+    if !review.tcp_targets.is_empty() {
+        print_cli_text(&format!("TCP target: {}\n", review.tcp_targets.join(", ")));
+    }
+    Ok(())
+}
+
 // Installs a reviewed port from a local fpasoterm-plugins checkout without network access.
 fn install_local_plugin_port(
     config_path: &str,
@@ -6419,11 +6561,29 @@ fn plugin_cli() {
         return;
     }
     if cli_has_flag(&["--plugin-list", "--plugins-list"]) {
-        print_plugin_list_cli(&config_path, &enabled);
+        if cli_option_value("--plugin-ports-dir").is_some() {
+            if let Err(error) =
+                print_local_plugin_port_list_cli(cli_option_value("--plugin-ports-dir"))
+            {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+        } else {
+            print_plugin_list_cli(&config_path, &enabled);
+        }
         return;
     }
 
     if let Some(selector) = cli_option_value("--plugin-info") {
+        if cli_option_value("--plugin-ports-dir").is_some() {
+            if let Err(error) =
+                print_local_plugin_port_info_cli(cli_option_value("--plugin-ports-dir"), &selector)
+            {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+            return;
+        }
         let available = discover_plugin_files(&config_path);
         match resolve_plugin_selector(&selector, &available, "inspect") {
             Ok(plugin) => {
@@ -12182,6 +12342,23 @@ mod tests {
         }
         assert_eq!(
             validate_direct_cli_args(&[
+                "--plugin-list".to_string(),
+                "--plugin-ports-dir".to_string(),
+                "./fpasoterm-plugins".to_string(),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-info".to_string(),
+                "integration/novnc-local-bridge".to_string(),
+                "--plugin-ports-dir".to_string(),
+                "./fpasoterm-plugins/ports".to_string(),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&[
                 "--plugin-install".to_string(),
                 "appearance/teal".to_string(),
                 "--plugin-ports-dir".to_string(),
@@ -12766,6 +12943,51 @@ maxSourceBytes = 8388608
                 description: "Existing plugin comment".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn local_port_review_reads_manifest_and_tcp_target_without_installing() {
+        let root = env::temp_dir().join(format!("fpasoterm-local-port-review-{}", now_millis()));
+        let port_directory = root.join("ports/integration/review-target");
+        fs::create_dir_all(&port_directory).expect("create local port directory");
+        fs::write(
+            port_directory.join("port.toml"),
+            concat!(
+                "[port]\n",
+                "id = \"integration/review-target\"\n",
+                "name = \"review-target\"\n",
+                "version = \"1.2.3\"\n",
+                "author = \"test\"\n",
+                "description = \"Local review fixture\"\n",
+                "license = \"MIT\"\n",
+                "minFpasotermVersion = \"1.0.0\"\n",
+                "source = \"plugin.js\"\n",
+                "installPath = \"integration/review-target.js\"\n",
+            ),
+        )
+        .expect("write manifest");
+        fs::write(
+            port_directory.join("plugin.js"),
+            concat!(
+                "// @fpasoterm-plugin version: 1.2.3\n",
+                "// @fpasoterm-plugin description: Local review fixture\n",
+                "// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.50:5900\n",
+            ),
+        )
+        .expect("write source");
+
+        let ports_root = root.join("ports");
+        assert_eq!(
+            discover_local_plugin_port_ids(&ports_root).expect("discover ports"),
+            vec!["integration/review-target".to_string()]
+        );
+        let review = local_plugin_port_review(&ports_root, "integration/review-target")
+            .expect("read local port review");
+        assert_eq!(review.port.version, "1.2.3");
+        assert!(review.compatible);
+        assert_eq!(review.tcp_targets, vec!["tcp://192.0.2.50:5900"]);
+        assert_eq!(review.metadata.description, "Local review fixture");
+        fs::remove_dir_all(root).expect("remove local port fixture");
     }
 
     #[test]

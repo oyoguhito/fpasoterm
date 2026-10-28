@@ -287,6 +287,14 @@ ports repository全体をcloneせず、Node.jsも使わずにreview済み公開p
 
 review済みのlocal `fpasoterm-plugins` checkoutからは、`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`を使用します。単独の信頼済みsource fileは`fpasoterm --plugin-install-file ./my-plugin.ts --enable`でcopyできます。ports projectはcatalog / INDEX検索とplugin開発・検証用で、利用者向けのinstallはfpasoterm本体が行います。
 
+checkoutからinstallする前に、plugin codeをcopy・実行せずmanifestとsource headerを確認できます。`--plugin-ports-dir`を付けない`--plugin-list`は、従来どおり導入済み`User/plugins`だけを表示します。
+
+```sh
+fpasoterm --plugin-list --plugin-ports-dir ./fpasoterm-plugins
+fpasoterm --plugin-info integration/rdp-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports
+```
+
 RDP/noVNC local bridge portはinstall時に一つの明示的なendpointを指定できます。RDPは`tcp://`だけ、noVNCは`tcp://`または`tls://`を受け付けます。`host:port`だけを渡した場合は`tcp://host:port`へ正規化されます。
 
 ```sh

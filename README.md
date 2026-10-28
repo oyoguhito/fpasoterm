@@ -482,6 +482,16 @@ For one trusted standalone source file, use
 for catalog/INDEX search and plugin development or validation; fpasoterm performs
 the end-user installation.
 
+Before installing from a checkout, inspect its declared manifests and source
+headers without copying or executing plugin code. Without `--plugin-ports-dir`,
+`--plugin-list` continues to show only already-installed `User/plugins`.
+
+```sh
+fpasoterm --plugin-list --plugin-ports-dir ./fpasoterm-plugins
+fpasoterm --plugin-info integration/rdp-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports
+```
+
 RDP/noVNC local bridge ports accept one exact configured endpoint at install
 time. RDP is `tcp://` only; noVNC accepts `tcp://` or `tls://`. A bare
 `host:port` is normalized to `tcp://host:port`.

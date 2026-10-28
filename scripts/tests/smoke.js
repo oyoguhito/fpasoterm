@@ -675,6 +675,43 @@ assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
 assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
 
+const localReviewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-review-'));
+const localReviewPort = path.join(localReviewRoot, 'ports', 'integration', 'review-target');
+fs.mkdirSync(localReviewPort, { recursive: true });
+fs.writeFileSync(path.join(localReviewPort, 'port.toml'), [
+  '[port]',
+  'id = "integration/review-target"',
+  'name = "review-target"',
+  'version = "1.2.3"',
+  'author = "test"',
+  'description = "Local review fixture"',
+  'license = "MIT"',
+  'minFpasotermVersion = "1.0.0"',
+  'source = "plugin.js"',
+  'installPath = "integration/review-target.js"',
+  '',
+].join('\n'));
+fs.writeFileSync(path.join(localReviewPort, 'plugin.js'), [
+  '// @fpasoterm-plugin version: 1.2.3',
+  '// @fpasoterm-plugin description: Local review fixture',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.50:5900',
+  'window.fpasotermPluginApi.onReady(() => {});',
+  '',
+].join('\n'));
+const localPortsListResult = runCli('--plugin-list', '--plugin-ports-dir', localReviewRoot);
+assert.equal(localPortsListResult.status, 0, localPortsListResult.stderr);
+assert.match(localPortsListResult.stdout, /Local plugin ports/);
+assert.match(localPortsListResult.stdout, /integration\/review-target \[version 1\.2\.3; compatible; source plugin\.js; TCP target tcp:\/\/192\.0\.2\.50:5900\]/);
+const localPortsInfoResult = runCli('--plugin-info', 'integration/review-target', '--plugin-ports-dir', localReviewRoot);
+assert.equal(localPortsInfoResult.status, 0, localPortsInfoResult.stderr);
+assert.match(localPortsInfoResult.stdout, /Port: integration\/review-target/);
+assert.match(localPortsInfoResult.stdout, /Install path: plugins\/integration\/review-target\.js/);
+assert.match(localPortsInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.50:5900/);
+const missingLocalPortsOperationResult = runCli('--plugin-ports-dir', localReviewRoot);
+assert.equal(missingLocalPortsOperationResult.status, 2);
+assert.match(missingLocalPortsOperationResult.stderr, /--plugin-ports-dir requires --plugin-install <category\/name>, --plugin-list, or --plugin-info <category\/name>/);
+fs.rmSync(localReviewRoot, { recursive: true, force: true });
+
 const uninstallResult = runCli('--plugin-uninstall', 'theme');
 assert.equal(uninstallResult.status, 0, uninstallResult.stderr);
 assert.match(uninstallResult.stdout, /uninstalled local plugin plugins\/theme\.js/);

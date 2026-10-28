@@ -76,14 +76,14 @@ Options:
       --doctor                   Check updates, npm audit, and config health, then exit.
       --open-log-dir             Open the configured terminal log directory, then exit.
       --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.
-      --plugin-list             List local User/plugins files and enabled plugins, then exit.
+      --plugin-list             List installed User/plugins, or local ports with --plugin-ports-dir.
       --plugins-list            Alias for --plugin-list.
       --plugin-path             Print the active User/plugins directory, then exit.
-      --plugin-info <file>      Show a .js/.ts plugin's state, version, source, and load status.
+      --plugin-info <file>      Show an installed plugin, or a local port with --plugin-ports-dir.
       --plugin-uninstall <file> Remove comma-separated local User/plugins files, then exit.
       --plugin-search [query]   Search official public plugin ports, then exit.
       --plugin-install <ports>  Install comma-separated ports from GitHub, or --plugin-ports-dir when supplied.
-      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout or its ports/ directory with --plugin-install.
+      --plugin-ports-dir <path> Use this local checkout/ports with --plugin-install, --plugin-list, or --plugin-info.
       --plugin-tcp-target <host:port|tcp://host:port>
                                 Set the one RDP or noVNC port target while installing it.
       --plugin-install-file <path>
@@ -623,8 +623,8 @@ function parseArgs(argv) {
   if ((pluginInstallForce || pluginInstallEnable) && pluginInstallCount === 0) {
     throw new Error('--force and --enable require a --plugin-install command');
   }
-  if (pluginPortsDir && !pluginInstall) {
-    throw new Error('--plugin-ports-dir requires --plugin-install <category/name>');
+  if (pluginPortsDir && !pluginInstall && !pluginList && !pluginInfo) {
+    throw new Error('--plugin-ports-dir requires --plugin-install <category/name>, --plugin-list, or --plugin-info <category/name>');
   }
   if (pluginTcpTarget) {
     if (!pluginInstall || pluginInstallFile) {
@@ -997,7 +997,7 @@ async function fetchPublicPluginText(relativePath, maximumBytes, revision = 'mai
 }
 
 // Parses and validates the narrow port manifest contract shared by remote and local sources.
-function parsePluginPortManifest(id, manifestText, label) {
+function parsePluginPortManifest(id, manifestText, label, { checkCompatibility = true } = {}) {
   const manifest = toml.parse(manifestText)?.port;
   const required = (key) => {
     const value = typeof manifest?.[key] === 'string' ? manifest[key].trim() : '';
@@ -1012,7 +1012,7 @@ function parsePluginPortManifest(id, manifestText, label) {
   if (!/^\d+\.\d+\.\d+$/.test(version) || !/^\d+\.\d+\.\d+$/.test(minimumVersion)) {
     throw new Error(`${label} port manifest has an invalid version`);
   }
-  if (comparePackageVersions(packageJson.version, minimumVersion) < 0) {
+  if (checkCompatibility && comparePackageVersions(packageJson.version, minimumVersion) < 0) {
     throw new Error(`${id} requires fpasoterm >= ${minimumVersion}; found ${packageJson.version}`);
   }
   if (!/^[^/\\]+\.(?:js|ts)$/.test(sourceName)
@@ -1028,7 +1028,7 @@ function parsePluginPortManifest(id, manifestText, label) {
     || sourceLimit > maximumDeclaredPluginPortSourceLimit) {
     throw new Error(`${label} port manifest port.maxSourceBytes must be an integer from ${defaultPluginPortSourceLimit} to ${maximumDeclaredPluginPortSourceLimit}`);
   }
-  return { version, sourceName, installPath, sourceLimit };
+  return { version, minimumVersion, sourceName, installPath, sourceLimit };
 }
 
 // These two official ports embed their one reviewed target both in the native
@@ -1235,6 +1235,84 @@ function localPluginPortsDirectory(options) {
     throw new Error('local fpasoterm-plugins checkout or its ports directory not found; pass --plugin-ports-dir <path>');
   }
   return portsDirectory;
+}
+
+// Finds checked-in port directories without evaluating any plugin source.
+// Symlinked directories are ignored so a review command cannot walk outside
+// the requested checkout.
+function discoverLocalPluginPortIds(portsDirectory) {
+  const ids = [];
+  const visit = (directory, segments) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const child = path.join(directory, entry.name);
+      const nextSegments = [...segments, entry.name];
+      if (fs.existsSync(path.join(child, 'port.toml'))) {
+        const id = nextSegments.join('/');
+        try {
+          ids.push(validatePublicPluginPortId(id));
+        } catch {
+          // An invalid directory name cannot be a reviewable public port.
+        }
+      }
+      visit(child, nextSegments);
+    }
+  };
+  visit(portsDirectory, []);
+  return [...new Set(ids)].sort();
+}
+
+function localPluginPortDetails(options, id) {
+  const portsDirectory = localPluginPortsDirectory(options);
+  const normalizedId = validatePublicPluginPortId(id);
+  const portDirectory = path.join(portsDirectory, ...normalizedId.split('/'));
+  const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
+  const manifest = parsePluginPortManifest(normalizedId, manifestText, 'local', { checkCompatibility: false });
+  const sourcePath = path.join(portDirectory, manifest.sourceName);
+  const source = readLocalPluginText(sourcePath, manifest.sourceLimit, 'local plugin source');
+  return {
+    id: normalizedId,
+    portsDirectory,
+    sourcePath,
+    source,
+    ...manifest,
+    metadata: pluginMetadata(source),
+    tcpTargets: pluginAllowedTcpTargets(source),
+    compatible: comparePackageVersions(packageJson.version, manifest.minimumVersion) >= 0,
+  };
+}
+
+function showLocalPluginPortList(options) {
+  const portsDirectory = localPluginPortsDirectory(options);
+  const ids = discoverLocalPluginPortIds(portsDirectory);
+  console.log(`Local plugin ports (${portsDirectory}):`);
+  if (ids.length === 0) {
+    console.log('  (none found)');
+    return;
+  }
+  for (const id of ids) {
+    try {
+      const port = localPluginPortDetails(options, id);
+      const targetSummary = port.tcpTargets.length ? `; TCP target ${port.tcpTargets.join(', ')}` : '';
+      const compatibility = port.compatible ? 'compatible' : `requires fpasoterm >= ${port.minimumVersion}`;
+      console.log(`  ${id} [version ${port.version}; ${compatibility}; source ${port.sourceName}${targetSummary}]`);
+    } catch (error) {
+      console.log(`  ${id} [invalid: ${error.message}]`);
+    }
+  }
+}
+
+function showLocalPluginPortInfo(options) {
+  const port = localPluginPortDetails(options, options.pluginInfo);
+  console.log(`Port: ${port.id}`);
+  console.log(`Version: ${port.version}`);
+  console.log(`Requires fpasoterm: >= ${port.minimumVersion} (${port.compatible ? 'compatible' : 'not compatible'})`);
+  console.log(`Source: ${port.sourcePath}`);
+  console.log(`Install path: plugins/${port.installPath}`);
+  console.log(`Description: ${port.metadata.description}`);
+  if (port.tcpTargets.length) {
+    console.log(`TCP target: ${port.tcpTargets.join(', ')}`);
+  }
 }
 
 // Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
@@ -2171,6 +2249,10 @@ function pluginTcpTargetsForPath(pluginPath) {
 // Lists every plugin file below User/plugins and the explicit enabled selection.
 function showPluginList(options) {
   applyEnv(options.env);
+  if (options.pluginPortsDir) {
+    showLocalPluginPortList(options);
+    return;
+  }
   const targetPath = configPath();
   const userConfig = readUserConfig(targetPath);
   const enabled = Array.isArray(userConfig.plugins?.enabled) ? userConfig.plugins.enabled : [];
@@ -2209,6 +2291,10 @@ function showPluginPath(options) {
 // Prints one local plugin's resolved source and load details without opening a window.
 function showPluginInfo(options) {
   applyEnv(options.env);
+  if (options.pluginPortsDir) {
+    showLocalPluginPortInfo(options);
+    return;
+  }
   const targetPath = configPath();
   const available = discoverPluginFiles(targetPath);
   const plugin = resolvePluginSelector(options.pluginInfo, available, 'inspect');
