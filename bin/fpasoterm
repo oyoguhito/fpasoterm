@@ -1313,13 +1313,32 @@ function showLocalPluginPortInfo(options) {
   if (port.tcpTargets.length) {
     console.log(`TCP target: ${port.tcpTargets.join(', ')}`);
   }
+  showLocalPluginPortInstallation(port);
+}
+
+// Prints the actual install shape for this reviewed checkout. The install never
+// executes source; --enable only records the installed file in config.toml.
+function showLocalPluginPortInstallation(port) {
+  const directory = JSON.stringify(port.portsDirectory);
+  const command = `fpasoterm --plugin-install ${port.id} --plugin-ports-dir ${directory}`;
   console.log('');
-  console.log('CLI usage:');
-  console.log('  fpasoterm --plugin-list --plugin-ports-dir <checkout-or-ports>');
-  console.log(`  fpasoterm --plugin-info ${port.id} --plugin-ports-dir <checkout-or-ports>`);
-  const targetOption = pluginTcpTargetPortIds.has(port.id) ? ' --plugin-tcp-target <target>' : '';
-  console.log(`  fpasoterm --plugin-install ${port.id} --plugin-ports-dir <checkout-or-ports>${targetOption} --enable`);
-  console.log('  fpasoterm --help');
+  console.log('Installation:');
+  console.log(`  ${command} --enable`);
+  if (port.id === rdpLocalBridgePortId) {
+    console.log('');
+    console.log('Connection target (replaces the declared default above):');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:<port> --enable`);
+    console.log('  RDP accepts tcp:// only; a bare host:port is normalized to tcp://host:port.');
+  } else if (port.id === noVncLocalBridgePortId) {
+    console.log('');
+    console.log('Connection target (replaces the declared default above):');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:<port> --enable`);
+    console.log(`  ${command} --plugin-tcp-target tls://<host>:<port> --enable`);
+    console.log('  noVNC accepts tcp:// or tls://; use the transport configured by the VNC server.');
+  }
+  console.log('');
+  console.log('  Omit --enable to install for source review only. Add --force only to replace an existing installed port.');
+  console.log('  Restart fpasoterm after installation so it loads an enabled plugin.');
 }
 
 // Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
@@ -2328,13 +2347,9 @@ function showPluginInfo(options) {
     console.log(`Renderer URL: ${resolved.url}`);
   }
   console.log('');
-  console.log('CLI usage:');
-  console.log('  fpasoterm --plugin-list');
-  console.log('  fpasoterm --plugin-info <plugin-file>');
-  console.log('  fpasoterm --enable-plugin <plugin-file>');
-  console.log('  fpasoterm --disable-plugin <plugin-file>');
-  console.log('  fpasoterm --plugin-uninstall <plugin-file>');
-  console.log('  fpasoterm --help');
+  console.log('Installation: already installed in User/plugins.');
+  console.log('For a reviewed checkout port and its install settings, run:');
+  console.log('  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>');
 }
 
 // Expands common environment variable forms used in configuration paths.

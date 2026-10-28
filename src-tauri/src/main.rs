@@ -6116,26 +6116,46 @@ fn print_local_plugin_port_info_cli(
     if !review.tcp_targets.is_empty() {
         print_cli_text(&format!("TCP target: {}\n", review.tcp_targets.join(", ")));
     }
-    print_cli_text(&local_plugin_port_cli_usage(&review.port));
+    print_cli_text(&local_plugin_port_installation(&review.port, &ports_root));
     Ok(())
 }
 
-// Keep the path generic: arbitrary local paths require shell-specific quoting,
-// so the review output gives a copyable command shape rather than guessing.
-fn local_plugin_port_cli_usage(port: &PublicPluginPort) -> String {
-    let target_option = if plugin_tcp_target_port_supported(&port.id) {
-        " --plugin-tcp-target <target>"
-    } else {
-        ""
-    };
-    format!(
-        "\nCLI usage:\n  fpasoterm --plugin-list --plugin-ports-dir <checkout-or-ports>\n  fpasoterm --plugin-info {} --plugin-ports-dir <checkout-or-ports>\n  fpasoterm --plugin-install {} --plugin-ports-dir <checkout-or-ports>{target_option} --enable\n  fpasoterm --help\n",
-        port.id, port.id
-    )
+// Render the supplied path as a quoted argument so the displayed install
+// command remains usable for checkout directories containing whitespace.
+fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) -> String {
+    let directory = format!("{:?}", ports_root.to_string_lossy());
+    let command = format!(
+        "fpasoterm --plugin-install {} --plugin-ports-dir {directory}",
+        port.id
+    );
+    let mut output = format!("\nInstallation:\n  {command} --enable\n");
+    match port.id.as_str() {
+        RDP_LOCAL_BRIDGE_PORT_ID => {
+            output.push_str("\nConnection target (replaces the declared default above):\n");
+            output.push_str(&format!(
+                "  {command} --plugin-tcp-target tcp://<host>:<port> --enable\n"
+            ));
+            output.push_str(
+                "  RDP accepts tcp:// only; a bare host:port is normalized to tcp://host:port.\n",
+            );
+        }
+        NOVNC_LOCAL_BRIDGE_PORT_ID => {
+            output.push_str("\nConnection target (replaces the declared default above):\n");
+            output.push_str(&format!(
+                "  {command} --plugin-tcp-target tcp://<host>:<port> --enable\n  {command} --plugin-tcp-target tls://<host>:<port> --enable\n"
+            ));
+            output.push_str(
+                "  noVNC accepts tcp:// or tls://; use the transport configured by the VNC server.\n",
+            );
+        }
+        _ => {}
+    }
+    output.push_str("\n  Omit --enable to install for source review only. Add --force only to replace an existing installed port.\n  Restart fpasoterm after installation so it loads an enabled plugin.\n");
+    output
 }
 
-fn installed_plugin_cli_usage() -> &'static str {
-    "\nCLI usage:\n  fpasoterm --plugin-list\n  fpasoterm --plugin-info <plugin-file>\n  fpasoterm --enable-plugin <plugin-file>\n  fpasoterm --disable-plugin <plugin-file>\n  fpasoterm --plugin-uninstall <plugin-file>\n  fpasoterm --help\n"
+fn installed_plugin_installation_note() -> &'static str {
+    "\nInstallation: already installed in User/plugins.\nFor a reviewed checkout port and its install settings, run:\n  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>\n"
 }
 
 // Installs a reviewed port from a local fpasoterm-plugins checkout without network access.
@@ -6625,7 +6645,7 @@ fn plugin_cli() {
                 if !tcp_targets.is_empty() {
                     print_cli_text(&format!("TCP target: {}\n", tcp_targets.join(", ")));
                 }
-                print_cli_text(installed_plugin_cli_usage());
+                print_cli_text(installed_plugin_installation_note());
             }
             Err(error) => {
                 print_cli_error(&format!("fpasoterm: {error}\n"));
@@ -13007,10 +13027,12 @@ maxSourceBytes = 8388608
         assert!(review.compatible);
         assert_eq!(review.tcp_targets, vec!["tcp://192.0.2.50:5900"]);
         assert_eq!(review.metadata.description, "Local review fixture");
-        let usage = local_plugin_port_cli_usage(&review.port);
-        assert!(usage.contains("--plugin-info integration/review-target --plugin-ports-dir"));
-        assert!(usage.contains("--plugin-install integration/review-target --plugin-ports-dir"));
-        assert!(!usage.contains("--plugin-tcp-target"));
+        let installation = local_plugin_port_installation(&review.port, &ports_root);
+        assert!(installation.contains("Installation:"));
+        assert!(
+            installation.contains("--plugin-install integration/review-target --plugin-ports-dir")
+        );
+        assert!(!installation.contains("--plugin-tcp-target"));
         fs::remove_dir_all(root).expect("remove local port fixture");
     }
 

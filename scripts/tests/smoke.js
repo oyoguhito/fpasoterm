@@ -674,7 +674,7 @@ assert.equal(pluginInfoResult.status, 0, pluginInfoResult.stderr);
 assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
 assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
-assert.match(pluginInfoResult.stdout, /CLI usage:[\s\S]*--enable-plugin <plugin-file>/);
+assert.match(pluginInfoResult.stdout, /Installation: already installed in User\/plugins/);
 
 const localReviewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-review-'));
 const localReviewPort = path.join(localReviewRoot, 'ports', 'integration', 'review-target');
@@ -708,7 +708,7 @@ assert.equal(localPortsInfoResult.status, 0, localPortsInfoResult.stderr);
 assert.match(localPortsInfoResult.stdout, /Port: integration\/review-target/);
 assert.match(localPortsInfoResult.stdout, /Install path: plugins\/integration\/review-target\.js/);
 assert.match(localPortsInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.50:5900/);
-assert.match(localPortsInfoResult.stdout, /CLI usage:[\s\S]*--plugin-install integration\/review-target --plugin-ports-dir <checkout-or-ports> --enable/);
+assert.match(localPortsInfoResult.stdout, /Installation:[\s\S]*--plugin-install integration\/review-target --plugin-ports-dir .* --enable/);
 const missingLocalPortsOperationResult = runCli('--plugin-ports-dir', localReviewRoot);
 assert.equal(missingLocalPortsOperationResult.status, 2);
 assert.match(missingLocalPortsOperationResult.stderr, /--plugin-ports-dir requires --plugin-install <category\/name>, --plugin-list, or --plugin-info <category\/name>/);

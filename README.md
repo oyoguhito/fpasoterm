@@ -450,11 +450,12 @@ discovered and enabled plugins in the local `User/plugins` directory, including
 each declared TCP bridge target. Use
 `--plugin-enable` / `--plugin-disable` to update the enabled list. Use
 `fpasoterm --plugin-info welcome-banner` for a plugin's source, enabled
-state, description, declared TCP target, and load status. It also prints the
-applicable list, inspect, enable, disable, uninstall, or local-port install
-command shapes. Restart the affected window after an enable or source change.
-Use `fpasoterm --help` for the full CLI reference; missing bridge-install
-parameters include a copyable usage example.
+state, description, declared TCP target, and load status. With
+`--plugin-ports-dir`, it also prints the reviewed port's installation command,
+whether `--enable`/`--force` is appropriate, and for RDP/noVNC the exact
+connection-target forms. Restart the affected window after an enable or source
+change. Use `fpasoterm --help` for the full CLI reference; missing
+bridge-install parameters include a copyable usage example.
 
 To invoke an enabled plugin's registered command while opening a new GUI
 window, use `fpasoterm --plugin-run <plugin/path[:command-id]>`. Pass one JSON
