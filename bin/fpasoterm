@@ -1327,14 +1327,14 @@ function showLocalPluginPortInstallation(port) {
   if (port.id === rdpLocalBridgePortId) {
     console.log('');
     console.log('Connection target (replaces the declared default above):');
-    console.log(`  ${command} --plugin-tcp-target tcp://<host>:<port> --enable`);
-    console.log('  RDP accepts tcp:// only; a bare host:port is normalized to tcp://host:port.');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:3389 --enable`);
+    console.log('  RDP uses the standard TCP port 3389; a bare host:port is normalized to tcp://host:port.');
   } else if (port.id === noVncLocalBridgePortId) {
     console.log('');
     console.log('Connection target (replaces the declared default above):');
-    console.log(`  ${command} --plugin-tcp-target tcp://<host>:<port> --enable`);
-    console.log(`  ${command} --plugin-tcp-target tls://<host>:<port> --enable`);
-    console.log('  noVNC accepts tcp:// or tls://; use the transport configured by the VNC server.');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:5900 --enable`);
+    console.log(`  ${command} --plugin-tcp-target tls://<host>:5900 --enable`);
+    console.log('  noVNC uses the standard VNC port 5900; use the transport configured by the VNC server.');
   }
   console.log('');
   console.log('  Omit --enable to install for source review only. Add --force only to replace an existing installed port.');

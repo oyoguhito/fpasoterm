@@ -6133,19 +6133,19 @@ fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) ->
         RDP_LOCAL_BRIDGE_PORT_ID => {
             output.push_str("\nConnection target (replaces the declared default above):\n");
             output.push_str(&format!(
-                "  {command} --plugin-tcp-target tcp://<host>:<port> --enable\n"
+                "  {command} --plugin-tcp-target tcp://<host>:3389 --enable\n"
             ));
             output.push_str(
-                "  RDP accepts tcp:// only; a bare host:port is normalized to tcp://host:port.\n",
+                "  RDP uses the standard TCP port 3389; a bare host:port is normalized to tcp://host:port.\n",
             );
         }
         NOVNC_LOCAL_BRIDGE_PORT_ID => {
             output.push_str("\nConnection target (replaces the declared default above):\n");
             output.push_str(&format!(
-                "  {command} --plugin-tcp-target tcp://<host>:<port> --enable\n  {command} --plugin-tcp-target tls://<host>:<port> --enable\n"
+                "  {command} --plugin-tcp-target tcp://<host>:5900 --enable\n  {command} --plugin-tcp-target tls://<host>:5900 --enable\n"
             ));
             output.push_str(
-                "  noVNC accepts tcp:// or tls://; use the transport configured by the VNC server.\n",
+                "  noVNC uses the standard VNC port 5900; use the transport configured by the VNC server.\n",
             );
         }
         _ => {}
