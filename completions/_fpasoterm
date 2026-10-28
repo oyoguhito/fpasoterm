@@ -71,6 +71,7 @@ _fpasoterm() {
     '--open-log-dir[open terminal log directory]' \
     '--copy-diagnostics[copy diagnostics report]' \
     '--plugin-list[list local User/plugins files]' \
+    '--plugins-list[alias for --plugin-list]' \
     '--plugin-path[print plugin directory]' \
     '--plugin-info=[show plugin information]:plugin:_fpasoterm_plugin_names' \
     '--plugin-uninstall=[remove local plugin files]:plugin:_fpasoterm_plugin_names' \

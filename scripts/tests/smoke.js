@@ -280,6 +280,7 @@ assert.match(bin, /runDoctor/);
 assert.match(bin, /npmAuditSummary/);
 assert.match(bin, /installPublicPlugin/);
 assert.match(bin, /--plugin-tcp-target/);
+assert.match(bin, /--plugins-list/);
 assert.match(bin, /configurePluginTcpTargetSource/);
 assert.match(bin, /integration\/rdp-local-bridge/);
 assert.match(bin, /integration\/novnc-local-bridge/);
@@ -427,6 +428,7 @@ fs.mkdirSync(cliPluginsDir, { recursive: true });
 fs.writeFileSync(path.join(cliPluginsDir, 'hello.ts'), [
   '// @fpasoterm-plugin version: 1.2.3',
   '// @fpasoterm-plugin description: Test plugin',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.25:3389',
   '',
 ].join('\n'));
 fs.writeFileSync(path.join(cliPluginsDir, 'theme.js'), '// test plugin\n');
@@ -651,12 +653,17 @@ assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enab
 const pluginListResult = runCli('--plugin-list');
 assert.equal(pluginListResult.status, 0, pluginListResult.stderr);
 assert.match(pluginListResult.stdout, /Enabled plugins:\n  plugins\/hello\.ts\n  plugins\/theme\.js/);
-assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3\]/);
+assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3; TCP target tcp:\/\/192\.0\.2\.25:3389\]/);
+
+const pluginsListAliasResult = runCli('--plugins-list');
+assert.equal(pluginsListAliasResult.status, 0, pluginsListAliasResult.stderr);
+assert.match(pluginsListAliasResult.stdout, /TCP target tcp:\/\/192\.0\.2\.25:3389/);
 
 const pluginInfoResult = runCli('--plugin-info', 'hello');
 assert.equal(pluginInfoResult.status, 0, pluginInfoResult.stderr);
 assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
 assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
+assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
 
 const uninstallResult = runCli('--plugin-uninstall', 'theme');
 assert.equal(uninstallResult.status, 0, uninstallResult.stderr);
@@ -1042,6 +1049,7 @@ assert.match(rustMain, /print_profile_list_cli/);
 assert.match(rustMain, /validate_selected_profile_cli/);
 assert.match(rustMain, /active_profile/);
 assert.match(rustMain, /--plugin-list/);
+assert.match(rustMain, /--plugins-list/);
 assert.match(rustMain, /--plugin-path/);
 assert.match(rustMain, /--plugin-info <file>/);
 assert.match(rustMain, /--plugin-uninstall <file>/);
@@ -1832,6 +1840,7 @@ assert.match(pluginDocsEn, /User\/plugins/);
 assert.match(pluginDocsEn, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsEn, /local files that you trust/);
 assert.match(pluginDocsEn, /--plugin-list/);
+assert.match(pluginDocsEn, /--plugins-list/);
 assert.match(pluginDocsEn, /--plugin-uninstall/);
 assert.match(pluginDocsEn, /registerCommand/);
 assert.match(pluginDocsEn, /--plugin-run/);
@@ -1847,6 +1856,7 @@ assert.match(pluginDocsJa, /User\/plugins/);
 assert.match(pluginDocsJa, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsJa, /信頼できるローカル file/);
 assert.match(pluginDocsJa, /--plugin-list/);
+assert.match(pluginDocsJa, /--plugins-list/);
 assert.match(pluginDocsJa, /--plugin-uninstall/);
 assert.match(pluginDocsJa, /registerCommand/);
 assert.match(pluginDocsJa, /--plugin-run/);

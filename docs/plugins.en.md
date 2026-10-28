@@ -140,6 +140,7 @@ The explicit plugin-management spellings are also available from every CLI:
 ```sh
 fpasoterm --plugin-path
 fpasoterm --plugin-list
+fpasoterm --plugins-list # alias for --plugin-list
 fpasoterm --plugin-info welcome-banner
 fpasoterm --plugin-uninstall welcome-banner
 fpasoterm --plugin-enable welcome-banner
@@ -150,11 +151,11 @@ fpasoterm --plugin-disable-all
 
 `--plugin-list` is a local-only view of the active `User/plugins` directory. It does not query
 GitHub or the public port catalog; use `--plugin-search [query]` for that remote catalog. It
-prints discovered files with their declared versions and the `enabled` entries. The
+prints discovered files with their declared versions, declared TCP bridge targets (when any), and the `enabled` entries. The
 `--plugin-enable` and `--plugin-disable` options are aliases for the existing
 `--enable-plugin` and `--disable-plugin` options.
 `--plugin-info <file>` prints the resolved source path, enabled state, declared
-version, description, load status, and renderer URL without opening a window. Pass a
+version, description, declared TCP bridge target (when any), load status, and renderer URL without opening a window. Pass a
 `.js` or `.ts` filename such as `welcome-banner.ts`. For all local
 `--plugin-*` selectors, the leading `plugins/` and the `.js`/`.ts` suffix are
 optional: use `welcome-banner` or `appearance/teal`. If both `.js` and `.ts`

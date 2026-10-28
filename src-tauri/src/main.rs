@@ -1317,6 +1317,10 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 // The direct binary has the same core options as the Node launcher.
 fn cli_help_text() -> String {
     let text = HELP_TEXT.replace(
+        "      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n",
+        "      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n      --plugins-list            Alias for --plugin-list.\n",
+    )
+    .replace(
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
     )
@@ -1674,6 +1678,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--show-config",
         "--profile-list",
         "--plugin-list",
+        "--plugins-list",
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
@@ -6120,8 +6125,20 @@ fn print_plugin_list_cli(config_path: &str, enabled: &[String]) {
         print_cli_text("  (none found)\n");
     } else {
         for plugin in available {
-            let metadata = read_plugin_metadata(&config_dir.join(&plugin));
-            print_cli_text(&format!("  {plugin} [version {}]\n", metadata.version));
+            let source_path = config_dir.join(&plugin);
+            let metadata = read_plugin_metadata(&source_path);
+            let tcp_targets = fs::read_to_string(&source_path)
+                .map(|source| plugin_allowed_tcp_targets(&source))
+                .unwrap_or_default();
+            let target_summary = if tcp_targets.is_empty() {
+                String::new()
+            } else {
+                format!("; TCP target {}", tcp_targets.join(", "))
+            };
+            print_cli_text(&format!(
+                "  {plugin} [version {}{target_summary}]\n",
+                metadata.version
+            ));
         }
     }
     print_cli_text("\nEnabled plugins:\n");
@@ -6380,7 +6397,7 @@ fn plugin_cli() {
         }
         return;
     }
-    if cli_has_flag(&["--plugin-list"]) {
+    if cli_has_flag(&["--plugin-list", "--plugins-list"]) {
         print_plugin_list_cli(&config_path, &enabled);
         return;
     }
@@ -6404,6 +6421,10 @@ fn plugin_cli() {
                     source_path.display(),
                     metadata.description,
                 ));
+                let tcp_targets = plugin_allowed_tcp_targets(&source);
+                if !tcp_targets.is_empty() {
+                    print_cli_text(&format!("TCP target: {}\n", tcp_targets.join(", ")));
+                }
             }
             Err(error) => {
                 print_cli_error(&format!("fpasoterm: {error}\n"));
@@ -6485,6 +6506,7 @@ fn plugin_cli() {
 fn plugin_cli_requested() -> bool {
     cli_has_flag(&[
         "--plugin-list",
+        "--plugins-list",
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
@@ -12065,6 +12087,7 @@ mod tests {
             "--copy-diagnostics",
             "--profile-list",
             "--plugin-list",
+            "--plugins-list",
             "--plugin-path",
             "--plugin-enable-all",
             "--plugin-disable-all",
