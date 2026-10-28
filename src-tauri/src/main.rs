@@ -1341,11 +1341,24 @@ fn cli_help_text() -> String {
     )
 }
 
+// Keep direct-binary argument failures actionable without dumping the entire
+// help screen for scripts. Bridge installs need a complete target and port ID,
+// so give those failures a copyable command shape.
+fn cli_usage_hint(error: &str) -> &'static str {
+    if error.starts_with("--plugin-tcp-target") {
+        "Usage: fpasoterm --plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge --plugin-tcp-target <host:port|tcp://host:port> [--plugin-ports-dir <path>] [--enable] [--force]\n"
+    } else if error.starts_with("--plugin-install requires") {
+        "Usage: fpasoterm --plugin-install <category/name> [--plugin-ports-dir <path>] [--enable] [--force]\n"
+    } else {
+        "Run 'fpasoterm --help' for full usage.\n"
+    }
+}
+
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     install_default_rustls_crypto_provider();
     if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
-        print_cli_error(&format!("fpasoterm: {error}\n"));
+        print_cli_error(&format!("fpasoterm: {error}\n{}", cli_usage_hint(&error)));
         std::process::exit(2);
     }
 
@@ -1788,6 +1801,14 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
                     ) {
                         format!(
                             "{argument} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm {argument} bash)"
+                        )
+                    } else if argument == "--plugin-tcp-target" {
+                        format!(
+                            "{argument} requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)"
+                        )
+                    } else if argument == "--plugin-install" {
+                        format!(
+                            "{argument} requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)"
                         )
                     } else {
                         format!("{argument} requires a value")
@@ -12353,11 +12374,28 @@ mod tests {
             Err("--completion-uninstall requires a shell: bash, zsh, fish, or powershell (example: fpasoterm --completion-uninstall bash)".to_string())
         );
         assert_eq!(
+            validate_direct_cli_args(&["--plugin-tcp-target".to_string()]),
+            Err("--plugin-tcp-target requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)".to_string())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-install".to_string()]),
+            Err("--plugin-install requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)".to_string())
+        );
+        assert_eq!(
             validate_direct_cli_args(&["--enable".to_string()]),
             Err(
                 "--force, --enable, and --plugin-tcp-target require a --plugin-install command"
                     .to_string()
             )
+        );
+        assert!(
+            cli_usage_hint("--plugin-tcp-target requires host:port").contains(
+                "--plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge"
+            )
+        );
+        assert_eq!(
+            cli_usage_hint("unknown option: --foo"),
+            "Run 'fpasoterm --help' for full usage.\n"
         );
     }
 

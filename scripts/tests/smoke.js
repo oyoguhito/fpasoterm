@@ -604,6 +604,16 @@ for (const unknownOption of ['--hoge', '-?']) {
   assert.doesNotMatch(result.stderr, /Usage: fpasoterm \[options\]/);
 }
 
+const missingPluginTargetResult = runCli('--plugin-tcp-target');
+assert.equal(missingPluginTargetResult.status, 2);
+assert.match(missingPluginTargetResult.stderr, /--plugin-tcp-target requires host:port/);
+assert.match(missingPluginTargetResult.stderr, /Usage: fpasoterm --plugin-install integration\/rdp-local-bridge\|integration\/novnc-local-bridge/);
+
+const missingPluginInstallResult = runCli('--plugin-install');
+assert.equal(missingPluginInstallResult.status, 2);
+assert.match(missingPluginInstallResult.stderr, /--plugin-install requires a port ID/);
+assert.match(missingPluginInstallResult.stderr, /Usage: fpasoterm --plugin-install <category\/name>/);
+
 const resetConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-reset-config-'));
 const resetConfigPath = path.join(resetConfigDir, 'User', 'config.toml');
 const resetStatePath = path.join(path.dirname(resetConfigPath), 'window-state.json');
@@ -1508,6 +1518,11 @@ assert.match(readme, /--setup-sync/);
 assert.match(readme, /--sync-status/);
 assert.match(readme, /--sync-clean/);
 assert.match(readme, /--broadcast/);
+assert.match(readme, /--plugin-tcp-target/);
+assert.match(readme, /--plugins-list/);
+assert.match(readme, /fpasoterm --help/);
+assert.match(readmeJa, /--plugin-tcp-target/);
+assert.match(readmeJa, /--plugins-list/);
 assert.match(readme, /node \.\\bin\\fpasoterm --setup-sync/);
 assert.match(readme, /docs\/pr-review\.en\.md/);
 assert.match(readme, /examples\/plugins/);

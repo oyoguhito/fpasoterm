@@ -1712,9 +1712,29 @@ function requireValue(argv, index, flag) {
     if (['--completion', '--completion-install', '--completion-uninstall'].includes(flag)) {
       throw new Error(`${flag} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm ${flag} bash)`);
     }
+    if (flag === '--plugin-tcp-target') {
+      throw new Error(`${flag} requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)`);
+    }
+    if (flag === '--plugin-install') {
+      throw new Error(`${flag} requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)`);
+    }
     throw new Error(`${flag} requires a value`);
   }
   return value;
+}
+
+// Keep invalid invocations concise, but always provide a route to complete
+// syntax. The two bridge options get copyable examples because they must be
+// supplied together and their native capability is intentionally exact.
+function cliUsageHint(error) {
+  const message = String(error?.message || error || '');
+  if (message.startsWith('--plugin-tcp-target')) {
+    return "\nUsage: fpasoterm --plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge --plugin-tcp-target <host:port|tcp://host:port> [--plugin-ports-dir <path>] [--enable] [--force]";
+  }
+  if (message.startsWith('--plugin-install requires')) {
+    return "\nUsage: fpasoterm --plugin-install <category/name> [--plugin-ports-dir <path>] [--enable] [--force]";
+  }
+  return "\nRun 'fpasoterm --help' for full usage.";
 }
 
 // Normalizes dimension arguments before they are passed to the app process.
@@ -3310,7 +3330,7 @@ try {
     });
   }
 } catch (error) {
-  console.error(`fpasoterm: ${error.message}`);
+  console.error(`fpasoterm: ${error.message}${cliUsageHint(error)}`);
   // Invalid CLI input must remain concise enough for scripts and shell history.
   // Explicit --help is the only operation that prints the full option list.
   process.exitCode = parsedArguments ? 1 : 2;

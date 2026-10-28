@@ -445,12 +445,15 @@ Plugins must live under `~/.config/fpasoterm/User/plugins/`. JavaScript (`.js`) 
 
 Plugins can read `version`, run post-startup work through `onReady()`, and add
 actions to the hamburger menu's `Plugins` submenu through `registerCommand()`.
-Use `fpasoterm --plugin-list` to inspect discovered and enabled plugins in the
-local `User/plugins` directory, or
+Use `fpasoterm --plugin-list` (or the `--plugins-list` alias) to inspect
+discovered and enabled plugins in the local `User/plugins` directory, including
+each declared TCP bridge target. Use
 `--plugin-enable` / `--plugin-disable` to update the enabled list. Use
 `fpasoterm --plugin-info welcome-banner` for a plugin's source, enabled
-state, description, and load status. Restart the affected window after an
-enable or source change.
+state, description, declared TCP target, and load status. Restart the affected
+window after an enable or source change. Use `fpasoterm --help` for the full
+CLI reference; missing bridge-install parameters include a copyable usage
+example.
 
 To invoke an enabled plugin's registered command while opening a new GUI
 window, use `fpasoterm --plugin-run <plugin/path[:command-id]>`. Pass one JSON
@@ -478,6 +481,24 @@ For one trusted standalone source file, use
 `fpasoterm --plugin-install-file ./my-plugin.ts --enable`. The ports project is
 for catalog/INDEX search and plugin development or validation; fpasoterm performs
 the end-user installation.
+
+RDP/noVNC local bridge ports accept one exact configured endpoint at install
+time. RDP is `tcp://` only; noVNC accepts `tcp://` or `tls://`. A bare
+`host:port` is normalized to `tcp://host:port`.
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+Add `--force` only when replacing an existing installed port. The target is
+written into both the plugin's bridge call and its native capability header;
+`--plugin-update-all` preserves it. Restart fpasoterm after installation.
 
 Use `fpasoterm --plugin-search [query]` to search official public port metadata
 without installing a plugin or downloading plugin source. The output includes a
