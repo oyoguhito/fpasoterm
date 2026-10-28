@@ -1313,6 +1313,13 @@ function showLocalPluginPortInfo(options) {
   if (port.tcpTargets.length) {
     console.log(`TCP target: ${port.tcpTargets.join(', ')}`);
   }
+  console.log('');
+  console.log('CLI usage:');
+  console.log('  fpasoterm --plugin-list --plugin-ports-dir <checkout-or-ports>');
+  console.log(`  fpasoterm --plugin-info ${port.id} --plugin-ports-dir <checkout-or-ports>`);
+  const targetOption = pluginTcpTargetPortIds.has(port.id) ? ' --plugin-tcp-target <target>' : '';
+  console.log(`  fpasoterm --plugin-install ${port.id} --plugin-ports-dir <checkout-or-ports>${targetOption} --enable`);
+  console.log('  fpasoterm --help');
 }
 
 // Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
@@ -2320,6 +2327,14 @@ function showPluginInfo(options) {
   if (resolved) {
     console.log(`Renderer URL: ${resolved.url}`);
   }
+  console.log('');
+  console.log('CLI usage:');
+  console.log('  fpasoterm --plugin-list');
+  console.log('  fpasoterm --plugin-info <plugin-file>');
+  console.log('  fpasoterm --enable-plugin <plugin-file>');
+  console.log('  fpasoterm --disable-plugin <plugin-file>');
+  console.log('  fpasoterm --plugin-uninstall <plugin-file>');
+  console.log('  fpasoterm --help');
 }
 
 // Expands common environment variable forms used in configuration paths.
