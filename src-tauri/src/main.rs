@@ -565,14 +565,18 @@ mod native_mp4 {
         ) -> c_int;
         fn fpasoterm_macos_mp4_writer_destroy(writer: *mut WriterHandle);
         fn fpasoterm_macos_mp4_error_free(message: *mut c_char);
-        fn fpasoterm_macos_window_snapshot_png(
+        fn fpasoterm_macos_window_snapshot_png_async(
             window: *mut c_void,
-            out_bytes: *mut *mut u8,
-            out_length: *mut usize,
-            out_width: *mut u32,
-            out_height: *mut u32,
-            out_error: *mut *mut c_char,
-        ) -> c_int;
+            callback: unsafe extern "C" fn(
+                bytes: *mut u8,
+                length: usize,
+                width: u32,
+                height: u32,
+                error: *mut c_char,
+                context: *mut c_void,
+            ),
+            context: *mut c_void,
+        );
         fn fpasoterm_macos_window_snapshot_free(bytes: *mut u8);
     }
 
@@ -599,40 +603,57 @@ mod native_mp4 {
         pub height: u32,
     }
 
-    // The C bridge owns the AppKit/CG objects and returns a copied PNG buffer.
-    // Copy it into Rust-owned memory before releasing it through the matching C
-    // allocator, so no allocator boundary crosses into the Tauri command.
-    pub fn capture_window_png(window: *mut c_void) -> Result<WindowPngFrame, String> {
-        let mut bytes = std::ptr::null_mut();
-        let mut length = 0usize;
-        let mut width = 0u32;
-        let mut height = 0u32;
-        let mut error = std::ptr::null_mut();
-        let captured = unsafe {
-            fpasoterm_macos_window_snapshot_png(
-                window,
-                &mut bytes,
-                &mut length,
-                &mut width,
-                &mut height,
-                &mut error,
-            )
-        };
-        if captured == 0 || bytes.is_null() || length == 0 {
+    type WindowSnapshotSender = tokio::sync::oneshot::Sender<Result<WindowPngFrame, String>>;
+
+    // The C bridge owns AppKit/WebKit objects and invokes this exactly once.
+    // Copy the returned bytes into Rust memory before releasing the C buffer,
+    // so the asynchronous WebKit completion never crosses allocator domains.
+    unsafe extern "C" fn window_snapshot_finished(
+        bytes: *mut u8,
+        length: usize,
+        width: u32,
+        height: u32,
+        error: *mut c_char,
+        context: *mut c_void,
+    ) {
+        if context.is_null() {
             if !bytes.is_null() {
                 unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
             }
-            return Err(take_error(
+            if !error.is_null() {
+                unsafe { fpasoterm_macos_mp4_error_free(error) };
+            }
+            return;
+        }
+        let sender = unsafe { Box::from_raw(context.cast::<WindowSnapshotSender>()) };
+        let result = if bytes.is_null() || length == 0 {
+            if !bytes.is_null() {
+                unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            }
+            Err(take_error(
                 error,
                 "macOS could not capture the fpasoterm window",
-            ));
+            ))
+        } else {
+            if !error.is_null() {
+                unsafe { fpasoterm_macos_mp4_error_free(error) };
+            }
+            let png = unsafe { std::slice::from_raw_parts(bytes, length).to_vec() };
+            unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+                Err("macOS window capture returned invalid dimensions".to_string())
+            } else {
+                Ok(WindowPngFrame { png, width, height })
+            }
+        };
+        let _ = sender.send(result);
+    }
+
+    pub fn request_window_png(window: *mut c_void, sender: WindowSnapshotSender) {
+        let context = Box::into_raw(Box::new(sender)).cast::<c_void>();
+        unsafe {
+            fpasoterm_macos_window_snapshot_png_async(window, window_snapshot_finished, context);
         }
-        let png = unsafe { std::slice::from_raw_parts(bytes, length).to_vec() };
-        unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
-        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
-            return Err("macOS window capture returned invalid dimensions".to_string());
-        }
-        Ok(WindowPngFrame { png, width, height })
     }
 
     pub struct NativeMp4Writer {
@@ -9316,10 +9337,11 @@ fn screen_video_recording_start(
     })
 }
 
-// Snapshot the invoking fpasoterm window only. The AppKit call is explicitly
-// marshalled to the main thread because CGWindowList image capture is not safe
-// from Tauri's command worker. Non-macOS builds retain their existing WebView
-// display/canvas paths and deliberately expose no equivalent command.
+// Snapshot the invoking fpasoterm window only. The AppKit/WebKit request is
+// explicitly marshalled to the main thread; WKWebView renders out of process
+// and completes its image asynchronously. Non-macOS builds retain their
+// existing WebView display/canvas paths and deliberately expose no equivalent
+// command.
 #[tauri::command]
 async fn screen_video_recording_window_snapshot(
     window: WebviewWindow,
@@ -9333,23 +9355,24 @@ async fn screen_video_recording_window_snapshot(
         let (sender, receiver) = tokio::sync::oneshot::channel();
         let window_for_main = window.clone();
         window
-            .run_on_main_thread(move || {
-                let frame = window_for_main
-                    .ns_window()
-                    .map_err(|error| format!("could not access the fpasoterm window: {error}"))
-                    .and_then(native_mp4::capture_window_png)
-                    .map(|frame| ScreenVideoWindowFrame {
-                        data_base64: BASE64_STANDARD.encode(frame.png),
-                        width: frame.width,
-                        height: frame.height,
-                    });
-                let _ = sender.send(frame);
+            .run_on_main_thread(move || match window_for_main.ns_window() {
+                Ok(native_window) => native_mp4::request_window_png(native_window, sender),
+                Err(error) => {
+                    let _ = sender.send(Err(format!(
+                        "could not access the fpasoterm window: {error}"
+                    )));
+                }
             })
             .map_err(|error| format!("could not schedule macOS window capture: {error}"))?;
-        tokio::time::timeout(Duration::from_secs(3), receiver)
+        let frame = tokio::time::timeout(Duration::from_secs(3), receiver)
             .await
             .map_err(|_| "macOS window capture did not complete within 3 seconds".to_string())?
-            .map_err(|_| "macOS window capture main-thread callback was cancelled".to_string())?
+            .map_err(|_| "macOS window capture main-thread callback was cancelled".to_string())??;
+        Ok(ScreenVideoWindowFrame {
+            data_base64: BASE64_STANDARD.encode(frame.png),
+            width: frame.width,
+            height: frame.height,
+        })
     }
     #[cfg(not(target_os = "macos"))]
     {

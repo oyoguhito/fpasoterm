@@ -157,6 +157,7 @@ fn main() {
             "CoreMedia",
             "CoreVideo",
             "Foundation",
+            "WebKit",
         ] {
             println!("cargo:rustc-link-lib=framework={framework}");
         }

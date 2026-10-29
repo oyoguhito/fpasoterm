@@ -116,12 +116,13 @@ path is used.
 
 On macOS, choosing the fpasoterm window from the system picker can require
 Screen Recording permission and is the supported way to include plugin controls
-and native popups. When the picker API is absent, fpasoterm rasterizes only its
-own AppKit content view. This fallback neither observes another application nor
-requires selecting a display; it prioritizes the terminal and plugin surface.
-Linux/ChromeOS and Windows retain their existing behavior. Test the picker and
-plugin-canvas route on each target platform before relying on recording in a
-workflow.
+and native popups. When the picker API is absent, fpasoterm asks its own
+WKWebView for a snapshot, then uses its AppKit content view only if WebKit is
+not ready. The WebKit route is necessary on Intel macOS because direct AppKit
+rasterization can be black for a process-isolated web view. Neither fallback
+observes another application nor requires selecting a display. Linux/ChromeOS
+and Windows retain their existing behavior. Test the picker and plugin-canvas
+route on each target platform before relying on recording in a workflow.
 
 Audio, microphone capture, automatic capture, editing, streaming, and a
 video-library UI are out of scope for this first version. GIF fallback files

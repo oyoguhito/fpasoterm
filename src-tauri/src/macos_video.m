@@ -4,6 +4,7 @@
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
+#import <WebKit/WebKit.h>
 #import <dispatch/dispatch.h>
 
 #include <stdbool.h>
@@ -356,51 +357,123 @@ static int fpasoterm_macos_encode_window_png(CGImageRef image,
   return 1;
 }
 
-// Captures only fpasoterm's own content view. It is called on the AppKit main
-// thread by the narrow Rust command and never enumerates or selects another
-// application's window. Taking this view snapshot avoids an external-screen
-// capture API and any external-screen capture permission.
-int fpasoterm_macos_window_snapshot_png(void *windowHandle,
-                                         uint8_t **outBytes,
-                                         size_t *outLength,
-                                         uint32_t *outWidth,
-                                         uint32_t *outHeight,
-                                         char **outError) {
-  @autoreleasepool {
-    if (outBytes == NULL || outLength == NULL || outWidth == NULL || outHeight == NULL) {
-      fpasoterm_copy_error(outError, nil, @"Window capture output is unavailable");
-      return 0;
+// The WebKit snapshot completion is asynchronous. The Rust caller owns the
+// returned bytes/error and releases them through the matching bridge helpers.
+typedef void (*FpasotermWindowSnapshotCallback)(uint8_t *bytes,
+                                                size_t length,
+                                                uint32_t width,
+                                                uint32_t height,
+                                                char *error,
+                                                void *context);
+
+static void fpasoterm_window_snapshot_complete_error(FpasotermWindowSnapshotCallback callback,
+                                                      void *context,
+                                                      NSError *error,
+                                                      NSString *fallback) {
+  char *message = NULL;
+  fpasoterm_copy_error(&message, error, fallback);
+  callback(NULL, 0, 0, 0, message, context);
+}
+
+static void fpasoterm_window_snapshot_complete_image(FpasotermWindowSnapshotCallback callback,
+                                                      void *context,
+                                                      CGImageRef image) {
+  uint8_t *bytes = NULL;
+  size_t length = 0;
+  uint32_t width = 0;
+  uint32_t height = 0;
+  char *error = NULL;
+  if (fpasoterm_macos_encode_window_png(
+          image, &bytes, &length, &width, &height, &error) == 0) {
+    callback(NULL, 0, 0, 0, error, context);
+    return;
+  }
+  callback(bytes, length, width, height, NULL, context);
+}
+
+static WKWebView *fpasoterm_find_web_view(NSView *view) {
+  if (view == nil) {
+    return nil;
+  }
+  if ([view isKindOfClass:[WKWebView class]]) {
+    return (WKWebView *)view;
+  }
+  for (NSView *subview in view.subviews) {
+    WKWebView *webView = fpasoterm_find_web_view(subview);
+    if (webView != nil) {
+      return webView;
     }
-    *outBytes = NULL;
-    *outLength = 0;
-    *outWidth = 0;
-    *outHeight = 0;
+  }
+  return nil;
+}
+
+static void fpasoterm_window_snapshot_content_view(NSView *contentView,
+                                                    FpasotermWindowSnapshotCallback callback,
+                                                    void *context) {
+  if (contentView == nil) {
+    fpasoterm_window_snapshot_complete_error(
+        callback, context, nil, @"macOS could not access the fpasoterm window content view");
+    return;
+  }
+  NSRect bounds = contentView.bounds;
+  if (NSIsEmptyRect(bounds)) {
+    fpasoterm_window_snapshot_complete_error(
+        callback, context, nil, @"macOS fpasoterm window content view has empty bounds");
+    return;
+  }
+  NSBitmapImageRep *contentBitmap = [contentView bitmapImageRepForCachingDisplayInRect:bounds];
+  if (contentBitmap == nil) {
+    fpasoterm_window_snapshot_complete_error(
+        callback, context, nil, @"macOS could not allocate a fpasoterm content snapshot");
+    return;
+  }
+  [contentView cacheDisplayInRect:bounds toBitmapImageRep:contentBitmap];
+  fpasoterm_window_snapshot_complete_image(callback, context, contentBitmap.CGImage);
+}
+
+// Captures fpasoterm's own WebKit view first, then falls back to its AppKit
+// content view if a WebKit snapshot cannot be produced. `cacheDisplayInRect`
+// can be black for a process-isolated WKWebView on Intel macOS; WebKit's own
+// snapshot API asks that rendering process for its visible pixels instead.
+// This is called on the AppKit main thread, never enumerates another window,
+// and does not use screen-capture APIs or require Screen Recording permission.
+void fpasoterm_macos_window_snapshot_png_async(void *windowHandle,
+                                                FpasotermWindowSnapshotCallback callback,
+                                                void *context) {
+  @autoreleasepool {
+    if (callback == NULL) {
+      return;
+    }
     if (windowHandle == NULL || ![NSThread isMainThread]) {
-      fpasoterm_copy_error(outError, nil, @"fpasoterm window capture must run on the AppKit main thread");
-      return 0;
+      fpasoterm_window_snapshot_complete_error(
+          callback, context, nil, @"fpasoterm window capture must run on the AppKit main thread");
+      return;
     }
     NSWindow *window = (__bridge NSWindow *)windowHandle;
-    // Rasterize the owned content view directly. This narrow path includes the
-    // WebView/plugin surface, has no global-window enumeration, and needs no
-    // Screen Recording permission.
     NSView *contentView = window.contentView;
-    if (contentView == nil) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not access the fpasoterm window content view");
-      return 0;
+    WKWebView *webView = fpasoterm_find_web_view(contentView);
+    if (webView == nil || NSIsEmptyRect(webView.bounds)) {
+      fpasoterm_window_snapshot_content_view(contentView, callback, context);
+      return;
     }
-    NSRect bounds = contentView.bounds;
-    if (NSIsEmptyRect(bounds)) {
-      fpasoterm_copy_error(outError, nil, @"macOS fpasoterm window content view has empty bounds");
-      return 0;
-    }
-    NSBitmapImageRep *contentBitmap = [contentView bitmapImageRepForCachingDisplayInRect:bounds];
-    if (contentBitmap == nil) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not allocate a fpasoterm content snapshot");
-      return 0;
-    }
-    [contentView cacheDisplayInRect:bounds toBitmapImageRep:contentBitmap];
-    return fpasoterm_macos_encode_window_png(
-        contentBitmap.CGImage, outBytes, outLength, outWidth, outHeight, outError);
+    WKSnapshotConfiguration *configuration = [[WKSnapshotConfiguration alloc] init];
+    configuration.rect = webView.bounds;
+    [webView takeSnapshotWithConfiguration:configuration
+                         completionHandler:^(NSImage *image, NSError *error) {
+      if (image == nil || error != nil) {
+        // Keep a narrow AppKit fallback for an early WebKit startup race. It
+        // can omit a remote layer, but still captures native terminal chrome.
+        fpasoterm_window_snapshot_content_view(contentView, callback, context);
+        return;
+      }
+      NSRect proposedRect = NSMakeRect(0, 0, image.size.width, image.size.height);
+      CGImageRef cgImage = [image CGImageForProposedRect:&proposedRect context:nil hints:nil];
+      if (cgImage == NULL) {
+        fpasoterm_window_snapshot_content_view(contentView, callback, context);
+        return;
+      }
+      fpasoterm_window_snapshot_complete_image(callback, context, cgImage);
+    }];
   }
 }
 
