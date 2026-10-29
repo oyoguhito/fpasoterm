@@ -308,6 +308,54 @@ void fpasoterm_macos_mp4_error_free(char *message) {
   free(message);
 }
 
+// Encodes one AppKit/CoreGraphics image to the bounded PNG payload consumed by
+// Rust. The caller retains ownership of `image`; this helper never observes a
+// display or another application.
+static int fpasoterm_macos_encode_window_png(CGImageRef image,
+                                              uint8_t **outBytes,
+                                              size_t *outLength,
+                                              uint32_t *outWidth,
+                                              uint32_t *outHeight,
+                                              char **outError) {
+  if (image == NULL) {
+    fpasoterm_copy_error(outError, nil, @"macOS window image is unavailable");
+    return 0;
+  }
+  size_t imageWidth = CGImageGetWidth(image);
+  size_t imageHeight = CGImageGetHeight(image);
+  // H.264 needs even dimensions. Crop one trailing pixel rather than
+  // rescaling the titlebar or remote-desktop pixels.
+  size_t width = imageWidth - (imageWidth % 2);
+  size_t height = imageHeight - (imageHeight % 2);
+  if (width < 2 || height < 2 || width > UINT32_MAX || height > UINT32_MAX) {
+    fpasoterm_copy_error(outError, nil, @"fpasoterm window capture has invalid dimensions");
+    return 0;
+  }
+  CGImageRef cropped = CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, height));
+  if (cropped == NULL) {
+    fpasoterm_copy_error(outError, nil, @"macOS could not crop the fpasoterm window capture");
+    return 0;
+  }
+  NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:cropped];
+  CGImageRelease(cropped);
+  NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+  if (png == nil || png.length == 0) {
+    fpasoterm_copy_error(outError, nil, @"macOS could not encode the fpasoterm window capture as PNG");
+    return 0;
+  }
+  uint8_t *bytes = malloc(png.length);
+  if (bytes == NULL) {
+    fpasoterm_copy_error(outError, nil, @"macOS could not allocate the fpasoterm window capture");
+    return 0;
+  }
+  memcpy(bytes, png.bytes, png.length);
+  *outBytes = bytes;
+  *outLength = png.length;
+  *outWidth = (uint32_t)width;
+  *outHeight = (uint32_t)height;
+  return 1;
+}
+
 // Captures only fpasoterm's own NSWindow. It is called on the AppKit main
 // thread by the narrow Rust command and never enumerates or selects another
 // application's window. The PNG result keeps the existing Rust/AVFoundation
@@ -343,45 +391,44 @@ int fpasoterm_macos_window_snapshot_png(void *windowHandle,
         kCGWindowListOptionIncludingWindow,
         windowId,
         kCGWindowImageBoundsIgnoreFraming | kCGWindowImageShouldBeOpaque);
-    if (image == NULL) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not capture the fpasoterm window; allow Screen Recording if requested");
-      return 0;
-    }
-    size_t imageWidth = CGImageGetWidth(image);
-    size_t imageHeight = CGImageGetHeight(image);
-    // H.264 needs even dimensions. Crop one trailing pixel rather than
-    // rescaling the titlebar or remote-desktop pixels.
-    size_t width = imageWidth - (imageWidth % 2);
-    size_t height = imageHeight - (imageHeight % 2);
-    if (width < 2 || height < 2 || width > UINT32_MAX || height > UINT32_MAX) {
+    if (image != NULL) {
+      int encoded = fpasoterm_macos_encode_window_png(
+          image, outBytes, outLength, outWidth, outHeight, outError);
       CGImageRelease(image);
-      fpasoterm_copy_error(outError, nil, @"fpasoterm window capture has invalid dimensions");
+      if (encoded != 0) {
+        return 1;
+      }
+      // The first path can have allocated a diagnostic string. It is not an
+      // error if the content-view path below succeeds, so release it before
+      // reusing the output slot.
+      if (outError != NULL && *outError != NULL) {
+        free(*outError);
+        *outError = NULL;
+      }
+    }
+
+    // CGWindowList can be denied by Screen Recording privacy controls even
+    // for the caller's own window. Rasterize the content view directly as a
+    // narrow fallback. This has no global-window enumeration, includes the
+    // WebView/plugin surface, and does not need a screen-capture permission.
+    NSView *contentView = window.contentView;
+    if (contentView == nil) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not access the fpasoterm window content view");
       return 0;
     }
-    CGImageRef cropped = CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, height));
-    CGImageRelease(image);
-    if (cropped == NULL) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not crop the fpasoterm window capture");
+    NSRect bounds = contentView.bounds;
+    if (NSIsEmptyRect(bounds)) {
+      fpasoterm_copy_error(outError, nil, @"macOS fpasoterm window content view has empty bounds");
       return 0;
     }
-    NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:cropped];
-    CGImageRelease(cropped);
-    NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
-    if (png == nil || png.length == 0) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not encode the fpasoterm window capture as PNG");
+    NSBitmapImageRep *contentBitmap = [contentView bitmapImageRepForCachingDisplayInRect:bounds];
+    if (contentBitmap == nil) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not allocate a fpasoterm content snapshot");
       return 0;
     }
-    uint8_t *bytes = malloc(png.length);
-    if (bytes == NULL) {
-      fpasoterm_copy_error(outError, nil, @"macOS could not allocate the fpasoterm window capture");
-      return 0;
-    }
-    memcpy(bytes, png.bytes, png.length);
-    *outBytes = bytes;
-    *outLength = png.length;
-    *outWidth = (uint32_t)width;
-    *outHeight = (uint32_t)height;
-    return 1;
+    [contentView cacheDisplayInRect:bounds toBitmapImageRep:contentBitmap];
+    return fpasoterm_macos_encode_window_png(
+        contentBitmap.CGImage, outBytes, outLength, outWidth, outHeight, outError);
   }
 }
 

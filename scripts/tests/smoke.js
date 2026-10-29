@@ -1030,6 +1030,10 @@ const rustMain = read('src-tauri/src/main.rs');
 assert.match(rustMain, /fn screen_video_recording_window_snapshot/);
 assert.match(rustMain, /fpasoterm_macos_window_snapshot_png/);
 assert.match(rustMain, /run_on_main_thread/);
+const macosVideoSource = read('src-tauri/src/macos_video.m');
+assert.match(macosVideoSource, /CGWindowListCreateImage/);
+assert.match(macosVideoSource, /bitmapImageRepForCachingDisplayInRect/);
+assert.match(macosVideoSource, /cacheDisplayInRect/);
 assert.match(
   rustMain,
   /"images":\s*\{\s*"enabled": true,\s*"kittySupport": true,\s*"kittySizeLimit": 8388608,\s*"storageLimit": 8,/,
