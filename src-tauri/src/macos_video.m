@@ -1,4 +1,6 @@
 #import <AVFoundation/AVFoundation.h>
+#import <AppKit/AppKit.h>
+#import <CoreGraphics/CoreGraphics.h>
 #import <CoreMedia/CoreMedia.h>
 #import <CoreVideo/CoreVideo.h>
 #import <Foundation/Foundation.h>
@@ -304,4 +306,85 @@ void fpasoterm_macos_mp4_writer_destroy(void *handle) {
 
 void fpasoterm_macos_mp4_error_free(char *message) {
   free(message);
+}
+
+// Captures only fpasoterm's own NSWindow. It is called on the AppKit main
+// thread by the narrow Rust command and never enumerates or selects another
+// application's window. The PNG result keeps the existing Rust/AVFoundation
+// writer boundary intact while preserving native popup controls that a canvas
+// snapshot cannot represent.
+int fpasoterm_macos_window_snapshot_png(void *windowHandle,
+                                         uint8_t **outBytes,
+                                         size_t *outLength,
+                                         uint32_t *outWidth,
+                                         uint32_t *outHeight,
+                                         char **outError) {
+  @autoreleasepool {
+    if (outBytes == NULL || outLength == NULL || outWidth == NULL || outHeight == NULL) {
+      fpasoterm_copy_error(outError, nil, @"Window capture output is unavailable");
+      return 0;
+    }
+    *outBytes = NULL;
+    *outLength = 0;
+    *outWidth = 0;
+    *outHeight = 0;
+    if (windowHandle == NULL || ![NSThread isMainThread]) {
+      fpasoterm_copy_error(outError, nil, @"fpasoterm window capture must run on the AppKit main thread");
+      return 0;
+    }
+    NSWindow *window = (__bridge NSWindow *)windowHandle;
+    CGWindowID windowId = (CGWindowID)[window windowNumber];
+    if (windowId == 0) {
+      fpasoterm_copy_error(outError, nil, @"fpasoterm window has no capture identifier");
+      return 0;
+    }
+    CGImageRef image = CGWindowListCreateImage(
+        CGRectNull,
+        kCGWindowListOptionIncludingWindow,
+        windowId,
+        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageShouldBeOpaque);
+    if (image == NULL) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not capture the fpasoterm window; allow Screen Recording if requested");
+      return 0;
+    }
+    size_t imageWidth = CGImageGetWidth(image);
+    size_t imageHeight = CGImageGetHeight(image);
+    // H.264 needs even dimensions. Crop one trailing pixel rather than
+    // rescaling the titlebar or remote-desktop pixels.
+    size_t width = imageWidth - (imageWidth % 2);
+    size_t height = imageHeight - (imageHeight % 2);
+    if (width < 2 || height < 2 || width > UINT32_MAX || height > UINT32_MAX) {
+      CGImageRelease(image);
+      fpasoterm_copy_error(outError, nil, @"fpasoterm window capture has invalid dimensions");
+      return 0;
+    }
+    CGImageRef cropped = CGImageCreateWithImageInRect(image, CGRectMake(0, 0, width, height));
+    CGImageRelease(image);
+    if (cropped == NULL) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not crop the fpasoterm window capture");
+      return 0;
+    }
+    NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc] initWithCGImage:cropped];
+    CGImageRelease(cropped);
+    NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
+    if (png == nil || png.length == 0) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not encode the fpasoterm window capture as PNG");
+      return 0;
+    }
+    uint8_t *bytes = malloc(png.length);
+    if (bytes == NULL) {
+      fpasoterm_copy_error(outError, nil, @"macOS could not allocate the fpasoterm window capture");
+      return 0;
+    }
+    memcpy(bytes, png.bytes, png.length);
+    *outBytes = bytes;
+    *outLength = png.length;
+    *outWidth = (uint32_t)width;
+    *outHeight = (uint32_t)height;
+    return 1;
+  }
+}
+
+void fpasoterm_macos_window_snapshot_free(uint8_t *bytes) {
+  free(bytes);
 }

@@ -537,7 +537,7 @@ mod native_webm {
 mod native_mp4 {
     use super::*;
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::{c_char, c_int, c_void};
 
     #[repr(C)]
     struct WriterHandle {
@@ -565,6 +565,15 @@ mod native_mp4 {
         ) -> c_int;
         fn fpasoterm_macos_mp4_writer_destroy(writer: *mut WriterHandle);
         fn fpasoterm_macos_mp4_error_free(message: *mut c_char);
+        fn fpasoterm_macos_window_snapshot_png(
+            window: *mut c_void,
+            out_bytes: *mut *mut u8,
+            out_length: *mut usize,
+            out_width: *mut u32,
+            out_height: *mut u32,
+            out_error: *mut *mut c_char,
+        ) -> c_int;
+        fn fpasoterm_macos_window_snapshot_free(bytes: *mut u8);
     }
 
     fn take_error(message: *mut c_char, fallback: &str) -> String {
@@ -582,6 +591,48 @@ mod native_mp4 {
         } else {
             value
         }
+    }
+
+    pub struct WindowPngFrame {
+        pub png: Vec<u8>,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    // The C bridge owns the AppKit/CG objects and returns a copied PNG buffer.
+    // Copy it into Rust-owned memory before releasing it through the matching C
+    // allocator, so no allocator boundary crosses into the Tauri command.
+    pub fn capture_window_png(window: *mut c_void) -> Result<WindowPngFrame, String> {
+        let mut bytes = std::ptr::null_mut();
+        let mut length = 0usize;
+        let mut width = 0u32;
+        let mut height = 0u32;
+        let mut error = std::ptr::null_mut();
+        let captured = unsafe {
+            fpasoterm_macos_window_snapshot_png(
+                window,
+                &mut bytes,
+                &mut length,
+                &mut width,
+                &mut height,
+                &mut error,
+            )
+        };
+        if captured == 0 || bytes.is_null() || length == 0 {
+            if !bytes.is_null() {
+                unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            }
+            return Err(take_error(
+                error,
+                "macOS could not capture the fpasoterm window",
+            ));
+        }
+        let png = unsafe { std::slice::from_raw_parts(bytes, length).to_vec() };
+        unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+        if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+            return Err("macOS window capture returned invalid dimensions".to_string());
+        }
+        Ok(WindowPngFrame { png, width, height })
     }
 
     pub struct NativeMp4Writer {
@@ -1175,6 +1226,16 @@ struct ScreenVideoRecordingStatus {
     message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One fpasoterm-owned native-window snapshot. Its encoded payload stays within
+// the existing bounded video-recording IPC path and is never written elsewhere.
+struct ScreenVideoWindowFrame {
+    data_base64: String,
+    width: u32,
+    height: u32,
+}
+
 // A small, non-sensitive runtime fact used where WebView user-agent strings
 // cannot distinguish Intel macOS from Apple Silicon (both commonly report
 // MacIntel). Keeping it native avoids browser-UA heuristics in video fallback
@@ -1609,6 +1670,7 @@ fn main() {
             terminal_log_list,
             terminal_log_delete,
             screen_video_recording_start,
+            screen_video_recording_window_snapshot,
             screen_video_recording_append,
             screen_video_recording_stop,
             screen_video_recording_abort,
@@ -9252,6 +9314,48 @@ fn screen_video_recording_start(
         max_bytes,
         message: "screen video recording started".to_string(),
     })
+}
+
+// Snapshot the invoking fpasoterm window only. The AppKit call is explicitly
+// marshalled to the main thread because CGWindowList image capture is not safe
+// from Tauri's command worker. Non-macOS builds retain their existing WebView
+// display/canvas paths and deliberately expose no equivalent command.
+#[tauri::command]
+async fn screen_video_recording_window_snapshot(
+    window: WebviewWindow,
+) -> Result<ScreenVideoWindowFrame, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Do not block the Tauri command worker while AppKit performs the
+        // snapshot. A synchronous channel wait can deadlock when the command
+        // is dispatched from the same UI run loop that run_on_main_thread
+        // needs to service.
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let window_for_main = window.clone();
+        window
+            .run_on_main_thread(move || {
+                let frame = window_for_main
+                    .ns_window()
+                    .map_err(|error| format!("could not access the fpasoterm window: {error}"))
+                    .and_then(native_mp4::capture_window_png)
+                    .map(|frame| ScreenVideoWindowFrame {
+                        data_base64: BASE64_STANDARD.encode(frame.png),
+                        width: frame.width,
+                        height: frame.height,
+                    });
+                let _ = sender.send(frame);
+            })
+            .map_err(|error| format!("could not schedule macOS window capture: {error}"))?;
+        tokio::time::timeout(Duration::from_secs(3), receiver)
+            .await
+            .map_err(|_| "macOS window capture did not complete within 3 seconds".to_string())?
+            .map_err(|_| "macOS window capture main-thread callback was cancelled".to_string())?
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Err("native fpasoterm window capture is available only on macOS".to_string())
+    }
 }
 
 fn append_screen_video_recording_bytes(

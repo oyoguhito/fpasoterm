@@ -1027,6 +1027,9 @@ assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
 assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
+assert.match(rustMain, /fn screen_video_recording_window_snapshot/);
+assert.match(rustMain, /fpasoterm_macos_window_snapshot_png/);
+assert.match(rustMain, /run_on_main_thread/);
 assert.match(
   rustMain,
   /"images":\s*\{\s*"enabled": true,\s*"kittySupport": true,\s*"kittySizeLimit": 8388608,\s*"storageLimit": 8,/,
@@ -2884,7 +2887,12 @@ assert.match(rendererSource, /function isCanvasVideoTarget\(value\)/);
 assert.match(rendererSource, /function canvasIsVisibleForVideo\(canvas\)/);
 assert.match(rendererSource, /createPluginCanvasSurface/);
 assert.match(rendererSource, /createPreferredVideoCanvasSurface/);
-assert.match(rendererSource, /startTerminalRasterRecording\(container, label, pluginCanvas = null\)/);
+assert.match(rendererSource, /startTerminalRasterRecording\(/);
+assert.match(rendererSource, /captureScreenVideoWindowFrame/);
+assert.match(rendererSource, /startNativeMacWindowRecording/);
+assert.match(rendererSource, /createNativeMacWindowCanvasVideoCapture/);
+assert.match(rendererSource, /native fpasoterm-window PNG frames in the WebM recorder/);
+assert.match(rendererSource, /native macOS fpasoterm-window capture unavailable/);
 assert.match(rendererSource, /startTerminalNativeMp4Recording\(frontPluginCanvas\)/);
 assert.match(rendererSource, /front plugin canvas/);
 assert.match(rendererSource, /front plugin canvas uses native WebM recording/);

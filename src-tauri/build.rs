@@ -140,16 +140,24 @@ fn main() {
     #[cfg(target_os = "macos")]
     {
         // Keep Intel macOS recording independent of WKWebView's unreliable
-        // CanvasCaptureMediaStream. This bridge sends trusted RGBA terminal
-        // frames to the OS AVFoundation H.264/MP4 writer; it is not built on
-        // Linux, Windows, or macOS arm64's normal WebM path.
+        // CanvasCaptureMediaStream and let every macOS build snapshot only its
+        // own AppKit window when the WebView omits the system picker. The
+        // bridge sends trusted RGBA frames to AVFoundation on Intel, while
+        // Apple Silicon keeps its normal WebM MediaRecorder path.
         println!("cargo:rerun-if-changed=src/macos_video.m");
         cc::Build::new()
             .file("src/macos_video.m")
             .flag("-fobjc-arc")
             .flag("-fblocks")
             .compile("fpasoterm_macos_video");
-        for framework in ["AVFoundation", "CoreMedia", "CoreVideo", "Foundation"] {
+        for framework in [
+            "AVFoundation",
+            "AppKit",
+            "CoreGraphics",
+            "CoreMedia",
+            "CoreVideo",
+            "Foundation",
+        ] {
             println!("cargo:rustc-link-lib=framework={framework}");
         }
     }

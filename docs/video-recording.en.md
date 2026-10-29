@@ -17,12 +17,14 @@ fpasoterm terminal surface.
 3. On macOS, select the **fpasoterm window** and approve sharing, even when
    starting from the terminal. The same recording then follows later changes to
    an RDP local-bridge or another reviewed plugin and includes controls and
-   popups. If the picker is unavailable, fpasoterm falls back to the currently
-   visible plugin canvas or terminal. On other platforms, a visible plugin
-   canvas starts recording directly. Otherwise, select the intended screen or
-   window in an available operating-system picker. If neither source is
-   available, fpasoterm immediately starts its terminal-surface recording
-   fallback.
+   popups. If the picker API is unavailable, fpasoterm uses a native snapshot
+   of its own window, which keeps the same terminal-to-plugin behavior without
+   selecting another application. Only if that native capture is unavailable
+   does it fall back to the currently visible plugin canvas or terminal. On
+   other platforms, a visible plugin canvas starts recording directly.
+   Otherwise, select the intended screen or window in an available
+   operating-system picker. If neither source is available, fpasoterm
+   immediately starts its terminal-surface recording fallback.
 4. The titlebar changes to **Recording** and the menu action changes to
    **Video Stop**. Continue using fpasoterm normally.
 5. Choose **Log → Video Stop**. The titlebar shows **Saving video** while the
@@ -59,8 +61,10 @@ can be recorded without capturing another application. On macOS, fpasoterm
 deliberately asks the user to select its own window for every recording, so one
 window stream remains valid when the foreground later changes from terminal to
 plugin. A canvas snapshot cannot include surrounding controls or native popups.
-If the picker is unavailable, the RDP fallback records the remote desktop
-canvas only, not the fpasoterm titlebar, plugin controls, prompts, or an iframe.
+When WKWebView omits the picker API, fpasoterm captures only its own NSWindow
+natively before resorting to a canvas fallback. If both paths are unavailable,
+the RDP fallback records the remote desktop canvas only, not the fpasoterm
+titlebar, plugin controls, prompts, or an iframe.
 Select only a screen/window surface you are allowed to record; a full-screen
 choice can include other applications and sensitive data. The terminal-surface
 fallback captures no other application and needs no picker.
@@ -86,11 +90,14 @@ macOS architectures, every start first uses a user-approved fpasoterm
 window/display stream when the picker is available, so terminal-to-plugin
 changes remain in the complete recording.
 Intel macOS WKWebView can instead report MP4 support but encode an all-black
-CanvasCapture movie. Only when the picker is unavailable, Intel macOS avoids
-that bad path and sends verified plugin-or-terminal PNG frames to the built-in
-macOS AVFoundation H.264/MP4 writer. If AVFoundation cannot initialize, it
-falls back to the built-in animated GIF writer. Windows retains the browser canvas MediaRecorder
-fallback. PNG is an internal frame format, never the completed recording file.
+CanvasCapture movie. When the picker is unavailable, macOS first creates PNG
+snapshots of fpasoterm's own NSWindow. Apple Silicon copies those trusted PNGs
+into its established WebM-capable MediaRecorder canvas path; Intel sends them
+to the built-in macOS AVFoundation H.264/MP4 writer. Only if native window
+capture fails does it use verified plugin-or-terminal canvas PNG frames;
+AVFoundation initialization failure falls back to the built-in animated GIF
+writer. Windows retains the browser canvas MediaRecorder fallback. PNG is an
+internal frame format, never the completed recording file.
 **Video unavailable** is shown only when the applicable platform path cannot
 create PNG canvas frames.
 
@@ -98,19 +105,22 @@ Some WebKitGTK builds produce a complete WebM document for each MediaRecorder
 timeslice; concatenating those documents makes many players stop at the first
 fragment. The Linux/ChromeOS terminal fallback does not concatenate those
 payloads: it streams PNG snapshots directly into one native WebM muxer. The
-Windows and Apple Silicon macOS terminal-surface MediaRecorder fallbacks buffer
-one recording until **Video Stop** and write a single final payload. Intel
-macOS writes bounded plugin-or-terminal PNG frames to AVFoundation's H.264 MP4
-encoder; only an AVFoundation setup failure falls back to GIF. Use moderate
-recording durations on memory-constrained systems. OS-picker screen/window
-captures continue to stream bounded chunks where that path is used.
+Windows and Apple Silicon macOS MediaRecorder paths buffer one recording until
+**Video Stop** and write a single final payload. On Apple Silicon, that includes
+the native self-window PNG-to-canvas route used when the picker API is missing.
+Intel macOS writes bounded self-window, plugin, or terminal PNG frames to
+AVFoundation's H.264 MP4 encoder; only an AVFoundation setup failure falls back
+to GIF. Use moderate recording durations on memory-constrained systems.
+OS-picker screen/window captures continue to stream bounded chunks where that
+path is used.
 
 On macOS, choosing the fpasoterm window can require Screen Recording permission
-and is the supported way to include plugin controls and native popups. If the
-picker is unavailable, Intel macOS uses its canvas-only AVFoundation fallback;
-Apple Silicon uses its normal WebView fallback. Linux/ChromeOS and Windows
-retain their existing behavior. Test the picker and plugin-canvas route on each
-target platform before relying on recording in a workflow.
+and is the supported way to include plugin controls and native popups. When the
+picker API is absent, the native self-window snapshot path provides the same
+scope without observing another application; it may still need macOS Screen
+Recording approval. Linux/ChromeOS and Windows retain their existing behavior.
+Test the picker and plugin-canvas route on each target platform before relying
+on recording in a workflow.
 
 Audio, microphone capture, automatic capture, editing, streaming, and a
 video-library UI are out of scope for this first version. GIF fallback files
