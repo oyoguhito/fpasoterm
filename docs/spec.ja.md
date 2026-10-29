@@ -93,7 +93,7 @@ renderer plugin は `window.fpasotermPluginApi` から terminal、fit addon、�
 ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
-diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shift+c` copy 経路を使います。
+diagnostics / log panel の textarea も terminal selection と同じ `Ctrl+Shift+c` copy 経路を使います。live **Diagnostics** viewの **Copy diagnostics** buttonは、textを選択せずterminal copy actionも呼ばずに、backendが保持するdiagnostic全文をclipboardへコピーします。
 
 ## 非目標
 

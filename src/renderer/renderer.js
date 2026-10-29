@@ -15,6 +15,7 @@ const terminalLogSearchStatusElement = document.getElementById('terminal-log-sea
 const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
 const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
 const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
+const diagnosticsCopyButton = document.getElementById('diagnostics-copy');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
 const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
 const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
@@ -1007,6 +1008,7 @@ function appendDiagnosticLine(message) {
   showDiagnosticsTextArea();
   setTerminalLogPickerVisible(false);
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
@@ -1030,6 +1032,7 @@ function showLiveDiagnosticsView() {
   setTerminalEncodingControlsVisible(false);
   showDiagnosticsTextArea();
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
@@ -1052,6 +1055,7 @@ function closeDiagnosticsPanel() {
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   setDiagnosticsFilterVisible(false);
+  setDiagnosticsCopyVisible(false);
   setPluginCatalogSearchVisible(false);
   setScreenVideoPickerVisible(false);
   setTerminalEncodingControlsVisible(false);
@@ -1075,6 +1079,13 @@ function setDiagnosticsFilterVisible(visible) {
   if (diagnosticsFilterElement) diagnosticsFilterElement.hidden = !visible;
   if (diagnosticsFilterApplyButton) diagnosticsFilterApplyButton.hidden = !visible;
   if (diagnosticsFilterStatusElement) diagnosticsFilterStatusElement.hidden = !visible;
+}
+
+// Copies backend-retained diagnostics without selecting text in the panel or
+// triggering the terminal's Copy shortcut. This is intentionally limited to
+// the live Diagnostics view; logs and catalog text retain their own actions.
+function setDiagnosticsCopyVisible(visible) {
+  if (diagnosticsCopyButton) diagnosticsCopyButton.hidden = !visible;
 }
 
 // Keeps public port filtering separate from terminal-log search controls.
@@ -3781,6 +3792,7 @@ function diagnosticsPanelFocusItems() {
     terminalLogSearchNextButton,
     diagnosticsFilterElement,
     diagnosticsFilterApplyButton,
+    diagnosticsCopyButton,
     pluginCatalogSearchElement,
     pluginCatalogUpdatesOnlyButton,
     terminalLogShowSelectedButton,
@@ -6167,6 +6179,28 @@ async function deleteSelectedTerminalOutputLog() {
 // Hides the diagnostics/log panel when it blocks the terminal view.
 closeDiagnosticsButton.addEventListener('click', () => {
   closeDiagnosticsPanel();
+});
+
+diagnosticsCopyButton?.addEventListener('click', async () => {
+  if (diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  const originalLabel = diagnosticsCopyButton.textContent;
+  diagnosticsCopyButton.disabled = true;
+  try {
+    const copied = await window.fpasoterm.copyDiagnostics();
+    if (!copied) {
+      throw new Error('there are no diagnostics to copy');
+    }
+    diagnosticsCopyButton.textContent = 'Copied';
+  } catch (error) {
+    diagnosticsCopyButton.textContent = 'Copy failed';
+    showDiagnostic(`diagnostics copy failed: ${error}`);
+  }
+  window.setTimeout(() => {
+    diagnosticsCopyButton.textContent = originalLabel;
+    diagnosticsCopyButton.disabled = false;
+  }, 1600);
 });
 
 terminalLogToggleButton.addEventListener('click', () => {

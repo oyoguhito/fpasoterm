@@ -108,7 +108,7 @@ Diagnostics are written to:
 ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
-The diagnostics and log panel textareas use the same `Ctrl+Shift+c` copy path as the terminal selection.
+The diagnostics and log panel textareas use the same `Ctrl+Shift+c` copy path as the terminal selection. The live **Diagnostics** view also has a **Copy diagnostics** button that copies the complete backend-retained diagnostic log without selecting text or invoking the terminal copy action.
 
 ## Non-goals
 
