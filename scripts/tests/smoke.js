@@ -1031,7 +1031,8 @@ assert.match(rustMain, /fn screen_video_recording_window_snapshot/);
 assert.match(rustMain, /fpasoterm_macos_window_snapshot_png/);
 assert.match(rustMain, /run_on_main_thread/);
 const macosVideoSource = read('src-tauri/src/macos_video.m');
-assert.match(macosVideoSource, /CGWindowListCreateImage/);
+assert.doesNotMatch(macosVideoSource, /CGWindowListCreateImage/);
+assert.doesNotMatch(macosVideoSource, /kCGWindow/);
 assert.match(macosVideoSource, /bitmapImageRepForCachingDisplayInRect/);
 assert.match(macosVideoSource, /cacheDisplayInRect/);
 assert.match(

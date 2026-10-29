@@ -114,14 +114,14 @@ to GIF. Use moderate recording durations on memory-constrained systems.
 OS-picker screen/window captures continue to stream bounded chunks where that
 path is used.
 
-On macOS, choosing the fpasoterm window can require Screen Recording permission
-and is the supported way to include plugin controls and native popups. When the
-picker API is absent, fpasoterm first tries that same self-window image and
-then rasterizes its own AppKit content view if macOS denies CoreGraphics screen
-capture. The latter neither observes another application nor requires selecting
-a display; it prioritizes the terminal and plugin surface. Linux/ChromeOS and
-Windows retain their existing behavior. Test the picker and plugin-canvas route
-on each target platform before relying on recording in a workflow.
+On macOS, choosing the fpasoterm window from the system picker can require
+Screen Recording permission and is the supported way to include plugin controls
+and native popups. When the picker API is absent, fpasoterm rasterizes only its
+own AppKit content view. This fallback neither observes another application nor
+requires selecting a display; it prioritizes the terminal and plugin surface.
+Linux/ChromeOS and Windows retain their existing behavior. Test the picker and
+plugin-canvas route on each target platform before relying on recording in a
+workflow.
 
 Audio, microphone capture, automatic capture, editing, streaming, and a
 video-library UI are out of scope for this first version. GIF fallback files

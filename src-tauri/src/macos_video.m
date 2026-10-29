@@ -308,8 +308,8 @@ void fpasoterm_macos_mp4_error_free(char *message) {
   free(message);
 }
 
-// Encodes one AppKit/CoreGraphics image to the bounded PNG payload consumed by
-// Rust. The caller retains ownership of `image`; this helper never observes a
+// Encodes one AppKit-owned image to the bounded PNG payload consumed by Rust.
+// The caller retains ownership of `image`; this helper never observes a
 // display or another application.
 static int fpasoterm_macos_encode_window_png(CGImageRef image,
                                               uint8_t **outBytes,
@@ -356,11 +356,10 @@ static int fpasoterm_macos_encode_window_png(CGImageRef image,
   return 1;
 }
 
-// Captures only fpasoterm's own NSWindow. It is called on the AppKit main
+// Captures only fpasoterm's own content view. It is called on the AppKit main
 // thread by the narrow Rust command and never enumerates or selects another
-// application's window. The PNG result keeps the existing Rust/AVFoundation
-// writer boundary intact while preserving native popup controls that a canvas
-// snapshot cannot represent.
+// application's window. Taking this view snapshot avoids an external-screen
+// capture API and any external-screen capture permission.
 int fpasoterm_macos_window_snapshot_png(void *windowHandle,
                                          uint8_t **outBytes,
                                          size_t *outLength,
@@ -381,36 +380,9 @@ int fpasoterm_macos_window_snapshot_png(void *windowHandle,
       return 0;
     }
     NSWindow *window = (__bridge NSWindow *)windowHandle;
-    CGWindowID windowId = (CGWindowID)[window windowNumber];
-    if (windowId == 0) {
-      fpasoterm_copy_error(outError, nil, @"fpasoterm window has no capture identifier");
-      return 0;
-    }
-    CGImageRef image = CGWindowListCreateImage(
-        CGRectNull,
-        kCGWindowListOptionIncludingWindow,
-        windowId,
-        kCGWindowImageBoundsIgnoreFraming | kCGWindowImageShouldBeOpaque);
-    if (image != NULL) {
-      int encoded = fpasoterm_macos_encode_window_png(
-          image, outBytes, outLength, outWidth, outHeight, outError);
-      CGImageRelease(image);
-      if (encoded != 0) {
-        return 1;
-      }
-      // The first path can have allocated a diagnostic string. It is not an
-      // error if the content-view path below succeeds, so release it before
-      // reusing the output slot.
-      if (outError != NULL && *outError != NULL) {
-        free(*outError);
-        *outError = NULL;
-      }
-    }
-
-    // CGWindowList can be denied by Screen Recording privacy controls even
-    // for the caller's own window. Rasterize the content view directly as a
-    // narrow fallback. This has no global-window enumeration, includes the
-    // WebView/plugin surface, and does not need a screen-capture permission.
+    // Rasterize the owned content view directly. This narrow path includes the
+    // WebView/plugin surface, has no global-window enumeration, and needs no
+    // Screen Recording permission.
     NSView *contentView = window.contentView;
     if (contentView == nil) {
       fpasoterm_copy_error(outError, nil, @"macOS could not access the fpasoterm window content view");
