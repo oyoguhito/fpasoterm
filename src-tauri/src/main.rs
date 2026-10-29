@@ -6114,10 +6114,25 @@ fn print_local_plugin_port_info_cli(
         review.metadata.description,
     ));
     if !review.tcp_targets.is_empty() {
-        print_cli_text(&format!("TCP target: {}\n", review.tcp_targets.join(", ")));
+        print_cli_text(&format!(
+            "{}: {}\n",
+            plugin_tcp_target_info_label(&review.tcp_targets),
+            review.tcp_targets.join(", ")
+        ));
     }
     print_cli_text(&local_plugin_port_installation(&review.port, &ports_root));
     Ok(())
+}
+
+// Public RDP source deliberately uses this inert loopback value until an
+// installer supplies one reviewed endpoint. It is not the conventional RDP
+// server port and should not be presented as one in `--plugin-info` output.
+fn plugin_tcp_target_info_label(targets: &[String]) -> &'static str {
+    if targets.len() == 1 && targets[0] == "tcp://127.0.0.1:53389" {
+        "Safe loopback default (not standard RDP port 3389)"
+    } else {
+        "TCP target"
+    }
 }
 
 // Render the supplied path as a quoted argument so the displayed install
@@ -6643,7 +6658,11 @@ fn plugin_cli() {
                 ));
                 let tcp_targets = plugin_allowed_tcp_targets(&source);
                 if !tcp_targets.is_empty() {
-                    print_cli_text(&format!("TCP target: {}\n", tcp_targets.join(", ")));
+                    print_cli_text(&format!(
+                        "{}: {}\n",
+                        plugin_tcp_target_info_label(&tcp_targets),
+                        tcp_targets.join(", ")
+                    ));
                 }
                 print_cli_text(installed_plugin_installation_note());
             }

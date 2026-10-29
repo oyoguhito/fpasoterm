@@ -4498,10 +4498,26 @@ function canvasIsVisibleForVideo(canvas) {
     && rect.height > 0;
 }
 
-// Prefer the topmost overlay, then its largest visible canvas.  This avoids a
-// small control canvas appended after the remote desktop stealing the capture
-// merely because it happens to be last in document order.
+// Prefer a plugin-declared remote surface first. This lets a reviewed plugin
+// keep its canvas capture stable even when a platform WebView changes the
+// overlay structure or reparents its dialog. The broad overlay scan below is
+// retained for existing plugins that do not declare a target yet.
 function visiblePluginCanvasVideoTarget() {
+  const explicitCandidates = [...document.querySelectorAll(
+    'canvas[data-fpasoterm-video-capture="front"]',
+  )].filter((canvas) => canvasIsVisibleForVideo(canvas));
+  if (explicitCandidates.length > 0) {
+    explicitCandidates.sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+    });
+    return explicitCandidates[0];
+  }
+
+  // Prefer the topmost overlay, then its largest visible canvas. This avoids
+  // a small control canvas appended after the remote desktop stealing capture
+  // merely because it happens to be last in document order.
   const overlays = [...document.querySelectorAll(
     '.fpasoterm-plugin-element-overlay, .fpasoterm-plugin-canvas-overlay',
   )];
@@ -5168,6 +5184,12 @@ async function startScreenVideoRecording() {
     throw new Error('native screen video recording support is unavailable');
   }
   const frontPluginCanvas = visiblePluginCanvasVideoTarget();
+  if (frontPluginCanvas) {
+    const explicitlyDeclared = frontPluginCanvas.getAttribute('data-fpasoterm-video-capture') === 'front';
+    showDiagnostic(
+      `screen video selected ${explicitlyDeclared ? 'declared' : 'detected'} plugin canvas pixels=${frontPluginCanvas.width}x${frontPluginCanvas.height}`,
+    );
+  }
   // Do this before probing MediaRecorder or getDisplayMedia. WKWebView's MP4
   // CanvasCapture path can complete successfully while all encoded pixels are
   // black; a later fallback cannot repair the already-written movie.

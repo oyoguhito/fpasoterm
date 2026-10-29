@@ -1311,9 +1311,18 @@ function showLocalPluginPortInfo(options) {
   console.log(`Install path: plugins/${port.installPath}`);
   console.log(`Description: ${port.metadata.description}`);
   if (port.tcpTargets.length) {
-    console.log(`TCP target: ${port.tcpTargets.join(', ')}`);
+    console.log(`${pluginTcpTargetInfoLabel(port.tcpTargets)}: ${port.tcpTargets.join(', ')}`);
   }
   showLocalPluginPortInstallation(port);
+}
+
+// The public RDP port deliberately ships an inert loopback destination so a
+// reviewed checkout cannot contact an arbitrary server before installation.
+// Do not present that policy default as though it were the standard RDP port.
+function pluginTcpTargetInfoLabel(targets) {
+  return targets.length === 1 && targets[0] === 'tcp://127.0.0.1:53389'
+    ? 'Safe loopback default (not standard RDP port 3389)'
+    : 'TCP target';
 }
 
 // Prints the actual install shape for this reviewed checkout. The install never
@@ -2341,7 +2350,7 @@ function showPluginInfo(options) {
   console.log(`Load status: ${resolved ? 'loadable' : 'not loadable'}`);
   const tcpTargets = pluginAllowedTcpTargets(source);
   if (tcpTargets.length) {
-    console.log(`TCP target: ${tcpTargets.join(', ')}`);
+    console.log(`${pluginTcpTargetInfoLabel(tcpTargets)}: ${tcpTargets.join(', ')}`);
   }
   if (resolved) {
     console.log(`Renderer URL: ${resolved.url}`);

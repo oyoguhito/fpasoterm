@@ -2878,6 +2878,8 @@ assert.match(rendererSource, /canvasPngBase64/);
 assert.match(rendererSource, /toDataURL/);
 assert.match(rendererSource, /visibleTerminalCanvasLayers/);
 assert.match(rendererSource, /visiblePluginCanvasVideoTarget/);
+assert.match(rendererSource, /data-fpasoterm-video-capture="front"/);
+assert.match(rendererSource, /screen video selected .* plugin canvas pixels=/);
 assert.match(rendererSource, /function isCanvasVideoTarget\(value\)/);
 assert.match(rendererSource, /function canvasIsVisibleForVideo\(canvas\)/);
 assert.match(rendererSource, /createPluginCanvasSurface/);
