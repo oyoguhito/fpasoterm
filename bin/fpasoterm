@@ -1316,13 +1316,18 @@ function showLocalPluginPortInfo(options) {
   showLocalPluginPortInstallation(port);
 }
 
-// The public RDP port deliberately ships an inert loopback destination so a
-// reviewed checkout cannot contact an arbitrary server before installation.
-// Do not present that policy default as though it were the standard RDP port.
+// Public bridge ports deliberately ship inert loopback destinations so a
+// reviewed checkout cannot contact a server before installation. Do not
+// present those policy defaults as though they were protocol standard ports.
 function pluginTcpTargetInfoLabel(targets) {
-  return targets.length === 1 && targets[0] === 'tcp://127.0.0.1:53389'
-    ? 'Safe loopback default (not standard RDP port 3389)'
-    : 'TCP target';
+  if (targets.length !== 1) return 'TCP target';
+  if (targets[0] === 'tcp://127.0.0.1:53389') {
+    return 'Safe loopback default (not standard RDP port 3389)';
+  }
+  if (targets[0] === 'tcp://127.0.0.1:53390') {
+    return 'Safe loopback default (not standard VNC port 5900)';
+  }
+  return 'TCP target';
 }
 
 // Prints the actual install shape for this reviewed checkout. The install never
@@ -1337,13 +1342,15 @@ function showLocalPluginPortInstallation(port) {
     console.log('');
     console.log('Connection target (replaces the declared default above):');
     console.log(`  ${command} --plugin-tcp-target tcp://<host>:3389 --enable`);
-    console.log('  RDP uses the standard TCP port 3389; a bare host:port is normalized to tcp://host:port.');
+    console.log('  RDP uses the standard TCP port 3389; the safe default does not connect until this target is specified.');
+    console.log('  A bare host:port is normalized to tcp://host:port.');
   } else if (port.id === noVncLocalBridgePortId) {
     console.log('');
     console.log('Connection target (replaces the declared default above):');
     console.log(`  ${command} --plugin-tcp-target tcp://<host>:5900 --enable`);
     console.log(`  ${command} --plugin-tcp-target tls://<host>:5900 --enable`);
-    console.log('  noVNC uses the standard VNC port 5900; use the transport configured by the VNC server.');
+    console.log('  noVNC uses the standard VNC port 5900; the safe default does not connect until this target is specified.');
+    console.log('  Use the transport configured by the VNC server.');
   }
   console.log('');
   console.log('  Omit --enable to install for source review only. Add --force only to replace an existing installed port.');

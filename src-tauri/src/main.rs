@@ -6124,14 +6124,17 @@ fn print_local_plugin_port_info_cli(
     Ok(())
 }
 
-// Public RDP source deliberately uses this inert loopback value until an
-// installer supplies one reviewed endpoint. It is not the conventional RDP
-// server port and should not be presented as one in `--plugin-info` output.
+// Public bridge sources deliberately use inert loopback values until an
+// installer supplies one reviewed endpoint. They are not conventional service
+// ports and should not be presented as such in `--plugin-info` output.
 fn plugin_tcp_target_info_label(targets: &[String]) -> &'static str {
-    if targets.len() == 1 && targets[0] == "tcp://127.0.0.1:53389" {
-        "Safe loopback default (not standard RDP port 3389)"
-    } else {
-        "TCP target"
+    if targets.len() != 1 {
+        return "TCP target";
+    }
+    match targets[0].as_str() {
+        "tcp://127.0.0.1:53389" => "Safe loopback default (not standard RDP port 3389)",
+        "tcp://127.0.0.1:53390" => "Safe loopback default (not standard VNC port 5900)",
+        _ => "TCP target",
     }
 }
 
@@ -6151,7 +6154,7 @@ fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) ->
                 "  {command} --plugin-tcp-target tcp://<host>:3389 --enable\n"
             ));
             output.push_str(
-                "  RDP uses the standard TCP port 3389; a bare host:port is normalized to tcp://host:port.\n",
+                "  RDP uses the standard TCP port 3389; the safe default does not connect until this target is specified.\n  A bare host:port is normalized to tcp://host:port.\n",
             );
         }
         NOVNC_LOCAL_BRIDGE_PORT_ID => {
@@ -6160,7 +6163,7 @@ fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) ->
                 "  {command} --plugin-tcp-target tcp://<host>:5900 --enable\n  {command} --plugin-tcp-target tls://<host>:5900 --enable\n"
             ));
             output.push_str(
-                "  noVNC uses the standard VNC port 5900; use the transport configured by the VNC server.\n",
+                "  noVNC uses the standard VNC port 5900; the safe default does not connect until this target is specified.\n  Use the transport configured by the VNC server.\n",
             );
         }
         _ => {}
@@ -13152,8 +13155,8 @@ maxSourceBytes = 8388608
         assert!(rdp.contains("var target = \"tcp://192.0.2.25:3389\";"));
 
         let novnc_source = concat!(
-            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:5900\n",
-            "const bridge = api.openVncBridge({ target: \"tcp://127.0.0.1:5900\" });\n"
+            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:53390\n",
+            "const bridge = api.openVncBridge({ target: \"tcp://127.0.0.1:53390\" });\n"
         );
         let novnc_target =
             normalize_plugin_tcp_target("tcp://192.0.2.10:5900", "test").expect("noVNC target");
@@ -13174,6 +13177,22 @@ maxSourceBytes = 8388608
             &tls_target,
         )
         .is_err());
+    }
+
+    #[test]
+    fn plugin_info_labels_safe_bridge_defaults_without_hiding_standard_ports() {
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://127.0.0.1:53389".to_string()]),
+            "Safe loopback default (not standard RDP port 3389)"
+        );
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://127.0.0.1:53390".to_string()]),
+            "Safe loopback default (not standard VNC port 5900)"
+        );
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://192.0.2.10:5900".to_string()]),
+            "TCP target"
+        );
     }
 
     #[test]
