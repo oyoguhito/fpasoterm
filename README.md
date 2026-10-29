@@ -565,8 +565,9 @@ available to terminal applications.
 `logging.directory` at the same synced folder when you want those logs shared.
 `Log → Video Start` / `Video Stop` is a separate, built-in video-recording
 feature. Where the platform picker is available, it records the screen or
-window you select; otherwise it records only the rendered fpasoterm terminal
-surface. It saves video-only WebM or MP4 when the WebView supports
+window you select; on macOS with a front plugin, select the fpasoterm window to
+include its controls and popups. Picker-free fallback records only the rendered
+plugin or terminal surface. It saves video-only WebM or MP4 when the WebView supports
 `MediaRecorder`. On Linux/ChromeOS terminal fallback, it instead uses the
 in-process GStreamer runtime to encode reliable PNG snapshots as WebM; GIF is
 used only when that runtime path is unavailable. It has no keyboard shortcut

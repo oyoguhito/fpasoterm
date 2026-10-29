@@ -12,7 +12,7 @@ fpasoterm は、ChromeOS Linux での日本語入力を重視したデスクト�
 - renderer と backend の通信は Tauri command / event に限定します。
 - terminal clipboard integration は選択した terminal text の copy、multiplexer からの OSC 52 copy request、paste shortcut の backend OS clipboard fallback 経由送信を処理します。
 - terminal output logging は fpasoterm が受け取る PTY stream から一般的な terminal control sequence を除去して記録します。自動生成 log 名には titlebar title と timestamp を含めます。fpasoterm は split-pane を認識しないため、pane 単位の log は tmux、screen、byobu、herdr などの multiplexer 側に委ねます。
-- 画面video recordingは別の本体経路です。直接の`Log → Video Start` menu clickでは、WebViewのScreen Capture APIがあればOS pickerで選択したsurfaceを、APIがなければrender済みfpasoterm terminal canvasを録画します。MediaRecorderが利用可能ならbounded WebMまたはMP4 chunkを、利用できなければterminal canvasのPNG frameを狭いTauri commandで送ります。後者はRust backendがanimated GIFへencodeします。automatic captureやterminal output/pluginからのcapture requestは受け付けません。
+- 画面video recordingは別の本体経路です。直接の`Log → Video Start` menu clickでは、WebViewのScreen Capture APIがあればOS pickerで選択したsurfaceを録画します。macOSで前面pluginがある場合はfpasoterm windowを選ぶことでcanvasに加えplugin controlsとnative popupも記録します。pickerなしのfallbackはrender済みpluginまたはterminal canvasだけを録画します。MediaRecorderが利用可能ならbounded WebMまたはMP4 chunkを、利用できなければPNG frameを狭いTauri commandで送ります。後者はRust backendがanimated GIFへencodeします。automatic captureやterminal output/pluginからのcapture requestは受け付けません。
 
 ## ChromeOS Linux の入力方針
 

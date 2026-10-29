@@ -5169,11 +5169,12 @@ function finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup) {
   window.setTimeout(settle, 75);
 }
 
-// Starts a capture from a direct menu click. A visible fpasoterm plugin canvas
-// (for example the RDP desktop) wins over an OS display picker so Video Start
-// records the surface the user is currently operating. Otherwise we prefer
-// OS-authorized display capture, with a terminal-canvas fallback for
-// WebKitGTK/ChromeOS builds that do not expose that API.
+// Starts a capture from a direct menu click. On macOS, a visible fpasoterm
+// plugin is recorded through the system display picker when possible: this is
+// the only browser-independent way to include the complete fpasoterm window,
+// including plugin controls, native select popups, and the remote canvas. The
+// user must select the fpasoterm window in that picker. A declared plugin
+// canvas remains the private fallback for WebViews without display capture.
 async function startScreenVideoRecording() {
   if (screenVideoRecorder || screenVideoStopping || screenVideoStarting) {
     throw new Error('screen video recording is already active');
@@ -5190,10 +5191,43 @@ async function startScreenVideoRecording() {
       `screen video selected ${explicitlyDeclared ? 'declared' : 'detected'} plugin canvas pixels=${frontPluginCanvas.width}x${frontPluginCanvas.height}`,
     );
   }
+  const format = screenVideoFormat();
+  const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
+  let wholeWindowDisplayStream = null;
+  // WKWebView cannot turn arbitrary DOM controls into pixels with a canvas
+  // snapshot. Requesting a user-approved fpasoterm window display is what
+  // keeps macOS recordings consistent with the complete-window recordings
+  // provided by Chromium-based hosts. Do this before any await so WebKit keeps
+  // the original Video Start user activation for the system picker.
+  if (frontPluginCanvas && isMacPlatform() && format && typeof getDisplayMedia === 'function') {
+    screenVideoFeedback = 'Select the fpasoterm window in the macOS capture picker';
+    screenVideoStarting = true;
+    refreshScreenVideoControl();
+    try {
+      wholeWindowDisplayStream = await getDisplayMedia.call(navigator.mediaDevices, {
+        video: { frameRate: { ideal: 30, max: 30 } },
+        audio: false,
+      });
+      if (!wholeWindowDisplayStream.getVideoTracks?.().length) {
+        stopScreenVideoTracks(wholeWindowDisplayStream);
+        wholeWindowDisplayStream = null;
+        throw new Error('macOS window capture returned no video track');
+      }
+      showDiagnostic('macOS screen video selected a user-approved window/display; plugin controls and popups are included');
+    } catch (error) {
+      screenVideoStarting = false;
+      screenVideoFeedback = '';
+      refreshScreenVideoControl();
+      if (!displayCaptureIsUnavailable(error)) {
+        throw error;
+      }
+      showDiagnostic(`macOS whole-window capture unavailable; using plugin canvas fallback: ${error}`);
+    }
+  }
   // Do this before probing MediaRecorder or getDisplayMedia. WKWebView's MP4
   // CanvasCapture path can complete successfully while all encoded pixels are
   // black; a later fallback cannot repair the already-written movie.
-  if (shouldUseReliableMacTerminalRasterRecording()) {
+  if (!wholeWindowDisplayStream && shouldUseReliableMacTerminalRasterRecording()) {
     showDiagnostic('Intel macOS WKWebView video capture uses PNG/AVFoundation canvas frames to avoid blank MP4 recordings');
     return startTerminalNativeMp4Recording(frontPluginCanvas);
   }
@@ -5205,18 +5239,16 @@ async function startScreenVideoRecording() {
     showDiagnostic('front plugin canvas uses native WebM recording to preserve final video frames');
     return startTerminalNativeWebmRecording(frontPluginCanvas);
   }
-  const format = screenVideoFormat();
   // Some WebKitGTK builds expose neither MediaRecorder nor canvas.captureStream.
   // They can nevertheless encode the canvas to PNG, which is enough for the
   // built-in native GIF fallback below.
   if (!format) {
-    return startTerminalFallbackRecording();
+    return startTerminalFallbackRecording(frontPluginCanvas);
   }
-  const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
   const supportsCanvasStream = typeof HTMLCanvasElement !== 'undefined'
     && typeof HTMLCanvasElement.prototype?.captureStream === 'function';
   if (typeof getDisplayMedia !== 'function' && !supportsCanvasStream) {
-    return startTerminalFallbackRecording();
+    return startTerminalFallbackRecording(frontPluginCanvas);
   }
   if (screenVideoFeedbackTimer !== null) {
     clearTimeout(screenVideoFeedbackTimer);
@@ -5232,7 +5264,10 @@ async function startScreenVideoRecording() {
   let flushFrame = null;
   let source = 'display';
   try {
-    if (frontPluginCanvas) {
+    if (wholeWindowDisplayStream) {
+      stream = wholeWindowDisplayStream;
+      source = 'fpasoterm window display';
+    } else if (frontPluginCanvas) {
       try {
         const fallback = createTerminalCanvasVideoCapture(frontPluginCanvas);
         stream = fallback.stream;
@@ -5320,7 +5355,7 @@ async function startScreenVideoRecording() {
       );
       screenVideoStarting = false;
       refreshScreenVideoControl();
-      return startTerminalFallbackRecording();
+      return startTerminalFallbackRecording(frontPluginCanvas);
     }
 
     const status = await window.fpasoterm.startScreenVideoRecording(format.container);
