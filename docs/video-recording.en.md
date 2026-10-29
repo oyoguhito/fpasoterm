@@ -1,26 +1,28 @@
 # Screen video recording
 
 fpasoterm can record video from the built-in **Log** menu. This is separate
-from readable terminal-output logging. With a visible plugin canvas, macOS
-first requests a user-selected fpasoterm window so the complete UI is captured:
-the remote desktop, plugin controls, and native popups. Other platforms retain
-their existing canvas-first path. When no plugin canvas is visible and the
-platform WebView supports the operating-system picker, fpasoterm can record a
-user-selected screen or window. On WebKitGTK/ChromeOS builds without that
-picker, it instead records the fpasoterm terminal surface.
+from readable terminal-output logging. On macOS, every **Video Start** first
+requests a user-selected fpasoterm window so one recording can follow changes
+between the terminal and plugins while including the remote desktop, controls,
+and native popups. Other platforms retain their existing canvas-first path.
+When no plugin canvas is visible and the platform WebView supports the
+operating-system picker, fpasoterm can record a user-selected screen or window.
+On WebKitGTK/ChromeOS builds without that picker, it instead records the
+fpasoterm terminal surface.
 
 ## Record a video
 
 1. Open the titlebar hamburger menu, then **Log**.
 2. Select **Video Start**.
-3. On macOS, if the RDP local-bridge (or another reviewed canvas plugin) is
-   visibly open and a capture picker appears, select the **fpasoterm window**
-   and approve sharing. This includes plugin controls and popups. If the picker
-   is unavailable, fpasoterm falls back to the remote canvas. On other
-   platforms, a visible plugin canvas starts recording directly. Otherwise,
-   select the intended screen or window in an available operating-system picker.
-   If neither source is available, fpasoterm immediately starts its
-   terminal-surface recording fallback.
+3. On macOS, select the **fpasoterm window** and approve sharing, even when
+   starting from the terminal. The same recording then follows later changes to
+   an RDP local-bridge or another reviewed plugin and includes controls and
+   popups. If the picker is unavailable, fpasoterm falls back to the currently
+   visible plugin canvas or terminal. On other platforms, a visible plugin
+   canvas starts recording directly. Otherwise, select the intended screen or
+   window in an available operating-system picker. If neither source is
+   available, fpasoterm immediately starts its terminal-surface recording
+   fallback.
 4. The titlebar changes to **Recording** and the menu action changes to
    **Video Stop**. Continue using fpasoterm normally.
 5. Choose **Log → Video Stop**. The titlebar shows **Saving video** while the
@@ -54,11 +56,11 @@ terminal output, plugin code, or a timer, and it does not choose a display on
 the user's behalf. A visible plugin canvas is an exception to the picker on
 non-macOS platforms: its pixels already belong to the fpasoterm WebView, so it
 can be recorded without capturing another application. On macOS, fpasoterm
-deliberately asks the user to select its own window first when a plugin is
-visible, because a canvas snapshot cannot include surrounding controls or
-native popups. If that picker is unavailable, the RDP fallback records the
-remote desktop canvas only, not the fpasoterm titlebar, plugin controls,
-prompts, or an iframe.
+deliberately asks the user to select its own window for every recording, so one
+window stream remains valid when the foreground later changes from terminal to
+plugin. A canvas snapshot cannot include surrounding controls or native popups.
+If the picker is unavailable, the RDP fallback records the remote desktop
+canvas only, not the fpasoterm titlebar, plugin controls, prompts, or an iframe.
 Select only a screen/window surface you are allowed to record; a full-screen
 choice can include other applications and sensitive data. The terminal-surface
 fallback captures no other application and needs no picker.
@@ -80,8 +82,9 @@ no `gst-launch`, ffmpeg, Chromium, or separate recorder installation. A
 minimal Linux image without the GStreamer appsrc/VP8/WebM plugins falls back to
 the built-in animated GIF writer. Apple Silicon macOS has been observed to
 produce a valid WebM through its normal WebView `MediaRecorder` path. On both
-macOS architectures, a visible plugin first uses a user-approved window/display
-stream when the picker is available, so the complete fpasoterm UI is recorded.
+macOS architectures, every start first uses a user-approved fpasoterm
+window/display stream when the picker is available, so terminal-to-plugin
+changes remain in the complete recording.
 Intel macOS WKWebView can instead report MP4 support but encode an all-black
 CanvasCapture movie. Only when the picker is unavailable, Intel macOS avoids
 that bad path and sends verified plugin-or-terminal PNG frames to the built-in

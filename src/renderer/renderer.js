@@ -5169,12 +5169,13 @@ function finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup) {
   window.setTimeout(settle, 75);
 }
 
-// Starts a capture from a direct menu click. On macOS, a visible fpasoterm
-// plugin is recorded through the system display picker when possible: this is
-// the only browser-independent way to include the complete fpasoterm window,
-// including plugin controls, native select popups, and the remote canvas. The
-// user must select the fpasoterm window in that picker. A declared plugin
-// canvas remains the private fallback for WebViews without display capture.
+// Starts a capture from a direct menu click. On macOS, every Video Start uses
+// the system display picker when possible: this is the only browser-independent
+// way to retain one complete fpasoterm window stream while its foreground
+// changes between the terminal, plugin controls, native select popups, and a
+// remote canvas. The user must select the fpasoterm window in that picker. A
+// declared plugin canvas remains the private fallback for WebViews without
+// display capture.
 async function startScreenVideoRecording() {
   if (screenVideoRecorder || screenVideoStopping || screenVideoStarting) {
     throw new Error('screen video recording is already active');
@@ -5195,12 +5196,12 @@ async function startScreenVideoRecording() {
   const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
   let wholeWindowDisplayStream = null;
   // WKWebView cannot turn arbitrary DOM controls into pixels with a canvas
-  // snapshot. Requesting a user-approved fpasoterm window display is what
-  // keeps macOS recordings consistent with the complete-window recordings
-  // provided by Chromium-based hosts. Do this before any await so WebKit keeps
-  // the original Video Start user activation for the system picker.
-  if (frontPluginCanvas && isMacPlatform() && format && typeof getDisplayMedia === 'function') {
-    screenVideoFeedback = 'Select the fpasoterm window in the macOS capture picker';
+  // snapshot. Requesting a user-approved fpasoterm window display at every
+  // macOS start lets a later terminal-to-plugin or plugin-to-terminal change
+  // remain in one recording. Do this before any await so WebKit keeps the
+  // original Video Start user activation for the system picker.
+  if (isMacPlatform() && format && typeof getDisplayMedia === 'function') {
+    screenVideoFeedback = 'Select the fpasoterm window to record current and later plugin views';
     screenVideoStarting = true;
     refreshScreenVideoControl();
     try {
@@ -5213,7 +5214,7 @@ async function startScreenVideoRecording() {
         wholeWindowDisplayStream = null;
         throw new Error('macOS window capture returned no video track');
       }
-      showDiagnostic('macOS screen video selected a user-approved window/display; plugin controls and popups are included');
+      showDiagnostic('macOS screen video selected a user-approved fpasoterm window/display; terminal-to-plugin changes, controls, and popups are included');
     } catch (error) {
       screenVideoStarting = false;
       screenVideoFeedback = '';
@@ -5221,7 +5222,7 @@ async function startScreenVideoRecording() {
       if (!displayCaptureIsUnavailable(error)) {
         throw error;
       }
-      showDiagnostic(`macOS whole-window capture unavailable; using plugin canvas fallback: ${error}`);
+      showDiagnostic(`macOS whole-window capture unavailable; using ${frontPluginCanvas ? 'plugin canvas' : 'terminal canvas'} fallback: ${error}`);
     }
   }
   // Do this before probing MediaRecorder or getDisplayMedia. WKWebView's MP4

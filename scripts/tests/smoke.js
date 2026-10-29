@@ -2888,9 +2888,10 @@ assert.match(rendererSource, /startTerminalRasterRecording\(container, label, pl
 assert.match(rendererSource, /startTerminalNativeMp4Recording\(frontPluginCanvas\)/);
 assert.match(rendererSource, /front plugin canvas/);
 assert.match(rendererSource, /front plugin canvas uses native WebM recording/);
-assert.match(rendererSource, /Select the fpasoterm window in the macOS capture picker/);
+assert.match(rendererSource, /Select the fpasoterm window to record current and later plugin views/);
 assert.match(rendererSource, /fpasoterm window display/);
-assert.match(rendererSource, /plugin controls and popups are included/);
+assert.match(rendererSource, /controls, and popups are included/);
+assert.match(rendererSource, /terminal-to-plugin changes/);
 assert.match(rendererSource, /screenVideoAwaitingFinalData/);
 assert.match(rendererSource, /drawTerminalBufferTextFallback/);
 assert.match(rendererSource, /displayCaptureIsUnavailable/);
