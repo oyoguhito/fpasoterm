@@ -71,12 +71,14 @@ _fpasoterm() {
     '--open-log-dir[open terminal log directory]' \
     '--copy-diagnostics[copy diagnostics report]' \
     '--plugin-list[list local User/plugins files]' \
+    '--plugins-list[alias for --plugin-list]' \
     '--plugin-path[print plugin directory]' \
     '--plugin-info=[show plugin information]:plugin:_fpasoterm_plugin_names' \
     '--plugin-uninstall=[remove local plugin files]:plugin:_fpasoterm_plugin_names' \
     '--plugin-search=[search official public plugin ports]:query:' \
     '--plugin-install=[install a public port or one from --plugin-ports-dir]:port:_fpasoterm_plugin_install_ports' \
     '--plugin-ports-dir=[install --plugin-install from this local fpasoterm-plugins checkout]:directory:_files -/' \
+    '--plugin-tcp-target=[set one RDP or noVNC target while installing]:target:' \
     '--plugin-install-file=[copy a trusted local JavaScript or TypeScript plugin]:plugin:_files -g "*.(js|ts)"' \
     '--plugin-update-all[update installed official public plugins with newer catalog versions]' \
     '--force[replace an existing file during plugin install]' \

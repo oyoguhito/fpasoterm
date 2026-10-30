@@ -15,6 +15,7 @@ const terminalLogSearchStatusElement = document.getElementById('terminal-log-sea
 const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
 const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
 const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
+const diagnosticsCopyButton = document.getElementById('diagnostics-copy');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
 const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
 const pluginCatalogSearchStatusElement = document.getElementById('plugin-catalog-search-status');
@@ -349,12 +350,19 @@ let screenVideoGifFrameQueued = false;
 // the terminal stop event just before their final dataavailable task; the
 // counter lets finalization wait for that last queued chunk.
 let screenVideoChunkSequence = 0;
+// `MediaRecorder.stop()` is asynchronous. In particular, WebKitGTK can emit
+// its final dataavailable task after onstop, so closing the native file as
+// soon as onstop runs loses a complete in-WebView canvas recording.
+let screenVideoAwaitingFinalData = false;
 // The terminal-canvas stream supplies a final redraw before a user-requested
 // stop so output that appeared immediately before Video Stop is encoded too.
 let screenVideoFlushFrame = null;
 let screenVideoStarting = false;
 let screenVideoFeedback = '';
 let screenVideoFeedbackTimer = null;
+// Shown while recording so a user can verify that an open RDP overlay rather
+// than the terminal or an OS-selected display was selected.
+let screenVideoCaptureSource = '';
 let screenVideoRuntimePlatformPromise = null;
 let screenVideoRuntimePlatformInfo = null;
 
@@ -559,6 +567,7 @@ function installTauriApiAdapter() {
     startScreenVideoRecording: (container, width = null, height = null, frameDelayCentiseconds = null) => invoke('screen_video_recording_start', {
       request: { container, width, height, frameDelayCentiseconds },
     }),
+    captureScreenVideoWindowFrame: () => invoke('screen_video_recording_window_snapshot'),
     appendScreenVideoRecording: (dataBase64) => invoke('screen_video_recording_append', {
       chunk: { dataBase64 },
     }),
@@ -999,6 +1008,7 @@ function appendDiagnosticLine(message) {
   showDiagnosticsTextArea();
   setTerminalLogPickerVisible(false);
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
@@ -1022,6 +1032,7 @@ function showLiveDiagnosticsView() {
   setTerminalEncodingControlsVisible(false);
   showDiagnosticsTextArea();
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
   }
@@ -1044,6 +1055,7 @@ function closeDiagnosticsPanel() {
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   setDiagnosticsFilterVisible(false);
+  setDiagnosticsCopyVisible(false);
   setPluginCatalogSearchVisible(false);
   setScreenVideoPickerVisible(false);
   setTerminalEncodingControlsVisible(false);
@@ -1067,6 +1079,13 @@ function setDiagnosticsFilterVisible(visible) {
   if (diagnosticsFilterElement) diagnosticsFilterElement.hidden = !visible;
   if (diagnosticsFilterApplyButton) diagnosticsFilterApplyButton.hidden = !visible;
   if (diagnosticsFilterStatusElement) diagnosticsFilterStatusElement.hidden = !visible;
+}
+
+// Copies backend-retained diagnostics without selecting text in the panel or
+// triggering the terminal's Copy shortcut. This is intentionally limited to
+// the live Diagnostics view; logs and catalog text retain their own actions.
+function setDiagnosticsCopyVisible(visible) {
+  if (diagnosticsCopyButton) diagnosticsCopyButton.hidden = !visible;
 }
 
 // Keeps public port filtering separate from terminal-log search controls.
@@ -3773,6 +3792,7 @@ function diagnosticsPanelFocusItems() {
     terminalLogSearchNextButton,
     diagnosticsFilterElement,
     diagnosticsFilterApplyButton,
+    diagnosticsCopyButton,
     pluginCatalogSearchElement,
     pluginCatalogUpdatesOnlyButton,
     terminalLogShowSelectedButton,
@@ -4434,7 +4454,8 @@ function refreshScreenVideoControl() {
   );
   screenVideoStatusElement.hidden = !active && !saving && !starting && !screenVideoFeedback;
   screenVideoStatusElement.textContent = screenVideoFeedback
-    || (saving ? 'Saving video' : starting ? 'Preparing video' : 'Recording');
+    || (saving ? 'Saving video' : starting ? 'Preparing video'
+      : `Recording${screenVideoCaptureSource ? `: ${screenVideoCaptureSource}` : ''}`);
 }
 
 // Returns only actually visible xterm canvas layers. In particular, do not
@@ -4457,6 +4478,77 @@ function visibleTerminalCanvasLayers() {
       && rect.width > 0
       && rect.height > 0;
   });
+}
+
+// Plugins render inside a reviewed fpasoterm-owned overlay.  In particular,
+// the local RDP bridge paints the remote desktop into one of these canvases.
+// A visible plugin canvas is safe to record without invoking the operating
+// system's display picker: it is already pixels inside this WebView, not an
+// arbitrary desktop window or a cross-origin iframe.
+function isCanvasVideoTarget(value) {
+  // Plugin source normally runs in this document, but a canvas can be adopted
+  // from another realm by a reviewed local plugin.  `instanceof` would reject
+  // that otherwise valid target, so retain a deliberately narrow structural
+  // test instead.
+  return value !== null
+    && typeof value === 'object'
+    && String(value.nodeName || '').toLowerCase() === 'canvas'
+    && Number.isFinite(Number(value.width))
+    && Number.isFinite(Number(value.height))
+    && typeof value.getBoundingClientRect === 'function';
+}
+
+function canvasIsVisibleForVideo(canvas) {
+  if (!isCanvasVideoTarget(canvas) || canvas.width <= 0 || canvas.height <= 0) {
+    return false;
+  }
+  const style = window.getComputedStyle(canvas);
+  const rect = canvas.getBoundingClientRect();
+  return style.display !== 'none'
+    && style.visibility !== 'hidden'
+    && Number.parseFloat(style.opacity || '1') > 0.01
+    && rect.width > 0
+    && rect.height > 0;
+}
+
+// Prefer a plugin-declared remote surface first. This lets a reviewed plugin
+// keep its canvas capture stable even when a platform WebView changes the
+// overlay structure or reparents its dialog. The broad overlay scan below is
+// retained for existing plugins that do not declare a target yet.
+function visiblePluginCanvasVideoTarget() {
+  const explicitCandidates = [...document.querySelectorAll(
+    'canvas[data-fpasoterm-video-capture="front"]',
+  )].filter((canvas) => canvasIsVisibleForVideo(canvas));
+  if (explicitCandidates.length > 0) {
+    explicitCandidates.sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+    });
+    return explicitCandidates[0];
+  }
+
+  // Prefer the topmost overlay, then its largest visible canvas. This avoids
+  // a small control canvas appended after the remote desktop stealing capture
+  // merely because it happens to be last in document order.
+  const overlays = [...document.querySelectorAll(
+    '.fpasoterm-plugin-element-overlay, .fpasoterm-plugin-canvas-overlay',
+  )];
+  for (let overlayIndex = overlays.length - 1; overlayIndex >= 0; overlayIndex -= 1) {
+    const overlay = overlays[overlayIndex];
+    const candidates = [...overlay.querySelectorAll('canvas')]
+      .filter((canvas) => canvasIsVisibleForVideo(canvas));
+    if (candidates.length === 0) {
+      continue;
+    }
+    candidates.sort((left, right) => {
+      const leftRect = left.getBoundingClientRect();
+      const rightRect = right.getBoundingClientRect();
+      return (rightRect.width * rightRect.height) - (leftRect.width * leftRect.height);
+    });
+    return candidates[0];
+  }
+  return null;
 }
 
 // Tests a bounded sample rather than reading every pixel on every capture
@@ -4609,6 +4701,65 @@ function createTerminalCanvasSurface(fixedGeometry = false) {
   };
 }
 
+// Rasterizes one visible plugin canvas at its own pixel resolution.  This is
+// intentionally narrower than a DOM screenshot: it includes the remote RDP
+// desktop but not fpasoterm chrome, another application, credentials prompt,
+// or a plugin's surrounding controls.  A fixed size lets the native WebM/MP4
+// encoders keep accepting frames if the remote desktop later resizes.
+function createPluginCanvasSurface(sourceCanvas, fixedGeometry = false) {
+  if (!isCanvasVideoTarget(sourceCanvas)) {
+    throw new Error('the visible plugin canvas is not available for video capture');
+  }
+  const captureCanvas = document.createElement('canvas');
+  const context = captureCanvas.getContext('2d', { alpha: false });
+  if (!context) {
+    throw new Error('this WebView cannot create a plugin video canvas');
+  }
+  let initialized = false;
+  const drawFrame = () => {
+    const rawWidth = Math.max(1, Math.round(sourceCanvas.width));
+    const rawHeight = Math.max(1, Math.round(sourceCanvas.height));
+    const width = fixedGeometry ? Math.max(2, rawWidth - (rawWidth % 2)) : rawWidth;
+    const height = fixedGeometry ? Math.max(2, rawHeight - (rawHeight % 2)) : rawHeight;
+    if ((!fixedGeometry || !initialized)
+        && (captureCanvas.width !== width || captureCanvas.height !== height)) {
+      captureCanvas.width = width;
+      captureCanvas.height = height;
+    }
+    if (!captureCanvas.width || !captureCanvas.height) {
+      captureCanvas.width = width;
+      captureCanvas.height = height;
+    }
+    initialized = true;
+    context.save();
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, captureCanvas.width, captureCanvas.height);
+    try {
+      context.drawImage(sourceCanvas, 0, 0, captureCanvas.width, captureCanvas.height);
+    } catch (_) {
+      // A remote-session renderer can recreate its source canvas while a
+      // reconnect is in progress. Keep the previous black frame for this one
+      // sample; the next timer tick will retry against the same live canvas.
+    }
+    context.restore();
+  };
+  drawFrame();
+  const timer = window.setInterval(drawFrame, 1000 / 30);
+  return {
+    canvas: captureCanvas,
+    drawFrame,
+    cleanup: () => window.clearInterval(timer),
+    source: 'front plugin canvas',
+  };
+}
+
+function createPreferredVideoCanvasSurface(fixedGeometry = false, pluginCanvas = null) {
+  const visiblePluginCanvas = pluginCanvas || visiblePluginCanvasVideoTarget();
+  return visiblePluginCanvas
+    ? createPluginCanvasSurface(visiblePluginCanvas, fixedGeometry)
+    : createTerminalCanvasSurface(fixedGeometry);
+}
+
 function canvasPngBase64(canvas) {
   if (typeof canvas?.toBlob === 'function') {
     return new Promise((resolve, reject) => {
@@ -4642,8 +4793,8 @@ function canvasPngBase64(canvas) {
 // WebKitGTK builds used on Linux/ChromeOS can omit getDisplayMedia while still
 // exposing canvas.captureStream and MediaRecorder. Use the canvas as a stream
 // on those builds.
-function createTerminalCanvasVideoCapture() {
-  const capture = createTerminalCanvasSurface(false);
+function createTerminalCanvasVideoCapture(pluginCanvas = null) {
+  const capture = createPreferredVideoCanvasSurface(false, pluginCanvas);
   if (typeof capture.canvas.captureStream !== 'function') {
     capture.cleanup();
     throw new Error('this WebView cannot stream a terminal canvas to MediaRecorder');
@@ -4720,6 +4871,10 @@ function appendScreenVideoChunk(recorder, blob) {
   if (!blob || blob.size === 0) {
     return screenVideoWriteChain;
   }
+  if (screenVideoRecorder === recorder && screenVideoAwaitingFinalData
+      && recorder.state === 'inactive') {
+    screenVideoAwaitingFinalData = false;
+  }
   screenVideoChunkSequence += 1;
   screenVideoWriteChain = screenVideoWriteChain
     .then(async () => {
@@ -4738,6 +4893,7 @@ function appendScreenVideoChunk(recorder, blob) {
         screenVideoStopping = true;
         refreshScreenVideoControl();
         try {
+          screenVideoAwaitingFinalData = true;
           recorder.stop();
         } catch (_) {
           // The onstop handler will finalize an already-stopping recorder.
@@ -4747,11 +4903,10 @@ function appendScreenVideoChunk(recorder, blob) {
   return screenVideoWriteChain;
 }
 
-// A WebView without a reliable canvas MediaRecorder can still provide
-// canvas.toBlob. Queue PNG captures at a deliberately modest 5fps; the Rust
-// backend turns them into an animated GIF everywhere, or a native WebM on
-// ChromeOS/Linux. Neither route requires an external recorder executable.
-function appendTerminalRasterFrame(recorder, canvas, label) {
+// WebViews without a reliable MediaRecorder can still provide canvas PNGs.
+// Queue every raster source at a deliberately modest 5fps: terminal/plugin
+// canvas frames and native macOS-window PNGs share the same bounded writer.
+function appendTerminalRasterFrame(recorder, canvas, label, frameProvider = null) {
   // Do not accumulate snapshots when an older PNG conversion or native GIF
   // write is still in flight. Dropping an intermediate frame keeps memory
   // bounded and preserves interaction responsiveness on slower WebViews.
@@ -4764,13 +4919,18 @@ function appendTerminalRasterFrame(recorder, canvas, label) {
       if (screenVideoWriteError) {
         return;
       }
-      const dataBase64 = await canvasPngBase64(canvas);
+      const dataBase64 = frameProvider
+        ? await frameProvider()
+        : await canvasPngBase64(canvas);
+      if (typeof dataBase64 !== 'string' || !dataBase64) {
+        throw new Error(`${label} recording frame is unavailable`);
+      }
       await window.fpasoterm.appendScreenVideoRecording(dataBase64);
     })
     .catch((error) => {
       if (!screenVideoWriteError) {
         screenVideoWriteError = error;
-        showDiagnostic(`terminal ${label} recording write failed: ${error}`);
+        showDiagnostic(`${label} recording write failed: ${error}`);
         setScreenVideoFeedback('Video recording failed');
       }
       if (screenVideoRecorder === recorder && recorder.state !== 'inactive') {
@@ -4798,37 +4958,80 @@ function displayCaptureIsUnavailable(error) {
     && /(cancel|denied|permission)/.test(message));
 }
 
-async function startTerminalRasterRecording(container, label) {
+async function startTerminalRasterRecording(
+  container,
+  label,
+  pluginCanvas = null,
+  frameProvider = null,
+) {
   if (screenVideoFeedbackTimer !== null) {
     clearTimeout(screenVideoFeedbackTimer);
     screenVideoFeedbackTimer = null;
   }
   screenVideoFeedback = '';
+  screenVideoCaptureSource = '';
+  screenVideoAwaitingFinalData = false;
   screenVideoFlushFrame = null;
   screenVideoStarting = true;
   refreshScreenVideoControl();
   let capture = null;
   let recorder = null;
+  let initialFrame = null;
   try {
     // Fixed geometry gives every raster frame the same size. On terminal
     // resize the live terminal is scaled into that recording canvas instead
     // of making the native encoder reject a frame-size change.
-    capture = createTerminalCanvasSurface(true);
+    // Keep the target selected in the Video Start activation.  In particular,
+    // an Intel macOS AVFoundation start reaches this asynchronous routine
+    // after menu/focus work can change the overlay tree; re-querying there
+    // could silently fall back to the terminal even though the RDP canvas was
+    // visibly in front when the user started recording.
+    if (frameProvider) {
+      initialFrame = await frameProvider();
+      if (!Number.isInteger(initialFrame?.width) || !Number.isInteger(initialFrame?.height)
+          || initialFrame.width <= 0 || initialFrame.height <= 0
+          || initialFrame.width % 2 !== 0 || initialFrame.height % 2 !== 0
+          || typeof initialFrame.dataBase64 !== 'string' || !initialFrame.dataBase64) {
+        throw new Error('native fpasoterm window capture returned an invalid PNG frame');
+      }
+    } else {
+      capture = createPreferredVideoCanvasSurface(true, pluginCanvas);
+    }
+    const captureWidth = initialFrame?.width || capture.canvas.width;
+    const captureHeight = initialFrame?.height || capture.canvas.height;
+    const captureSource = frameProvider ? 'fpasoterm window' : capture.source;
     const status = await window.fpasoterm.startScreenVideoRecording(
       container,
-      capture.canvas.width,
-      capture.canvas.height,
+      captureWidth,
+      captureHeight,
       20,
     );
     let timer = null;
     recorder = {
       state: 'recording',
       onstop: null,
-      requestData: () => appendTerminalRasterFrame(recorder, capture.canvas, label),
+      requestData: () => {
+        if (!frameProvider) {
+          appendTerminalRasterFrame(recorder, capture.canvas, label);
+          return;
+        }
+        const frame = initialFrame;
+        initialFrame = null;
+        appendTerminalRasterFrame(
+          recorder,
+          null,
+          label,
+          async () => (frame || await frameProvider()).dataBase64,
+        );
+      },
       stop: () => {
         if (recorder.state === 'inactive') {
           return;
         }
+        // Include a frame sampled at Video Stop. This matters most for the
+        // native macOS window source because plugin controls can change after
+        // the previous five-fps timer tick.
+        recorder.requestData();
         recorder.state = 'inactive';
         if (timer !== null) {
           clearInterval(timer);
@@ -4838,20 +5041,21 @@ async function startTerminalRasterRecording(container, label) {
       },
     };
     screenVideoRecorder = recorder;
+    screenVideoCaptureSource = captureSource;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
     screenVideoGifFrameQueued = false;
     screenVideoStopping = false;
     recorder.onstop = () => {
-      finalizeScreenVideoRecording(recorder, null, capture.cleanup).catch((error) => {
-        showDiagnostic(`terminal ${label} recording stop failed: ${error}`);
+      finalizeScreenVideoRecording(recorder, null, capture?.cleanup).catch((error) => {
+        showDiagnostic(`${label} recording stop failed: ${error}`);
       });
     };
     recorder.requestData();
     timer = window.setInterval(() => recorder.requestData(), 200);
     screenVideoStarting = false;
     refreshScreenVideoControl();
-    showDiagnostic(`terminal ${label} recording started path=${status.path} maxBytes=${status.maxBytes}`);
+    showDiagnostic(`${captureSource} ${label} recording started path=${status.path} maxBytes=${status.maxBytes}`);
     return status;
   } catch (error) {
     capture?.cleanup();
@@ -4859,6 +5063,7 @@ async function startTerminalRasterRecording(container, label) {
     screenVideoStopping = false;
     if (screenVideoRecorder === recorder) {
       screenVideoRecorder = null;
+      screenVideoCaptureSource = '';
     }
     await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
     throw error;
@@ -4870,8 +5075,8 @@ async function startTerminalRasterRecording(container, label) {
   }
 }
 
-function startTerminalGifRecording() {
-  return startTerminalRasterRecording('gif', 'GIF');
+function startTerminalGifRecording(pluginCanvas = null) {
+  return startTerminalRasterRecording('gif', 'GIF', pluginCanvas);
 }
 
 // WebKitGTK's CanvasCaptureMediaStream can freeze on the first xterm canvas
@@ -4912,36 +5117,174 @@ function shouldUseReliableMacTerminalRasterRecording() {
     && screenVideoRuntimePlatformInfo.architecture === 'x86_64';
 }
 
-async function startTerminalNativeWebmRecording() {
+async function startTerminalNativeWebmRecording(pluginCanvas = null) {
   try {
-    return await startTerminalRasterRecording('webm-gstreamer', 'native WebM');
+    return await startTerminalRasterRecording('webm-gstreamer', 'native WebM', pluginCanvas);
   } catch (error) {
     // A minimal Linux image can omit the GStreamer appsrc/VP8 plugins. GIF is
     // still a complete recording in that case and makes the fallback explicit.
     showDiagnostic(`native WebM recording unavailable; using GIF fallback: ${error}`);
-    return startTerminalGifRecording();
+    return startTerminalGifRecording(pluginCanvas);
   }
 }
 
 // AVFoundation is present on every supported macOS installation. It consumes
 // the same trusted PNG terminal frames as the GIF fallback, but writes H.264
 // into an MP4 container without depending on WKWebView MediaRecorder.
-async function startTerminalNativeMp4Recording() {
+async function startTerminalNativeMp4Recording(pluginCanvas = null) {
   try {
-    return await startTerminalRasterRecording('mp4-avfoundation', 'native MP4');
+    return await startTerminalRasterRecording('mp4-avfoundation', 'native MP4', pluginCanvas);
   } catch (error) {
     showDiagnostic(`native MP4 recording unavailable; using GIF fallback: ${error}`);
-    return startTerminalGifRecording();
+    return startTerminalGifRecording(pluginCanvas);
   }
 }
 
-function startTerminalFallbackRecording() {
+// WKWebView can omit getDisplayMedia entirely. In that case a native snapshot
+// of fpasoterm's own NSWindow is the only route that retains later changes
+// between terminal and plugin UI; it never asks the renderer to capture a
+// desktop or a foreign window.
+async function captureNativeMacWindowFrame() {
+  const frame = await window.fpasoterm.captureScreenVideoWindowFrame();
+  if (!frame || typeof frame.dataBase64 !== 'string'
+      || !Number.isInteger(frame.width) || !Number.isInteger(frame.height)
+      || frame.width <= 0 || frame.height <= 0) {
+    throw new Error('macOS native window capture returned no PNG data');
+  }
+  return frame;
+}
+
+// Draws a trusted PNG returned by the narrow native self-window command. A
+// data URL keeps this independent of fetch/CORS support in older WKWebViews;
+// the pixels never leave the local fpasoterm process.
+function nativeMacWindowFrameImage(dataBase64) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error('macOS native window PNG could not be decoded'));
+    image.src = `data:image/png;base64,${dataBase64}`;
+  });
+}
+
+// Apple Silicon WKWebView can make a usable WebM from a CanvasCapture stream
+// even when it does not expose getDisplayMedia. Feed that stream with native
+// snapshots of fpasoterm's own NSWindow, rather than reverting to the terminal
+// canvas. Thus later terminal/plugin/popup changes are retained while keeping
+// the established arm64 WebM output path.
+async function createNativeMacWindowCanvasVideoCapture() {
+  const initialFrame = await captureNativeMacWindowFrame();
+  const canvas = document.createElement('canvas');
+  canvas.width = initialFrame.width - (initialFrame.width % 2);
+  canvas.height = initialFrame.height - (initialFrame.height % 2);
+  if (canvas.width < 2 || canvas.height < 2) {
+    throw new Error('macOS native window capture returned invalid dimensions');
+  }
+  const context = canvas.getContext('2d', { alpha: false });
+  if (!context || typeof canvas.captureStream !== 'function') {
+    throw new Error('this WebView cannot stream native macOS window frames to MediaRecorder');
+  }
+
+  let disposed = false;
+  let drawing = null;
+  const drawFrame = async (frame = null) => {
+    if (disposed) {
+      return;
+    }
+    const nextFrame = frame || await captureNativeMacWindowFrame();
+    const image = await nativeMacWindowFrameImage(nextFrame.dataBase64);
+    if (disposed) {
+      return;
+    }
+    context.fillStyle = '#000';
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    // Keep a stable stream geometry if the user resizes the native window
+    // during recording. Native encoders and MediaRecorder both require it.
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+  };
+  const refresh = (frame = null) => {
+    if (drawing || disposed) {
+      return drawing || Promise.resolve();
+    }
+    drawing = drawFrame(frame)
+      .catch((error) => {
+        if (!disposed) {
+          showDiagnostic(`native macOS fpasoterm-window frame refresh failed: ${error}`);
+        }
+        throw error;
+      })
+      .finally(() => {
+        drawing = null;
+      });
+    return drawing;
+  };
+  await refresh(initialFrame);
+  // requestFrame() is used when supplied to avoid emitting only the initial
+  // canvas paint on WebKit builds. Other engines repaint at a conservative
+  // rate, matching the five-fps native PNG recording path.
+  const stream = canvas.captureStream(0);
+  const videoTrack = stream.getVideoTracks?.()[0];
+  const requestFrame = () => {
+    refresh().then(() => {
+      try {
+        // Request only after the asynchronous native PNG has been painted;
+        // requesting first would repeatedly encode the preceding frame.
+        videoTrack?.requestFrame?.();
+      } catch (_) {
+        // The stream can be stopped while Video Stop is finalizing.
+      }
+    }).catch(() => {});
+  };
+  requestFrame();
+  const timer = window.setInterval(requestFrame, 200);
+  if (typeof videoTrack?.requestFrame !== 'function') {
+    for (const track of stream.getTracks?.() || []) {
+      track.stop();
+    }
+    const automaticStream = canvas.captureStream(30);
+    return {
+      stream: automaticStream,
+      flushFrame: () => refresh(),
+      cleanup: () => {
+        disposed = true;
+        clearInterval(timer);
+      },
+      source: 'fpasoterm window',
+    };
+  }
+  return {
+    stream,
+    flushFrame: () => refresh(),
+    cleanup: () => {
+      disposed = true;
+      clearInterval(timer);
+    },
+    source: 'fpasoterm window',
+  };
+}
+
+async function startNativeMacWindowRecording(pluginCanvas = null) {
+  try {
+    return await startTerminalRasterRecording(
+      'mp4-avfoundation',
+      'native macOS window',
+      null,
+      captureNativeMacWindowFrame,
+    );
+  } catch (error) {
+    showDiagnostic(
+      `native macOS fpasoterm-window capture unavailable; using ${pluginCanvas ? 'plugin canvas' : 'terminal canvas'} fallback: ${error}`,
+    );
+    return startTerminalNativeMp4Recording(pluginCanvas);
+  }
+}
+
+function startTerminalFallbackRecording(pluginCanvas = null) {
   if (shouldUseReliableMacTerminalRasterRecording()) {
-    return startTerminalNativeMp4Recording();
+    return startTerminalNativeMp4Recording(pluginCanvas);
   }
   return shouldUseNativeTerminalWebmRecording()
-    ? startTerminalNativeWebmRecording()
-    : startTerminalGifRecording();
+    ? startTerminalNativeWebmRecording(pluginCanvas)
+    : startTerminalGifRecording(pluginCanvas);
 }
 
 // Saves the end of a recording after every queued chunk has reached the
@@ -4968,7 +5311,9 @@ async function finalizeScreenVideoRecording(recorder, stream, cleanup) {
       screenVideoWriteError = null;
       screenVideoGifFrameQueued = false;
       screenVideoChunkSequence = 0;
+      screenVideoAwaitingFinalData = false;
       screenVideoFlushFrame = null;
+      screenVideoCaptureSource = '';
       refreshScreenVideoControl();
     }
   }
@@ -4983,9 +5328,20 @@ async function finalizeScreenVideoRecording(recorder, stream, cleanup) {
 function finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup) {
   let observedSequence = screenVideoChunkSequence;
   let quietChecks = 0;
+  const finalDataDeadline = Date.now() + 3000;
   const settle = () => {
     if (screenVideoRecorder !== recorder) {
       return;
+    }
+    if (screenVideoAwaitingFinalData) {
+      if (Date.now() < finalDataDeadline) {
+        window.setTimeout(settle, 75);
+        return;
+      }
+      // Preserve any earlier chunks, but make a missing final payload
+      // diagnosable instead of reporting an empty recording as successful.
+      screenVideoAwaitingFinalData = false;
+      screenVideoWriteError ||= new Error('MediaRecorder did not deliver final video data before the 3s timeout');
     }
     if (screenVideoChunkSequence !== observedSequence) {
       observedSequence = screenVideoChunkSequence;
@@ -5004,9 +5360,13 @@ function finalizeScreenVideoRecordingAfterFinalData(recorder, stream, cleanup) {
   window.setTimeout(settle, 75);
 }
 
-// Starts a capture from a direct menu click.  We prefer OS-authorized display
-// capture where its WebView API exists.  A terminal-canvas fallback keeps the
-// feature usable in WebKitGTK/ChromeOS builds that do not expose that API.
+// Starts a capture from a direct menu click. On macOS, every Video Start uses
+// the system display picker when possible: this is the only browser-independent
+// way to retain one complete fpasoterm window stream while its foreground
+// changes between the terminal, plugin controls, native select popups, and a
+// remote canvas. The user must select the fpasoterm window in that picker. A
+// declared plugin canvas remains the private fallback for WebViews without
+// display capture.
 async function startScreenVideoRecording() {
   if (screenVideoRecorder || screenVideoStopping || screenVideoStarting) {
     throw new Error('screen video recording is already active');
@@ -5016,31 +5376,100 @@ async function startScreenVideoRecording() {
       || !window.fpasoterm?.stopScreenVideoRecording) {
     throw new Error('native screen video recording support is unavailable');
   }
+  const frontPluginCanvas = visiblePluginCanvasVideoTarget();
+  if (frontPluginCanvas) {
+    const explicitlyDeclared = frontPluginCanvas.getAttribute('data-fpasoterm-video-capture') === 'front';
+    showDiagnostic(
+      `screen video selected ${explicitlyDeclared ? 'declared' : 'detected'} plugin canvas pixels=${frontPluginCanvas.width}x${frontPluginCanvas.height}`,
+    );
+  }
+  const format = screenVideoFormat();
+  const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
+  let wholeWindowDisplayStream = null;
+  let nativeMacWindowCapture = null;
+  let macNativeWindowCaptureNeeded = isMacPlatform()
+    && (!format || typeof getDisplayMedia !== 'function');
+  // WKWebView cannot turn arbitrary DOM controls into pixels with a canvas
+  // snapshot. Requesting a user-approved fpasoterm window display at every
+  // macOS start lets a later terminal-to-plugin or plugin-to-terminal change
+  // remain in one recording. Do this before any await so WebKit keeps the
+  // original Video Start user activation for the system picker.
+  if (isMacPlatform() && format && typeof getDisplayMedia === 'function') {
+    screenVideoFeedback = 'Select the fpasoterm window to record current and later plugin views';
+    screenVideoStarting = true;
+    refreshScreenVideoControl();
+    try {
+      wholeWindowDisplayStream = await getDisplayMedia.call(navigator.mediaDevices, {
+        video: { frameRate: { ideal: 30, max: 30 } },
+        audio: false,
+      });
+      if (!wholeWindowDisplayStream.getVideoTracks?.().length) {
+        stopScreenVideoTracks(wholeWindowDisplayStream);
+        wholeWindowDisplayStream = null;
+        throw new Error('macOS window capture returned no video track');
+      }
+      showDiagnostic('macOS screen video selected a user-approved fpasoterm window/display; terminal-to-plugin changes, controls, and popups are included');
+    } catch (error) {
+      screenVideoStarting = false;
+      screenVideoFeedback = '';
+      refreshScreenVideoControl();
+      if (!displayCaptureIsUnavailable(error)) {
+        throw error;
+      }
+      macNativeWindowCaptureNeeded = true;
+      showDiagnostic(`macOS whole-window capture unavailable; using ${frontPluginCanvas ? 'plugin canvas' : 'terminal canvas'} fallback: ${error}`);
+    }
+  }
+  if (!wholeWindowDisplayStream && macNativeWindowCaptureNeeded) {
+    // Intel WKWebView cannot reliably encode any CanvasCapture stream, so it
+    // must use AVFoundation directly. Apple Silicon retains its normal WebM
+    // route by copying the native fpasoterm-window PNGs into that canvas
+    // stream. Both paths include whatever is foremost in this app window.
+    if (!format || shouldUseReliableMacTerminalRasterRecording()) {
+      showDiagnostic('macOS display picker is unavailable; starting native fpasoterm-window MP4 capture');
+      return startNativeMacWindowRecording(frontPluginCanvas);
+    }
+    try {
+      nativeMacWindowCapture = await createNativeMacWindowCanvasVideoCapture();
+      showDiagnostic('macOS display picker is unavailable; using native fpasoterm-window PNG frames in the WebM recorder');
+    } catch (error) {
+      showDiagnostic(`native macOS fpasoterm-window WebM capture unavailable; using AVFoundation fallback: ${error}`);
+      return startNativeMacWindowRecording(frontPluginCanvas);
+    }
+  }
   // Do this before probing MediaRecorder or getDisplayMedia. WKWebView's MP4
   // CanvasCapture path can complete successfully while all encoded pixels are
   // black; a later fallback cannot repair the already-written movie.
-  if (shouldUseReliableMacTerminalRasterRecording()) {
-    showDiagnostic('Intel macOS WKWebView video capture uses PNG/AVFoundation terminal frames to avoid blank MP4 recordings');
-    return startTerminalNativeMp4Recording();
+  if (!wholeWindowDisplayStream && !nativeMacWindowCapture && shouldUseReliableMacTerminalRasterRecording()) {
+    showDiagnostic('Intel macOS WKWebView video capture uses PNG/AVFoundation canvas frames to avoid blank MP4 recordings');
+    return startTerminalNativeMp4Recording(frontPluginCanvas);
   }
-  const format = screenVideoFormat();
+  // WebKitGTK/ChromeOS can paint a plugin canvas correctly while its
+  // CanvasCaptureMediaStream fails to emit a final MediaRecorder payload. The
+  // in-process PNG→WebM writer already used for terminal recordings is more
+  // reliable and automatically retains the currently visible RDP/noVNC canvas.
+  if (frontPluginCanvas && shouldUseNativeTerminalWebmRecording()) {
+    showDiagnostic('front plugin canvas uses native WebM recording to preserve final video frames');
+    return startTerminalNativeWebmRecording(frontPluginCanvas);
+  }
   // Some WebKitGTK builds expose neither MediaRecorder nor canvas.captureStream.
   // They can nevertheless encode the canvas to PNG, which is enough for the
   // built-in native GIF fallback below.
   if (!format) {
-    return startTerminalFallbackRecording();
+    return startTerminalFallbackRecording(frontPluginCanvas);
   }
-  const getDisplayMedia = navigator.mediaDevices?.getDisplayMedia;
   const supportsCanvasStream = typeof HTMLCanvasElement !== 'undefined'
     && typeof HTMLCanvasElement.prototype?.captureStream === 'function';
-  if (typeof getDisplayMedia !== 'function' && !supportsCanvasStream) {
-    return startTerminalFallbackRecording();
+  if (!nativeMacWindowCapture && typeof getDisplayMedia !== 'function' && !supportsCanvasStream) {
+    return startTerminalFallbackRecording(frontPluginCanvas);
   }
   if (screenVideoFeedbackTimer !== null) {
     clearTimeout(screenVideoFeedbackTimer);
     screenVideoFeedbackTimer = null;
   }
   screenVideoFeedback = '';
+  screenVideoCaptureSource = '';
+  screenVideoAwaitingFinalData = false;
   screenVideoStarting = true;
   refreshScreenVideoControl();
   let stream = null;
@@ -5048,7 +5477,32 @@ async function startScreenVideoRecording() {
   let flushFrame = null;
   let source = 'display';
   try {
-    if (typeof getDisplayMedia === 'function') {
+    if (wholeWindowDisplayStream) {
+      stream = wholeWindowDisplayStream;
+      source = 'fpasoterm window display';
+    } else if (nativeMacWindowCapture) {
+      stream = nativeMacWindowCapture.stream;
+      cleanup = nativeMacWindowCapture.cleanup;
+      flushFrame = nativeMacWindowCapture.flushFrame || null;
+      source = nativeMacWindowCapture.source;
+    } else if (frontPluginCanvas) {
+      try {
+        const fallback = createTerminalCanvasVideoCapture(frontPluginCanvas);
+        stream = fallback.stream;
+        cleanup = fallback.cleanup;
+        flushFrame = fallback.flushFrame || null;
+        source = fallback.source;
+      } catch (error) {
+        // A plugin canvas can be paintable yet live in a WebView without
+        // CanvasCaptureMediaStream. The native PNG path still records that
+        // same visible plugin surface, so do not discard the user-selected
+        // front surface merely because MediaRecorder is unavailable.
+        showDiagnostic(`front plugin canvas media capture unavailable; using native canvas recording: ${error}`);
+        screenVideoStarting = false;
+        refreshScreenVideoControl();
+        return startTerminalFallbackRecording(frontPluginCanvas);
+      }
+    } else if (typeof getDisplayMedia === 'function') {
       // This call must stay before the first await: browser engines require its
       // permission picker to begin in the user-activation scope of Video Start.
       try {
@@ -5119,11 +5573,12 @@ async function startScreenVideoRecording() {
       );
       screenVideoStarting = false;
       refreshScreenVideoControl();
-      return startTerminalFallbackRecording();
+      return startTerminalFallbackRecording(frontPluginCanvas);
     }
 
     const status = await window.fpasoterm.startScreenVideoRecording(format.container);
     screenVideoRecorder = recorder;
+    screenVideoCaptureSource = source;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
     screenVideoStopping = false;
@@ -5142,16 +5597,17 @@ async function startScreenVideoRecording() {
         if (screenVideoRecorder === recorder && recorder.state !== 'inactive') {
           screenVideoStopping = true;
           refreshScreenVideoControl();
+          screenVideoAwaitingFinalData = true;
           recorder.stop();
         }
       }, { once: true });
     }
-    if (source === 'terminal canvas') {
+    if (source !== 'display') {
       // WebKitGTK can produce a complete WebM document for each timeslice.
       // Appending those documents lets a player see only the first fragment.
-      // A single final Blob is a valid self-contained WebM, so use it for the
-      // canvas fallback even though it temporarily buffers one recording in
-      // the WebView until Video Stop.
+      // A single final Blob is a valid self-contained WebM, so use it for an
+      // in-WebView canvas source even though it temporarily buffers one
+      // recording in the WebView until Video Stop.
       recorder.start();
     } else {
       // OS-authorized display capture uses bounded chunks to avoid retaining a
@@ -5170,6 +5626,7 @@ async function startScreenVideoRecording() {
       screenVideoRecorder = null;
     }
     screenVideoFlushFrame = null;
+    screenVideoCaptureSource = '';
     await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
     throw error;
   } finally {
@@ -5198,6 +5655,7 @@ async function stopScreenVideoRecording() {
     // Calling requestData immediately beforehand triggers a WebKitGTK ordering
     // race in which the native destination can be finalized before the actual
     // final cluster reaches the renderer.
+    screenVideoAwaitingFinalData = true;
     recorder.stop();
   } catch (error) {
     return Promise.reject(error);
@@ -5721,6 +6179,28 @@ async function deleteSelectedTerminalOutputLog() {
 // Hides the diagnostics/log panel when it blocks the terminal view.
 closeDiagnosticsButton.addEventListener('click', () => {
   closeDiagnosticsPanel();
+});
+
+diagnosticsCopyButton?.addEventListener('click', async () => {
+  if (diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  const originalLabel = diagnosticsCopyButton.textContent;
+  diagnosticsCopyButton.disabled = true;
+  try {
+    const copied = await window.fpasoterm.copyDiagnostics();
+    if (!copied) {
+      throw new Error('there are no diagnostics to copy');
+    }
+    diagnosticsCopyButton.textContent = 'Copied';
+  } catch (error) {
+    diagnosticsCopyButton.textContent = 'Copy failed';
+    showDiagnostic(`diagnostics copy failed: ${error}`);
+  }
+  window.setTimeout(() => {
+    diagnosticsCopyButton.textContent = originalLabel;
+    diagnosticsCopyButton.disabled = false;
+  }, 1600);
 });
 
 terminalLogToggleButton.addEventListener('click', () => {

@@ -279,6 +279,11 @@ assert.match(bin, /--doctor/);
 assert.match(bin, /runDoctor/);
 assert.match(bin, /npmAuditSummary/);
 assert.match(bin, /installPublicPlugin/);
+assert.match(bin, /--plugin-tcp-target/);
+assert.match(bin, /--plugins-list/);
+assert.match(bin, /configurePluginTcpTargetSource/);
+assert.match(bin, /integration\/rdp-local-bridge/);
+assert.match(bin, /integration\/novnc-local-bridge/);
 assert.match(bin, /installLocalPluginPort/);
 assert.match(bin, /installLocalPluginFile/);
 assert.match(bin, /function pluginInstallPortIds\(value\)/);
@@ -423,6 +428,7 @@ fs.mkdirSync(cliPluginsDir, { recursive: true });
 fs.writeFileSync(path.join(cliPluginsDir, 'hello.ts'), [
   '// @fpasoterm-plugin version: 1.2.3',
   '// @fpasoterm-plugin description: Test plugin',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.25:3389',
   '',
 ].join('\n'));
 fs.writeFileSync(path.join(cliPluginsDir, 'theme.js'), '// test plugin\n');
@@ -598,6 +604,16 @@ for (const unknownOption of ['--hoge', '-?']) {
   assert.doesNotMatch(result.stderr, /Usage: fpasoterm \[options\]/);
 }
 
+const missingPluginTargetResult = runCli('--plugin-tcp-target');
+assert.equal(missingPluginTargetResult.status, 2);
+assert.match(missingPluginTargetResult.stderr, /--plugin-tcp-target requires host:port/);
+assert.match(missingPluginTargetResult.stderr, /Usage: fpasoterm --plugin-install integration\/rdp-local-bridge\|integration\/novnc-local-bridge/);
+
+const missingPluginInstallResult = runCli('--plugin-install');
+assert.equal(missingPluginInstallResult.status, 2);
+assert.match(missingPluginInstallResult.stderr, /--plugin-install requires a port ID/);
+assert.match(missingPluginInstallResult.stderr, /Usage: fpasoterm --plugin-install <category\/name>/);
+
 const resetConfigDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-reset-config-'));
 const resetConfigPath = path.join(resetConfigDir, 'User', 'config.toml');
 const resetStatePath = path.join(path.dirname(resetConfigPath), 'window-state.json');
@@ -647,12 +663,56 @@ assert.deepEqual(toml.parse(fs.readFileSync(cliConfigPath, 'utf8')).plugins.enab
 const pluginListResult = runCli('--plugin-list');
 assert.equal(pluginListResult.status, 0, pluginListResult.stderr);
 assert.match(pluginListResult.stdout, /Enabled plugins:\n  plugins\/hello\.ts\n  plugins\/theme\.js/);
-assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3\]/);
+assert.match(pluginListResult.stdout, /plugins\/hello\.ts \[version 1\.2\.3; TCP target tcp:\/\/192\.0\.2\.25:3389\]/);
+
+const pluginsListAliasResult = runCli('--plugins-list');
+assert.equal(pluginsListAliasResult.status, 0, pluginsListAliasResult.stderr);
+assert.match(pluginsListAliasResult.stdout, /TCP target tcp:\/\/192\.0\.2\.25:3389/);
 
 const pluginInfoResult = runCli('--plugin-info', 'hello');
 assert.equal(pluginInfoResult.status, 0, pluginInfoResult.stderr);
 assert.match(pluginInfoResult.stdout, /Version: 1\.2\.3/);
 assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
+assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
+assert.match(pluginInfoResult.stdout, /Installation: already installed in User\/plugins/);
+
+const localReviewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-review-'));
+const localReviewPort = path.join(localReviewRoot, 'ports', 'integration', 'review-target');
+fs.mkdirSync(localReviewPort, { recursive: true });
+fs.writeFileSync(path.join(localReviewPort, 'port.toml'), [
+  '[port]',
+  'id = "integration/review-target"',
+  'name = "review-target"',
+  'version = "1.2.3"',
+  'author = "test"',
+  'description = "Local review fixture"',
+  'license = "MIT"',
+  'minFpasotermVersion = "1.0.0"',
+  'source = "plugin.js"',
+  'installPath = "integration/review-target.js"',
+  '',
+].join('\n'));
+fs.writeFileSync(path.join(localReviewPort, 'plugin.js'), [
+  '// @fpasoterm-plugin version: 1.2.3',
+  '// @fpasoterm-plugin description: Local review fixture',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.50:5900',
+  'window.fpasotermPluginApi.onReady(() => {});',
+  '',
+].join('\n'));
+const localPortsListResult = runCli('--plugin-list', '--plugin-ports-dir', localReviewRoot);
+assert.equal(localPortsListResult.status, 0, localPortsListResult.stderr);
+assert.match(localPortsListResult.stdout, /Local plugin ports/);
+assert.match(localPortsListResult.stdout, /integration\/review-target \[version 1\.2\.3; compatible; source plugin\.js; TCP target tcp:\/\/192\.0\.2\.50:5900\]/);
+const localPortsInfoResult = runCli('--plugin-info', 'integration/review-target', '--plugin-ports-dir', localReviewRoot);
+assert.equal(localPortsInfoResult.status, 0, localPortsInfoResult.stderr);
+assert.match(localPortsInfoResult.stdout, /Port: integration\/review-target/);
+assert.match(localPortsInfoResult.stdout, /Install path: plugins\/integration\/review-target\.js/);
+assert.match(localPortsInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.50:5900/);
+assert.match(localPortsInfoResult.stdout, /Installation:[\s\S]*--plugin-install integration\/review-target --plugin-ports-dir .* --enable/);
+const missingLocalPortsOperationResult = runCli('--plugin-ports-dir', localReviewRoot);
+assert.equal(missingLocalPortsOperationResult.status, 2);
+assert.match(missingLocalPortsOperationResult.stderr, /--plugin-ports-dir requires --plugin-install <category\/name>, --plugin-list, or --plugin-info <category\/name>/);
+fs.rmSync(localReviewRoot, { recursive: true, force: true });
 
 const uninstallResult = runCli('--plugin-uninstall', 'theme');
 assert.equal(uninstallResult.status, 0, uninstallResult.stderr);
@@ -785,6 +845,7 @@ const fishCompletion = read('completions/fpasoterm.fish');
 const powershellCompletion = read('completions/fpasoterm.ps1');
 for (const completion of [bashCompletion, zshCompletion, fishCompletion, powershellCompletion]) {
   assert.match(completion, /--plugin-install/);
+  assert.match(completion, /plugin-tcp-target/);
   assert.match(completion, /--plugin-search/);
 }
 assert.match(bashCompletion, /--plugin-update-all/);
@@ -828,7 +889,7 @@ assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(ele
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
 assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
-assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*pluginCatalogSearchElement,\s*pluginCatalogUpdatesOnlyButton,\s*terminalLogShowSelectedButton/);
+assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*diagnosticsCopyButton,\s*pluginCatalogSearchElement,\s*pluginCatalogUpdatesOnlyButton,\s*terminalLogShowSelectedButton/);
 
 const localPortsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-ports-'));
 const localPortManifest = path.join(localPortsFixture, 'ports', 'productivity', 'clipboard-translate', 'port.toml');
@@ -966,6 +1027,15 @@ assert.match(tauriCapabilities, /core:window:allow-start-resize-dragging/);
 assert.match(tauriCapabilities, /"windows": \["main"\]/);
 
 const rustMain = read('src-tauri/src/main.rs');
+assert.match(rustMain, /fn screen_video_recording_window_snapshot/);
+assert.match(rustMain, /fpasoterm_macos_window_snapshot_png_async/);
+assert.match(rustMain, /run_on_main_thread/);
+const macosVideoSource = read('src-tauri/src/macos_video.m');
+assert.doesNotMatch(macosVideoSource, /CGWindowListCreateImage/);
+assert.doesNotMatch(macosVideoSource, /kCGWindow/);
+assert.match(macosVideoSource, /takeSnapshotWithConfiguration/);
+assert.match(macosVideoSource, /bitmapImageRepForCachingDisplayInRect/);
+assert.match(macosVideoSource, /cacheDisplayInRect/);
 assert.match(
   rustMain,
   /"images":\s*\{\s*"enabled": true,\s*"kittySupport": true,\s*"kittySizeLimit": 8388608,\s*"storageLimit": 8,/,
@@ -1037,6 +1107,7 @@ assert.match(rustMain, /print_profile_list_cli/);
 assert.match(rustMain, /validate_selected_profile_cli/);
 assert.match(rustMain, /active_profile/);
 assert.match(rustMain, /--plugin-list/);
+assert.match(rustMain, /--plugins-list/);
 assert.match(rustMain, /--plugin-path/);
 assert.match(rustMain, /--plugin-info <file>/);
 assert.match(rustMain, /--plugin-uninstall <file>/);
@@ -1342,7 +1413,7 @@ assert.doesNotMatch(indexHtml, /id="sync-diagnostics"/);
 assert.doesNotMatch(indexHtml, /Copy Selection/);
 assert.doesNotMatch(indexHtml, /Pull to Clipboard/);
 assert.doesNotMatch(indexHtml, /Write Diagnostics/);
-assert.doesNotMatch(indexHtml, /id="copy-diagnostics"/);
+assert.match(indexHtml, /id="diagnostics-copy"/);
 assert.match(indexHtml, /id="close-diagnostics"/);
 assert.match(indexHtml, /id="terminal-mirror"[\s\S]*id="close-terminal-mirror"/);
 assert.match(indexHtml, /id="plugin-command-status"[\s\S]*id="close-plugin-command-status"/);
@@ -1429,6 +1500,7 @@ assert.match(indexHtml, /id="terminal-log-search-status"/);
 assert.match(indexHtml, /id="diagnostics-filter"/);
 assert.match(indexHtml, /id="diagnostics-filter-apply"/);
 assert.match(indexHtml, /id="diagnostics-filter-status"/);
+assert.match(indexHtml, /id="diagnostics-copy"/);
 assert.match(indexHtml, /id="terminal-log-show-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-all"/);
@@ -1495,6 +1567,11 @@ assert.match(readme, /--setup-sync/);
 assert.match(readme, /--sync-status/);
 assert.match(readme, /--sync-clean/);
 assert.match(readme, /--broadcast/);
+assert.match(readme, /--plugin-tcp-target/);
+assert.match(readme, /--plugins-list/);
+assert.match(readme, /fpasoterm --help/);
+assert.match(readmeJa, /--plugin-tcp-target/);
+assert.match(readmeJa, /--plugins-list/);
 assert.match(readme, /node \.\\bin\\fpasoterm --setup-sync/);
 assert.match(readme, /docs\/pr-review\.en\.md/);
 assert.match(readme, /examples\/plugins/);
@@ -1827,6 +1904,7 @@ assert.match(pluginDocsEn, /User\/plugins/);
 assert.match(pluginDocsEn, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsEn, /local files that you trust/);
 assert.match(pluginDocsEn, /--plugin-list/);
+assert.match(pluginDocsEn, /--plugins-list/);
 assert.match(pluginDocsEn, /--plugin-uninstall/);
 assert.match(pluginDocsEn, /registerCommand/);
 assert.match(pluginDocsEn, /--plugin-run/);
@@ -1842,6 +1920,7 @@ assert.match(pluginDocsJa, /User\/plugins/);
 assert.match(pluginDocsJa, /fpasoterm-plugin\.d\.ts/);
 assert.match(pluginDocsJa, /信頼できるローカル file/);
 assert.match(pluginDocsJa, /--plugin-list/);
+assert.match(pluginDocsJa, /--plugins-list/);
 assert.match(pluginDocsJa, /--plugin-uninstall/);
 assert.match(pluginDocsJa, /registerCommand/);
 assert.match(pluginDocsJa, /--plugin-run/);
@@ -2390,8 +2469,9 @@ assert.match(renderer, /contextmenu/);
 assert.match(renderer, /terminal context paste failed/);
 assert.match(renderer, /terminal menu copy failed/);
 assert.match(renderer, /terminal menu paste failed/);
-assert.doesNotMatch(renderer, /copyDiagnosticsButton/);
-assert.doesNotMatch(renderer, /diagnostics copy failed/);
+assert.match(renderer, /diagnosticsCopyButton\?\.addEventListener\('click'/);
+assert.match(renderer, /copyDiagnostics\(\)/);
+assert.match(renderer, /diagnostics copy failed/);
 assert.match(renderer, /matchesKeybinding\(event, 'paste'\)/);
 assert.match(renderer, /matchesKeybinding\(event, 'copy'\)/);
 assert.doesNotMatch(renderer, /setPointerCapture/);
@@ -2628,6 +2708,7 @@ assert.match(styles, /#terminal-log-search-status/);
 assert.match(styles, /#diagnostics-filter/);
 assert.match(styles, /#diagnostics-filter-apply/);
 assert.match(styles, /#diagnostics-filter-status/);
+assert.match(styles, /#diagnostics-copy/);
 assert.match(styles, /#terminal-log-confirm/);
 assert.match(styles, /\.terminal-log-confirm-card/);
 assert.match(styles, /#sshfs-manager-dialog \{[\s\S]*overflow-y: auto;/);
@@ -2771,8 +2852,11 @@ assert.match(videoRecordingDocsEn, /MP4/);
 assert.match(videoRecordingDocsEn, /AVFoundation/);
 assert.match(videoRecordingDocsEn, /animated GIF/);
 assert.match(videoRecordingDocsEn, /videoMaxBytes/);
+assert.match(videoRecordingDocsEn, /RDP local-bridge/);
+assert.match(videoRecordingDocsEn, /front plugin canvas/);
 assert.match(videoRecordingDocsJa, /Video Start/);
 assert.match(videoRecordingDocsJa, /Screen Recording permission/);
+assert.match(videoRecordingDocsJa, /RDP local bridge/);
 const rendererSource = read('src/renderer/renderer.js');
 assert.match(rendererSource, /startScreenVideoRecording/);
 assert.match(rendererSource, /appendScreenVideoRecording/);
@@ -2801,10 +2885,31 @@ assert.match(rendererSource, /shouldUseReliableMacTerminalRasterRecording/);
 assert.match(rendererSource, /screenVideoRuntimePlatform/);
 assert.match(rendererSource, /screenVideoRuntimePlatformInfo\?\.os === 'macos'/);
 assert.match(rendererSource, /screenVideoRuntimePlatformInfo\.architecture === 'x86_64'/);
-assert.match(rendererSource, /Intel macOS WKWebView video capture uses PNG\/AVFoundation terminal frames/);
+assert.match(rendererSource, /Intel macOS WKWebView video capture uses PNG\/AVFoundation canvas frames/);
 assert.match(rendererSource, /canvasPngBase64/);
 assert.match(rendererSource, /toDataURL/);
 assert.match(rendererSource, /visibleTerminalCanvasLayers/);
+assert.match(rendererSource, /visiblePluginCanvasVideoTarget/);
+assert.match(rendererSource, /data-fpasoterm-video-capture="front"/);
+assert.match(rendererSource, /screen video selected .* plugin canvas pixels=/);
+assert.match(rendererSource, /function isCanvasVideoTarget\(value\)/);
+assert.match(rendererSource, /function canvasIsVisibleForVideo\(canvas\)/);
+assert.match(rendererSource, /createPluginCanvasSurface/);
+assert.match(rendererSource, /createPreferredVideoCanvasSurface/);
+assert.match(rendererSource, /startTerminalRasterRecording\(/);
+assert.match(rendererSource, /captureScreenVideoWindowFrame/);
+assert.match(rendererSource, /startNativeMacWindowRecording/);
+assert.match(rendererSource, /createNativeMacWindowCanvasVideoCapture/);
+assert.match(rendererSource, /native fpasoterm-window PNG frames in the WebM recorder/);
+assert.match(rendererSource, /native macOS fpasoterm-window capture unavailable/);
+assert.match(rendererSource, /startTerminalNativeMp4Recording\(frontPluginCanvas\)/);
+assert.match(rendererSource, /front plugin canvas/);
+assert.match(rendererSource, /front plugin canvas uses native WebM recording/);
+assert.match(rendererSource, /Select the fpasoterm window to record current and later plugin views/);
+assert.match(rendererSource, /fpasoterm window display/);
+assert.match(rendererSource, /controls, and popups are included/);
+assert.match(rendererSource, /terminal-to-plugin changes/);
+assert.match(rendererSource, /screenVideoAwaitingFinalData/);
 assert.match(rendererSource, /drawTerminalBufferTextFallback/);
 assert.match(rendererSource, /displayCaptureIsUnavailable/);
 assert.match(rendererSource, /Video Starting/);

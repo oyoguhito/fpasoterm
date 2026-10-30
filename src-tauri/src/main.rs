@@ -537,7 +537,7 @@ mod native_webm {
 mod native_mp4 {
     use super::*;
     use std::ffi::{CStr, CString};
-    use std::os::raw::{c_char, c_int};
+    use std::os::raw::{c_char, c_int, c_void};
 
     #[repr(C)]
     struct WriterHandle {
@@ -565,6 +565,19 @@ mod native_mp4 {
         ) -> c_int;
         fn fpasoterm_macos_mp4_writer_destroy(writer: *mut WriterHandle);
         fn fpasoterm_macos_mp4_error_free(message: *mut c_char);
+        fn fpasoterm_macos_window_snapshot_png_async(
+            window: *mut c_void,
+            callback: unsafe extern "C" fn(
+                bytes: *mut u8,
+                length: usize,
+                width: u32,
+                height: u32,
+                error: *mut c_char,
+                context: *mut c_void,
+            ),
+            context: *mut c_void,
+        );
+        fn fpasoterm_macos_window_snapshot_free(bytes: *mut u8);
     }
 
     fn take_error(message: *mut c_char, fallback: &str) -> String {
@@ -581,6 +594,65 @@ mod native_mp4 {
             fallback.to_string()
         } else {
             value
+        }
+    }
+
+    pub struct WindowPngFrame {
+        pub png: Vec<u8>,
+        pub width: u32,
+        pub height: u32,
+    }
+
+    type WindowSnapshotSender = tokio::sync::oneshot::Sender<Result<WindowPngFrame, String>>;
+
+    // The C bridge owns AppKit/WebKit objects and invokes this exactly once.
+    // Copy the returned bytes into Rust memory before releasing the C buffer,
+    // so the asynchronous WebKit completion never crosses allocator domains.
+    unsafe extern "C" fn window_snapshot_finished(
+        bytes: *mut u8,
+        length: usize,
+        width: u32,
+        height: u32,
+        error: *mut c_char,
+        context: *mut c_void,
+    ) {
+        if context.is_null() {
+            if !bytes.is_null() {
+                unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            }
+            if !error.is_null() {
+                unsafe { fpasoterm_macos_mp4_error_free(error) };
+            }
+            return;
+        }
+        let sender = unsafe { Box::from_raw(context.cast::<WindowSnapshotSender>()) };
+        let result = if bytes.is_null() || length == 0 {
+            if !bytes.is_null() {
+                unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            }
+            Err(take_error(
+                error,
+                "macOS could not capture the fpasoterm window",
+            ))
+        } else {
+            if !error.is_null() {
+                unsafe { fpasoterm_macos_mp4_error_free(error) };
+            }
+            let png = unsafe { std::slice::from_raw_parts(bytes, length).to_vec() };
+            unsafe { fpasoterm_macos_window_snapshot_free(bytes) };
+            if width == 0 || height == 0 || width % 2 != 0 || height % 2 != 0 {
+                Err("macOS window capture returned invalid dimensions".to_string())
+            } else {
+                Ok(WindowPngFrame { png, width, height })
+            }
+        };
+        let _ = sender.send(result);
+    }
+
+    pub fn request_window_png(window: *mut c_void, sender: WindowSnapshotSender) {
+        let context = Box::into_raw(Box::new(sender)).cast::<c_void>();
+        unsafe {
+            fpasoterm_macos_window_snapshot_png_async(window, window_snapshot_finished, context);
         }
     }
 
@@ -1175,6 +1247,16 @@ struct ScreenVideoRecordingStatus {
     message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// One fpasoterm-owned native-window snapshot. Its encoded payload stays within
+// the existing bounded video-recording IPC path and is never written elsewhere.
+struct ScreenVideoWindowFrame {
+    data_base64: String,
+    width: u32,
+    height: u32,
+}
+
 // A small, non-sensitive runtime fact used where WebView user-agent strings
 // cannot distinguish Intel macOS from Apple Silicon (both commonly report
 // MacIntel). Keeping it native avoids browser-UA heuristics in video fallback
@@ -1317,12 +1399,24 @@ const COMPLETION_POWERSHELL: &str = include_str!("../../completions/fpasoterm.ps
 // The direct binary has the same core options as the Node launcher.
 fn cli_help_text() -> String {
     let text = HELP_TEXT.replace(
+        "      --plugin-list             List local User/plugins files and enabled plugins, then exit.\n",
+        "      --plugin-list             List installed User/plugins, or local ports with --plugin-ports-dir.\n      --plugins-list            Alias for --plugin-list.\n",
+    )
+    .replace(
+        "      --plugin-info <file>      Show a .js/.ts plugin's state, version, and source details.\n",
+        "      --plugin-info <file>      Show an installed plugin, or a local port with --plugin-ports-dir.\n",
+    )
+    .replace(
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --show-config",
         "      --plugin-disable <names>  Alias for --disable-plugin.\n      --plugin-run <command>    Open fpasoterm and invoke one registered plugin command.\n      --plugin-args <json>      JSON value passed to --plugin-run's command handler.\n      --show-config",
     )
     .replace(
         "Use this local fpasoterm-plugins checkout.",
-        "Use this local fpasoterm-plugins checkout or its ports directory.",
+        "Use this local checkout or its ports directory with --plugin-install, --plugin-list, or --plugin-info.",
+    )
+    .replace(
+        "or --plugin-info.\n      --plugin-install-file",
+        "or --plugin-info.\n      --plugin-tcp-target <host:port|tcp://host:port>\n                                Set the one RDP or noVNC port target while installing it.\n      --plugin-install-file",
     )
     .replace(
         "      --force                   Replace an existing file during a plugin install.",
@@ -1333,11 +1427,24 @@ fn cli_help_text() -> String {
     )
 }
 
+// Keep direct-binary argument failures actionable without dumping the entire
+// help screen for scripts. Bridge installs need a complete target and port ID,
+// so give those failures a copyable command shape.
+fn cli_usage_hint(error: &str) -> &'static str {
+    if error.starts_with("--plugin-tcp-target") {
+        "Usage: fpasoterm --plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge --plugin-tcp-target <host:port|tcp://host:port> [--plugin-ports-dir <path>] [--enable] [--force]\n"
+    } else if error.starts_with("--plugin-install requires") {
+        "Usage: fpasoterm --plugin-install <category/name> [--plugin-ports-dir <path>] [--enable] [--force]\n"
+    } else {
+        "Run 'fpasoterm --help' for full usage.\n"
+    }
+}
+
 // Starts Tauri and registers window setup plus renderer-callable commands.
 fn main() {
     install_default_rustls_crypto_provider();
     if let Err(error) = validate_direct_cli_args(&env::args().skip(1).collect::<Vec<_>>()) {
-        print_cli_error(&format!("fpasoterm: {error}\n"));
+        print_cli_error(&format!("fpasoterm: {error}\n{}", cli_usage_hint(&error)));
         std::process::exit(2);
     }
 
@@ -1584,6 +1691,7 @@ fn main() {
             terminal_log_list,
             terminal_log_delete,
             screen_video_recording_start,
+            screen_video_recording_window_snapshot,
             screen_video_recording_append,
             screen_video_recording_stop,
             screen_video_recording_abort,
@@ -1670,6 +1778,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--show-config",
         "--profile-list",
         "--plugin-list",
+        "--plugins-list",
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
@@ -1710,6 +1819,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--plugin-disable",
         "--plugin-install",
         "--plugin-ports-dir",
+        "--plugin-tcp-target",
         "--plugin-install-file",
         "--plugin-run",
         "--plugin-args",
@@ -1779,6 +1889,14 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
                         format!(
                             "{argument} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm {argument} bash)"
                         )
+                    } else if argument == "--plugin-tcp-target" {
+                        format!(
+                            "{argument} requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)"
+                        )
+                    } else if argument == "--plugin-install" {
+                        format!(
+                            "{argument} requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)"
+                        )
                     } else {
                         format!("{argument} requires a value")
                     }
@@ -1821,19 +1939,31 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         return Err("use only one of --plugin-install or --plugin-install-file".to_string());
     }
     if plugin_install_count == 0
-        && args
-            .iter()
-            .any(|argument| argument == "--force" || argument == "--enable")
+        && args.iter().any(|argument| {
+            argument == "--force"
+                || argument == "--enable"
+                || argument == "--plugin-tcp-target"
+                || argument.starts_with("--plugin-tcp-target=")
+        })
     {
-        return Err("--force and --enable require a --plugin-install command".to_string());
+        return Err(
+            "--force, --enable, and --plugin-tcp-target require a --plugin-install command"
+                .to_string(),
+        );
     }
-    if args.iter().any(|argument| {
+    let local_ports_requested = args.iter().any(|argument| {
         argument == "--plugin-ports-dir" || argument.starts_with("--plugin-ports-dir=")
-    }) && !args
-        .iter()
-        .any(|argument| argument == "--plugin-install" || argument.starts_with("--plugin-install="))
-    {
-        return Err("--plugin-ports-dir requires --plugin-install <category/name>".to_string());
+    });
+    let local_ports_operation = args.iter().any(|argument| {
+        matches!(
+            argument.as_str(),
+            "--plugin-list" | "--plugins-list" | "--plugin-info"
+        ) || argument.starts_with("--plugin-info=")
+            || argument == "--plugin-install"
+            || argument.starts_with("--plugin-install=")
+    });
+    if local_ports_requested && !local_ports_operation {
+        return Err("--plugin-ports-dir requires --plugin-install <category/name>, --plugin-list, or --plugin-info <category/name>".to_string());
     }
     let has_plugin_uninstall = args.iter().any(|argument| {
         argument == "--plugin-uninstall" || argument.starts_with("--plugin-uninstall=")
@@ -5583,6 +5713,135 @@ fn public_plugin_version_at_least(current: &str, required: &str) -> bool {
     }
 }
 
+const RDP_LOCAL_BRIDGE_PORT_ID: &str = "integration/rdp-local-bridge";
+const NOVNC_LOCAL_BRIDGE_PORT_ID: &str = "integration/novnc-local-bridge";
+const PLUGIN_TCP_TARGET_HEADER: &str = "// @fpasoterm-plugin allowed-tcp-targets:";
+
+fn plugin_tcp_target_port_supported(id: &str) -> bool {
+    matches!(id, RDP_LOCAL_BRIDGE_PORT_ID | NOVNC_LOCAL_BRIDGE_PORT_ID)
+}
+
+// Accept the short host:port spelling for the common case, but persist and
+// compare the explicit canonical URI that the native bridge enforces.
+fn normalize_plugin_tcp_target(value: &str, option: &str) -> Result<PluginTcpTarget, String> {
+    let value = value.trim();
+    let candidate = if value.contains("://") {
+        value.to_string()
+    } else {
+        format!("tcp://{value}")
+    };
+    parse_plugin_tcp_target(&candidate)
+        .ok_or_else(|| format!("{option} must be host:port, tcp://host:port, or tls://host:port"))
+}
+
+// Reads the one exact capability target baked into a generated RDP/noVNC
+// source. Reconfiguration refuses a source with zero or multiple declarations
+// rather than guessing which network capability a plugin intended to receive.
+fn plugin_tcp_target_from_source(
+    source: &str,
+    id: &str,
+) -> Result<(String, PluginTcpTarget), String> {
+    let values = source
+        .lines()
+        .filter_map(|line| line.trim().strip_prefix(PLUGIN_TCP_TARGET_HEADER))
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    if values.len() != 1 {
+        return Err(format!(
+            "{id} must declare exactly one allowed-tcp-targets value"
+        ));
+    }
+    let raw = values[0].to_string();
+    let target = normalize_plugin_tcp_target(&raw, &format!("{id} source target"))?;
+    if raw != target.canonical() {
+        return Err(format!(
+            "{id} source target must be a canonical tcp://host:port or tls://host:port value"
+        ));
+    }
+    Ok((raw, target))
+}
+
+fn replace_exactly_once(
+    source: String,
+    needle: &str,
+    replacement: &str,
+    label: &str,
+) -> Result<String, String> {
+    if source.matches(needle).count() != 1 {
+        return Err(format!(
+            "{label} does not contain exactly one expected target declaration"
+        ));
+    }
+    Ok(source.replacen(needle, replacement, 1))
+}
+
+// Keeps the source's declared native capability and its JavaScript bridge call
+// synchronized. The generated sources differ only in their bridge expression.
+fn configure_plugin_tcp_target_source(
+    source: String,
+    id: &str,
+    target: &PluginTcpTarget,
+) -> Result<String, String> {
+    if !plugin_tcp_target_port_supported(id) {
+        return Ok(source);
+    }
+    if id == RDP_LOCAL_BRIDGE_PORT_ID && target.protocol != "tcp" {
+        return Err(
+            "--plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port"
+                .to_string(),
+        );
+    }
+    let (previous, _) = plugin_tcp_target_from_source(&source, id)?;
+    let target_text = target.canonical();
+    let source = replace_exactly_once(
+        source,
+        &format!("{PLUGIN_TCP_TARGET_HEADER} {previous}"),
+        &format!("{PLUGIN_TCP_TARGET_HEADER} {target_text}"),
+        id,
+    )?;
+    let previous_json = serde_json::to_string(&previous).map_err(|error| error.to_string())?;
+    let target_json = serde_json::to_string(&target_text).map_err(|error| error.to_string())?;
+    if id == RDP_LOCAL_BRIDGE_PORT_ID {
+        for keyword in ["var", "let", "const"] {
+            let needle = format!("{keyword} target = {previous_json};");
+            if source.contains(&needle) {
+                return replace_exactly_once(
+                    source,
+                    &needle,
+                    &format!("{keyword} target = {target_json};"),
+                    id,
+                );
+            }
+        }
+        return Err(format!(
+            "{id} source target does not match its allowed-tcp-targets declaration"
+        ));
+    }
+    replace_exactly_once(
+        source,
+        &format!("openVncBridge({{ target: {previous_json} }})"),
+        &format!("openVncBridge({{ target: {target_json} }})"),
+        id,
+    )
+}
+
+fn installed_plugin_tcp_target(
+    config_path: &str,
+    port: &PublicPluginPort,
+) -> Result<Option<PluginTcpTarget>, String> {
+    if !plugin_tcp_target_port_supported(&port.id) {
+        return Ok(None);
+    }
+    let source_path = Path::new(config_path)
+        .parent()
+        .unwrap_or_else(|| Path::new("."))
+        .join(public_plugin_local_name(&port.install_path));
+    let source = fs::read_to_string(&source_path)
+        .map_err(|error| format!("could not read installed {} target: {error}", port.id))?;
+    plugin_tcp_target_from_source(&source, &format!("installed {}", port.id))
+        .map(|(_, target)| Some(target))
+}
+
 // Writes one verified plugin source into User/plugins without following symlinked destinations.
 fn install_plugin_source(
     config_path: &str,
@@ -5692,8 +5951,13 @@ fn install_public_plugin_catalog_entry(
     entry: &PublicPluginCatalogEntry,
     use_previous: bool,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let (port, source) = download_public_plugin_catalog_entry(entry, use_previous)?;
+    let source = match plugin_tcp_target {
+        Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+        None => source,
+    };
     install_plugin_source(config_path, &port, source, force)
 }
 
@@ -5702,6 +5966,7 @@ fn install_public_plugin_port(
     config_path: &str,
     selector: &str,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let (requested_id, use_previous) = selector
         .strip_suffix("@previous")
@@ -5713,7 +5978,7 @@ fn install_public_plugin_port(
         .iter()
         .find(|entry| entry.id == id)
         .ok_or_else(|| format!("official INDEX does not contain {id}"))?;
-    install_public_plugin_catalog_entry(config_path, entry, use_previous, force)
+    install_public_plugin_catalog_entry(config_path, entry, use_previous, force, plugin_tcp_target)
 }
 
 // Updates only local files that live at an official catalog install path and
@@ -5758,6 +6023,11 @@ fn update_all_public_plugin_ports(
 
     let mut updated = Vec::new();
     for (entry, previous_version, port, source) in downloads {
+        let target = installed_plugin_tcp_target(config_path, &port)?;
+        let source = match target.as_ref() {
+            Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+            None => source,
+        };
         let installed = install_plugin_source(config_path, &port, source, true)?;
         updated.push((entry.id, previous_version, entry.version, installed));
     }
@@ -5800,12 +6070,202 @@ fn read_local_plugin_file(path: &Path, limit: u64, label: &str) -> Result<String
         .map_err(|error| format!("could not read {label} {}: {error}", path.display()))
 }
 
+// Review metadata is deliberately read from checked-in manifests and source
+// headers only. `--plugin-list --plugin-ports-dir` must not install, execute,
+// or transpile a plugin merely to show what a checkout contains.
+struct LocalPluginPortReview {
+    port: PublicPluginPort,
+    source_path: PathBuf,
+    metadata: PluginMetadata,
+    tcp_targets: Vec<String>,
+    compatible: bool,
+}
+
+fn discover_local_plugin_port_ids(ports_root: &Path) -> Result<Vec<String>, String> {
+    fn visit(root: &Path, directory: &Path, ids: &mut Vec<String>) -> Result<(), String> {
+        for entry in fs::read_dir(directory)
+            .map_err(|error| {
+                format!(
+                    "could not list local ports {}: {error}",
+                    directory.display()
+                )
+            })?
+            .flatten()
+        {
+            let file_type = entry
+                .file_type()
+                .map_err(|error| format!("could not inspect local port entry: {error}"))?;
+            if !file_type.is_dir() || file_type.is_symlink() {
+                continue;
+            }
+            let path = entry.path();
+            if path.join("port.toml").exists() {
+                if let Ok(relative) = path.strip_prefix(root) {
+                    let id = relative.to_string_lossy().replace('\\', "/");
+                    if validate_public_plugin_port_id(&id).is_ok() {
+                        ids.push(id);
+                    }
+                }
+            }
+            visit(root, &path, ids)?;
+        }
+        Ok(())
+    }
+
+    let mut ids = Vec::new();
+    visit(ports_root, ports_root, &mut ids)?;
+    ids.sort();
+    ids.dedup();
+    Ok(ids)
+}
+
+fn local_plugin_port_review(
+    ports_root: &Path,
+    selector: &str,
+) -> Result<LocalPluginPortReview, String> {
+    let id = validate_public_plugin_port_id(selector)?;
+    let port_directory = ports_root.join(&id);
+    let manifest = read_local_plugin_file(
+        &port_directory.join("port.toml"),
+        PUBLIC_PLUGIN_MANIFEST_LIMIT,
+        "local port manifest",
+    )?;
+    let port = parse_public_plugin_manifest(&id, &manifest)?;
+    let source_path = port_directory.join(&port.source);
+    let source = read_local_plugin_file(&source_path, port.source_limit, "local plugin source")?;
+    Ok(LocalPluginPortReview {
+        compatible: public_plugin_version_at_least(
+            env!("CARGO_PKG_VERSION"),
+            &port.min_fpasoterm_version,
+        ),
+        metadata: plugin_metadata(&source),
+        tcp_targets: plugin_allowed_tcp_targets(&source),
+        port,
+        source_path,
+    })
+}
+
+fn print_local_plugin_port_list_cli(ports_directory: Option<String>) -> Result<(), String> {
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let ids = discover_local_plugin_port_ids(&ports_root)?;
+    print_cli_text(&format!("Local plugin ports ({}):\n", ports_root.display()));
+    if ids.is_empty() {
+        print_cli_text("  (none found)\n");
+        return Ok(());
+    }
+    for id in ids {
+        match local_plugin_port_review(&ports_root, &id) {
+            Ok(review) => {
+                let target_summary = if review.tcp_targets.is_empty() {
+                    String::new()
+                } else {
+                    format!("; TCP target {}", review.tcp_targets.join(", "))
+                };
+                let compatibility = if review.compatible {
+                    "compatible".to_string()
+                } else {
+                    format!(
+                        "requires fpasoterm >= {}",
+                        review.port.min_fpasoterm_version
+                    )
+                };
+                print_cli_text(&format!(
+                    "  {} [version {}; {compatibility}; source {}{target_summary}]\n",
+                    review.port.id, review.port.version, review.port.source
+                ));
+            }
+            Err(error) => print_cli_text(&format!("  {id} [invalid: {error}]\n")),
+        }
+    }
+    Ok(())
+}
+
+fn print_local_plugin_port_info_cli(
+    ports_directory: Option<String>,
+    selector: &str,
+) -> Result<(), String> {
+    let ports_root = local_plugin_ports_directory(ports_directory)?;
+    let review = local_plugin_port_review(&ports_root, selector)?;
+    print_cli_text(&format!(
+        "Port: {}\nVersion: {}\nRequires fpasoterm: >= {} ({})\nSource: {}\nInstall path: plugins/{}\nDescription: {}\n",
+        review.port.id,
+        review.port.version,
+        review.port.min_fpasoterm_version,
+        if review.compatible { "compatible" } else { "not compatible" },
+        review.source_path.display(),
+        review.port.install_path,
+        review.metadata.description,
+    ));
+    if !review.tcp_targets.is_empty() {
+        print_cli_text(&format!(
+            "{}: {}\n",
+            plugin_tcp_target_info_label(&review.tcp_targets),
+            review.tcp_targets.join(", ")
+        ));
+    }
+    print_cli_text(&local_plugin_port_installation(&review.port, &ports_root));
+    Ok(())
+}
+
+// Public bridge sources deliberately use inert loopback values until an
+// installer supplies one reviewed endpoint. They are not conventional service
+// ports and should not be presented as such in `--plugin-info` output.
+fn plugin_tcp_target_info_label(targets: &[String]) -> &'static str {
+    if targets.len() != 1 {
+        return "TCP target";
+    }
+    match targets[0].as_str() {
+        "tcp://127.0.0.1:53389" => "Safe loopback default (not standard RDP port 3389)",
+        "tcp://127.0.0.1:53390" => "Safe loopback default (not standard VNC port 5900)",
+        _ => "TCP target",
+    }
+}
+
+// Render the supplied path as a quoted argument so the displayed install
+// command remains usable for checkout directories containing whitespace.
+fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) -> String {
+    let directory = format!("{:?}", ports_root.to_string_lossy());
+    let command = format!(
+        "fpasoterm --plugin-install {} --plugin-ports-dir {directory}",
+        port.id
+    );
+    let mut output = format!("\nInstallation:\n  {command} --enable\n");
+    match port.id.as_str() {
+        RDP_LOCAL_BRIDGE_PORT_ID => {
+            output.push_str("\nConnection target (replaces the declared default above):\n");
+            output.push_str(&format!(
+                "  {command} --plugin-tcp-target tcp://<host>:3389 --enable\n"
+            ));
+            output.push_str(
+                "  RDP uses the standard TCP port 3389; the safe default does not connect until this target is specified.\n  A bare host:port is normalized to tcp://host:port.\n",
+            );
+        }
+        NOVNC_LOCAL_BRIDGE_PORT_ID => {
+            output.push_str("\nConnection target (replaces the declared default above):\n");
+            output.push_str(&format!(
+                "  {command} --plugin-tcp-target tcp://<host>:5900 --enable\n  {command} --plugin-tcp-target tls://<host>:5900 --enable\n"
+            ));
+            output.push_str(
+                "  noVNC uses the standard VNC port 5900; the safe default does not connect until this target is specified.\n  Use the transport configured by the VNC server.\n",
+            );
+        }
+        _ => {}
+    }
+    output.push_str("\n  Omit --enable to install for source review only. Add --force only to replace an existing installed port.\n  Restart fpasoterm after installation so it loads an enabled plugin.\n");
+    output
+}
+
+fn installed_plugin_installation_note() -> &'static str {
+    "\nInstallation: already installed in User/plugins.\nFor a reviewed checkout port and its install settings, run:\n  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>\n"
+}
+
 // Installs a reviewed port from a local fpasoterm-plugins checkout without network access.
 fn install_local_plugin_port(
     config_path: &str,
     selector: &str,
     ports_directory: Option<String>,
     force: bool,
+    plugin_tcp_target: Option<&PluginTcpTarget>,
 ) -> Result<String, String> {
     let id = validate_public_plugin_port_id(selector)?;
     let ports_root = local_plugin_ports_directory(ports_directory)?;
@@ -5829,6 +6289,10 @@ fn install_local_plugin_port(
         port.source_limit,
         "local plugin source",
     )?;
+    let source = match plugin_tcp_target {
+        Some(target) => configure_plugin_tcp_target_source(source, &port.id, target)?,
+        None => source,
+    };
     install_plugin_source(config_path, &port, source, force)
 }
 
@@ -5964,8 +6428,20 @@ fn print_plugin_list_cli(config_path: &str, enabled: &[String]) {
         print_cli_text("  (none found)\n");
     } else {
         for plugin in available {
-            let metadata = read_plugin_metadata(&config_dir.join(&plugin));
-            print_cli_text(&format!("  {plugin} [version {}]\n", metadata.version));
+            let source_path = config_dir.join(&plugin);
+            let metadata = read_plugin_metadata(&source_path);
+            let tcp_targets = fs::read_to_string(&source_path)
+                .map(|source| plugin_allowed_tcp_targets(&source))
+                .unwrap_or_default();
+            let target_summary = if tcp_targets.is_empty() {
+                String::new()
+            } else {
+                format!("; TCP target {}", tcp_targets.join(", "))
+            };
+            print_cli_text(&format!(
+                "  {plugin} [version {}{target_summary}]\n",
+                metadata.version
+            ));
         }
     }
     print_cli_text("\nEnabled plugins:\n");
@@ -6121,6 +6597,37 @@ fn plugin_cli() {
     }
     let public_ports = cli_option_values_any(&["--plugin-install"]);
     let local_files = cli_option_values_any(&["--plugin-install-file"]);
+    let plugin_tcp_target = match cli_option_value("--plugin-tcp-target") {
+        Some(value) => Some(normalize_plugin_tcp_target(&value, "--plugin-tcp-target")).transpose(),
+        None => Ok(None),
+    };
+    let plugin_tcp_target = match plugin_tcp_target {
+        Ok(value) => value,
+        Err(error) => {
+            print_cli_error(&format!("fpasoterm: {error}\n"));
+            std::process::exit(2);
+        }
+    };
+    if let Some(target) = plugin_tcp_target.as_ref() {
+        let requested = public_ports
+            .iter()
+            .flat_map(|value| value.split(','))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.strip_suffix("@previous").unwrap_or(value))
+            .collect::<Vec<_>>();
+        if !local_files.is_empty()
+            || requested.len() != 1
+            || !plugin_tcp_target_port_supported(requested[0])
+        {
+            print_cli_error("fpasoterm: --plugin-tcp-target requires exactly one supported --plugin-install port: integration/rdp-local-bridge or integration/novnc-local-bridge\n");
+            std::process::exit(2);
+        }
+        if requested[0] == RDP_LOCAL_BRIDGE_PORT_ID && target.protocol != "tcp" {
+            print_cli_error("fpasoterm: --plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port\n");
+            std::process::exit(2);
+        }
+    }
     if !public_ports.is_empty() || !local_files.is_empty() {
         let force = cli_has_flag(&["--force"]);
         let enable = cli_has_flag(&["--enable"]);
@@ -6143,9 +6650,15 @@ fn plugin_cli() {
                         selector,
                         cli_option_value("--plugin-ports-dir"),
                         force,
+                        plugin_tcp_target.as_ref(),
                     )
                 } else if !public_ports.is_empty() {
-                    install_public_plugin_port(&config_path, selector, force)
+                    install_public_plugin_port(
+                        &config_path,
+                        selector,
+                        force,
+                        plugin_tcp_target.as_ref(),
+                    )
                 } else {
                     install_local_plugin_file(&config_path, selector, force)
                 };
@@ -6187,12 +6700,30 @@ fn plugin_cli() {
         }
         return;
     }
-    if cli_has_flag(&["--plugin-list"]) {
-        print_plugin_list_cli(&config_path, &enabled);
+    if cli_has_flag(&["--plugin-list", "--plugins-list"]) {
+        if cli_option_value("--plugin-ports-dir").is_some() {
+            if let Err(error) =
+                print_local_plugin_port_list_cli(cli_option_value("--plugin-ports-dir"))
+            {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+        } else {
+            print_plugin_list_cli(&config_path, &enabled);
+        }
         return;
     }
 
     if let Some(selector) = cli_option_value("--plugin-info") {
+        if cli_option_value("--plugin-ports-dir").is_some() {
+            if let Err(error) =
+                print_local_plugin_port_info_cli(cli_option_value("--plugin-ports-dir"), &selector)
+            {
+                print_cli_error(&format!("fpasoterm: {error}\n"));
+                std::process::exit(2);
+            }
+            return;
+        }
         let available = discover_plugin_files(&config_path);
         match resolve_plugin_selector(&selector, &available, "inspect") {
             Ok(plugin) => {
@@ -6211,6 +6742,15 @@ fn plugin_cli() {
                     source_path.display(),
                     metadata.description,
                 ));
+                let tcp_targets = plugin_allowed_tcp_targets(&source);
+                if !tcp_targets.is_empty() {
+                    print_cli_text(&format!(
+                        "{}: {}\n",
+                        plugin_tcp_target_info_label(&tcp_targets),
+                        tcp_targets.join(", ")
+                    ));
+                }
+                print_cli_text(installed_plugin_installation_note());
             }
             Err(error) => {
                 print_cli_error(&format!("fpasoterm: {error}\n"));
@@ -6292,6 +6832,7 @@ fn plugin_cli() {
 fn plugin_cli_requested() -> bool {
     cli_has_flag(&[
         "--plugin-list",
+        "--plugins-list",
         "--plugin-path",
         "--plugin-enable-all",
         "--plugin-disable-all",
@@ -8794,6 +9335,50 @@ fn screen_video_recording_start(
         max_bytes,
         message: "screen video recording started".to_string(),
     })
+}
+
+// Snapshot the invoking fpasoterm window only. The AppKit/WebKit request is
+// explicitly marshalled to the main thread; WKWebView renders out of process
+// and completes its image asynchronously. Non-macOS builds retain their
+// existing WebView display/canvas paths and deliberately expose no equivalent
+// command.
+#[tauri::command]
+async fn screen_video_recording_window_snapshot(
+    window: WebviewWindow,
+) -> Result<ScreenVideoWindowFrame, String> {
+    #[cfg(target_os = "macos")]
+    {
+        // Do not block the Tauri command worker while AppKit performs the
+        // snapshot. A synchronous channel wait can deadlock when the command
+        // is dispatched from the same UI run loop that run_on_main_thread
+        // needs to service.
+        let (sender, receiver) = tokio::sync::oneshot::channel();
+        let window_for_main = window.clone();
+        window
+            .run_on_main_thread(move || match window_for_main.ns_window() {
+                Ok(native_window) => native_mp4::request_window_png(native_window, sender),
+                Err(error) => {
+                    let _ = sender.send(Err(format!(
+                        "could not access the fpasoterm window: {error}"
+                    )));
+                }
+            })
+            .map_err(|error| format!("could not schedule macOS window capture: {error}"))?;
+        let frame = tokio::time::timeout(Duration::from_secs(3), receiver)
+            .await
+            .map_err(|_| "macOS window capture did not complete within 3 seconds".to_string())?
+            .map_err(|_| "macOS window capture main-thread callback was cancelled".to_string())??;
+        Ok(ScreenVideoWindowFrame {
+            data_base64: BASE64_STANDARD.encode(frame.png),
+            width: frame.width,
+            height: frame.height,
+        })
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = window;
+        Err("native fpasoterm window capture is available only on macOS".to_string())
+    }
 }
 
 fn append_screen_video_recording_bytes(
@@ -11872,6 +12457,7 @@ mod tests {
             "--copy-diagnostics",
             "--profile-list",
             "--plugin-list",
+            "--plugins-list",
             "--plugin-path",
             "--plugin-enable-all",
             "--plugin-disable-all",
@@ -11943,6 +12529,23 @@ mod tests {
                 "option {option} should be accepted"
             );
         }
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-list".to_string(),
+                "--plugin-ports-dir".to_string(),
+                "./fpasoterm-plugins".to_string(),
+            ]),
+            Ok(())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&[
+                "--plugin-info".to_string(),
+                "integration/novnc-local-bridge".to_string(),
+                "--plugin-ports-dir".to_string(),
+                "./fpasoterm-plugins/ports".to_string(),
+            ]),
+            Ok(())
+        );
         assert_eq!(
             validate_direct_cli_args(&[
                 "--plugin-install".to_string(),
@@ -12137,8 +12740,28 @@ mod tests {
             Err("--completion-uninstall requires a shell: bash, zsh, fish, or powershell (example: fpasoterm --completion-uninstall bash)".to_string())
         );
         assert_eq!(
+            validate_direct_cli_args(&["--plugin-tcp-target".to_string()]),
+            Err("--plugin-tcp-target requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)".to_string())
+        );
+        assert_eq!(
+            validate_direct_cli_args(&["--plugin-install".to_string()]),
+            Err("--plugin-install requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)".to_string())
+        );
+        assert_eq!(
             validate_direct_cli_args(&["--enable".to_string()]),
-            Err("--force and --enable require a --plugin-install command".to_string())
+            Err(
+                "--force, --enable, and --plugin-tcp-target require a --plugin-install command"
+                    .to_string()
+            )
+        );
+        assert!(
+            cli_usage_hint("--plugin-tcp-target requires host:port").contains(
+                "--plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge"
+            )
+        );
+        assert_eq!(
+            cli_usage_hint("unknown option: --foo"),
+            "Run 'fpasoterm --help' for full usage.\n"
         );
     }
 
@@ -12512,6 +13135,57 @@ maxSourceBytes = 8388608
     }
 
     #[test]
+    fn local_port_review_reads_manifest_and_tcp_target_without_installing() {
+        let root = env::temp_dir().join(format!("fpasoterm-local-port-review-{}", now_millis()));
+        let port_directory = root.join("ports/integration/review-target");
+        fs::create_dir_all(&port_directory).expect("create local port directory");
+        fs::write(
+            port_directory.join("port.toml"),
+            concat!(
+                "[port]\n",
+                "id = \"integration/review-target\"\n",
+                "name = \"review-target\"\n",
+                "version = \"1.2.3\"\n",
+                "author = \"test\"\n",
+                "description = \"Local review fixture\"\n",
+                "license = \"MIT\"\n",
+                "minFpasotermVersion = \"1.0.0\"\n",
+                "source = \"plugin.js\"\n",
+                "installPath = \"integration/review-target.js\"\n",
+            ),
+        )
+        .expect("write manifest");
+        fs::write(
+            port_directory.join("plugin.js"),
+            concat!(
+                "// @fpasoterm-plugin version: 1.2.3\n",
+                "// @fpasoterm-plugin description: Local review fixture\n",
+                "// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.50:5900\n",
+            ),
+        )
+        .expect("write source");
+
+        let ports_root = root.join("ports");
+        assert_eq!(
+            discover_local_plugin_port_ids(&ports_root).expect("discover ports"),
+            vec!["integration/review-target".to_string()]
+        );
+        let review = local_plugin_port_review(&ports_root, "integration/review-target")
+            .expect("read local port review");
+        assert_eq!(review.port.version, "1.2.3");
+        assert!(review.compatible);
+        assert_eq!(review.tcp_targets, vec!["tcp://192.0.2.50:5900"]);
+        assert_eq!(review.metadata.description, "Local review fixture");
+        let installation = local_plugin_port_installation(&review.port, &ports_root);
+        assert!(installation.contains("Installation:"));
+        assert!(
+            installation.contains("--plugin-install integration/review-target --plugin-ports-dir")
+        );
+        assert!(!installation.contains("--plugin-tcp-target"));
+        fs::remove_dir_all(root).expect("remove local port fixture");
+    }
+
+    #[test]
     fn public_plugin_catalog_status_distinguishes_updates_and_disabled_sources() {
         let update = public_plugin_catalog_status(Some("1.0.4".to_string()), true, "1.0.5");
         assert_eq!(update.installed_version.as_deref(), Some("1.0.4"));
@@ -12588,6 +13262,64 @@ maxSourceBytes = 8388608
         let mut wrong_request = request.clone();
         wrong_request[mismatched..mismatched + b"192.0.2.25".len()].copy_from_slice(b"192.0.2.26");
         assert!(parse_rdp_clean_path_request(&wrong_request, &target).is_err());
+    }
+
+    #[test]
+    fn configured_rdp_and_novnc_sources_keep_program_and_capability_target_in_sync() {
+        let rdp_source = concat!(
+            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:53389\n",
+            "var target = \"tcp://127.0.0.1:53389\";\n"
+        );
+        let rdp_target =
+            normalize_plugin_tcp_target("192.0.2.25:3389", "test").expect("RDP target");
+        let rdp = configure_plugin_tcp_target_source(
+            rdp_source.to_string(),
+            RDP_LOCAL_BRIDGE_PORT_ID,
+            &rdp_target,
+        )
+        .expect("configured RDP source");
+        assert!(rdp.contains("allowed-tcp-targets: tcp://192.0.2.25:3389"));
+        assert!(rdp.contains("var target = \"tcp://192.0.2.25:3389\";"));
+
+        let novnc_source = concat!(
+            "// @fpasoterm-plugin allowed-tcp-targets: tcp://127.0.0.1:53390\n",
+            "const bridge = api.openVncBridge({ target: \"tcp://127.0.0.1:53390\" });\n"
+        );
+        let novnc_target =
+            normalize_plugin_tcp_target("tcp://192.0.2.10:5900", "test").expect("noVNC target");
+        let novnc = configure_plugin_tcp_target_source(
+            novnc_source.to_string(),
+            NOVNC_LOCAL_BRIDGE_PORT_ID,
+            &novnc_target,
+        )
+        .expect("configured noVNC source");
+        assert!(novnc.contains("allowed-tcp-targets: tcp://192.0.2.10:5900"));
+        assert!(novnc.contains("openVncBridge({ target: \"tcp://192.0.2.10:5900\" })"));
+
+        let tls_target =
+            normalize_plugin_tcp_target("tls://192.0.2.25:3389", "test").expect("TLS target parse");
+        assert!(configure_plugin_tcp_target_source(
+            rdp_source.to_string(),
+            RDP_LOCAL_BRIDGE_PORT_ID,
+            &tls_target,
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn plugin_info_labels_safe_bridge_defaults_without_hiding_standard_ports() {
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://127.0.0.1:53389".to_string()]),
+            "Safe loopback default (not standard RDP port 3389)"
+        );
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://127.0.0.1:53390".to_string()]),
+            "Safe loopback default (not standard VNC port 5900)"
+        );
+        assert_eq!(
+            plugin_tcp_target_info_label(&["tcp://192.0.2.10:5900".to_string()]),
+            "TCP target"
+        );
     }
 
     #[test]

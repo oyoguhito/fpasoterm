@@ -106,6 +106,7 @@ fpasoterm --show-config
 ```sh
 fpasoterm --plugin-path
 fpasoterm --plugin-list
+fpasoterm --plugins-list # --plugin-list のalias
 fpasoterm --plugin-info welcome-banner
 fpasoterm --plugin-uninstall welcome-banner
 fpasoterm --plugin-enable welcome-banner
@@ -114,8 +115,8 @@ fpasoterm --plugin-enable-all
 fpasoterm --plugin-disable-all
 ```
 
-`--plugin-list` はactiveな `User/plugins` directoryだけを対象にする **local list** です。GitHubや公開port catalogへの問い合わせは行いません。remote catalogは `--plugin-search [query]` を使用してください。検出した fileと宣言されたversion、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
-`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、load status、renderer URL を表示します。localの`--plugin-*` selectorでは、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。たとえば`welcome-banner`や`appearance/teal`を指定できます。`.js`と`.ts`の両方が一致する場合はextensionまたはより具体的なpathを指定してください。
+`--plugin-list`（`--plugins-list`もalias）はactiveな `User/plugins` directoryだけを対象にする **local list** です。GitHubや公開port catalogへの問い合わせは行いません。remote catalogは `--plugin-search [query]` を使用してください。検出した fileと宣言されたversion、宣言済みTCP bridge target（あれば）、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
+`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、宣言済みTCP bridge target（あれば）、load status、renderer URL を表示します。localの`--plugin-*` selectorでは、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。たとえば`welcome-banner`や`appearance/teal`を指定できます。`.js`と`.ts`の両方が一致する場合はextensionまたはより具体的なpathを指定してください。
 `--plugin-uninstall <file>` は `User/plugins` のlocal plugin sourceを1件またはcomma区切りで削除し、生成済みcacheと同じ`plugins.enabled` entryも削除します。公開catalogには接続せず、曖昧なname、traversal、symlink化されたplugin fileはerrorにします。削除後は開いているfpasoterm windowを再起動してください。他のplugin変更optionとの同時指定はできません。
 `--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`User/plugins`にplugin sourceが無い場合は、空のlistを成功扱いにせずerrorを表示します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
 
@@ -140,6 +141,20 @@ fpasoterm --plugin-uninstall appearance/teal
 ```
 
 最初のcommandは指定portのsourceだけを`User/plugins`へcopyし、reviewできるよう無効のままにします。`--enable`を明示した場合だけ`plugins.enabled`へ追加します。既存fileは`--force`を指定しない限り置き換えません。installerは固定の公式repositoryにHTTPSで接続し、port/source path、manifest metadata、source size、期待するfpasoterm plugin headerを検証します。download後もpluginはrendererで動作するため、有効化前に内容を確認して信頼できるものだけを使用してください。
+
+### RDP / noVNC の接続先をinstall時に指定
+
+RDP local bridge と noVNC local bridge は、それぞれ一つの明示的なTCP接続先を必要とします。公開portに埋め込まれたplaceholderをinstallした後でportを再buildする必要はありません。どちらか一つのportをinstallするcommandへ`--plugin-tcp-target`を指定してください。`host:port`だけを指定した場合は`tcp://host:port`として扱います。
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+installerはreview済みplugin sourceの`allowed-tcp-targets`宣言とbridge callの両方へ同じ接続先を書き込みます。native bridgeはこの宣言と一致する接続先だけを受け付けるため、このoptionでpluginに任意のTCP接続権限を与えることはありません。RDPは現在`tcp://`だけを受け付けます。noVNCはVNC service自身がTLSを使う場合に`tls://`も指定できます。既存のinstall先を変更する場合は同じcommandに`--force`を加えます。`--plugin-update-all`は設定済みRDP/noVNC targetを保持し、catalogのplaceholderへ戻しません。複数port、無関係なport、`--plugin-install-file`との併用は接続先を曖昧にするためerrorになります。
 
 ### local checkout / fileからのinstall
 

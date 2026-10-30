@@ -277,7 +277,7 @@ enabled = ["plugins/example.ts"]
 
 プラグインは `~/.config/fpasoterm/User/plugins/` 配下に置きます。JavaScript (`.js`) と TypeScript (`.ts`) に対応しています。TypeScript plugin は起動時に `~/.config/fpasoterm/User/cache/plugins/` へ変換されます。plugin は renderer context で動作するため、内容を確認した信頼できるローカル file だけを有効にしてください。pluginとsync folderの信頼境界は[セキュリティ](docs/security.ja.md)を参照してください。
 
-plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list` でlocalの `User/plugins` にある検出済み・有効な plugin を確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`--plugin-info welcome-banner`ではsource、有効状態、description、load statusを確認できます。有効化またはsource変更後は対象windowを再起動してください。
+plugin は `version` を参照し、`onReady()` で起動後の処理を登録し、`registerCommand()` で hamburger menu の `Plugins` submenu に action を追加できます。`fpasoterm --plugin-list`（`--plugins-list`もalias）でlocalの `User/plugins` にある検出済み・有効な pluginと、宣言済みTCP bridge targetを確認し、`--plugin-enable` / `--plugin-disable` で有効 list を更新できます。`--plugin-info welcome-banner`ではsource、有効状態、description、TCP target、load statusを確認できます。`--plugin-ports-dir`を伴う`--plugin-info`では、review済みportのinstall command、`--enable`/`--force`の使い分け、RDP/noVNCの場合は接続先を設定する正確な形式も表示します。有効化またはsource変更後は対象windowを再起動してください。全CLI optionは`fpasoterm --help`で確認できます。不足しているbridge install parameterはcopy可能なusage例と共に表示されます。
 
 新しいGUI windowを開く際に有効pluginの登録済みcommandを実行するには、`fpasoterm --plugin-run <plugin/path[:command-id]>`を使用します。`--plugin-args <json>`でhandlerへJSON値を一つ渡せます。例えば`fpasoterm --plugin-run integration/youtube-web-panel`です。複数commandを持つpluginは`integration/youtube-web-panel:youtube-web-panel`のように一意な指定を使用します。従来のbare command IDも互換のため使用できます。CLIから渡されたJavaScriptを実行せず、登録済みcommandだけをdispatchします。
 
@@ -286,6 +286,28 @@ review済みのlocal pluginとそのenabled entryを削除する場合は`fpasot
 ports repository全体をcloneせず、Node.jsも使わずにreview済み公開pluginを取得する場合は、`fpasoterm --plugin-install appearance/teal`を実行します。内容確認後に有効化する場合だけ`--enable`を追加します。固定repository、検証、上書き条件は[プラグイン](docs/plugins.ja.md)を参照してください。
 
 review済みのlocal `fpasoterm-plugins` checkoutからは、`fpasoterm --plugin-install appearance/teal --plugin-ports-dir ./fpasoterm-plugins --enable`を使用します。単独の信頼済みsource fileは`fpasoterm --plugin-install-file ./my-plugin.ts --enable`でcopyできます。ports projectはcatalog / INDEX検索とplugin開発・検証用で、利用者向けのinstallはfpasoterm本体が行います。
+
+checkoutからinstallする前に、plugin codeをcopy・実行せずmanifestとsource headerを確認できます。`--plugin-ports-dir`を付けない`--plugin-list`は、従来どおり導入済み`User/plugins`だけを表示します。
+
+```sh
+fpasoterm --plugin-list --plugin-ports-dir ./fpasoterm-plugins
+fpasoterm --plugin-info integration/rdp-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports
+```
+
+RDP/noVNC local bridge portはinstall時に一つの明示的なendpointを指定できます。RDPは`tcp://`だけ、noVNCは`tcp://`または`tls://`を受け付けます。`host:port`だけを渡した場合は`tcp://host:port`へ正規化されます。
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-ports-dir ./fpasoterm-plugins/ports \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+既存install先を置き換えるときだけ`--force`を追加します。targetはpluginのbridge callとnative capability headerの両方へ書き込まれ、`--plugin-update-all`でも維持されます。install後はfpasotermを再起動してください。
 
 公式catalogより古いstable versionの導入済み公開pluginを、有効・無効状態を維持したまま一括更新するには、`fpasoterm --plugin-update-all`を実行してからfpasotermを再起動します。
 
@@ -311,7 +333,7 @@ Kitty Graphicsのdirect PNG/RGB/RGBAはbounded rendererで対応します。SIXE
 Windows の source checkout では `node .\bin\fpasoterm --setup-sync` を使います。
 `fpasoterm --sync-status` で folder health と channel を確認でき、`fpasoterm --sync-clean` は期限切れの sync command file だけを削除します。
 terminal output log は hamburger menu の `Log Start` / `Log Stop` で取得し、`Log Show` で active log または `Log Stop` で閉じた最後の log を表示できます。これらの操作には application-wide shortcut を設けないため、`Ctrl+Shift+s` と `Ctrl+Shift+l` は terminal application で利用できます。共有したい場合は `logging.directory` を同期フォルダに向けます。
-`Log → Video Start` / `Video Stop`は別の本体video recording機能です。OS pickerが使えるplatformでは選択したscreenまたはwindowを、使えない場合はrender済みのfpasoterm terminal surfaceだけを録画します。WebViewの`MediaRecorder`が利用可能なら音声なしWebMまたはMP4を使います。Linux/ChromeOSのterminal fallbackでは、WebKitGTKのGStreamer runtimeをアプリ内で利用し、信頼できるPNG snapshotからWebMを生成します。GStreamer経路が利用できない場合だけanimated GIFとしてlogと同じdirectoryへ保存します。`Log → Video Show`は完了済みfileの一覧を表示し、選択したfileをOS既定viewerで開くか、確認後に選択fileまたは全video fileを削除できます。text logは削除しません。keyboard shortcutやautomatic recordingはありません。permission、`videoMaxBytes`上限、現在のplatform制限は[画面動画録画](docs/video-recording.ja.md)を参照してください。
+`Log → Video Start` / `Video Stop`は別の本体video recording機能です。OS pickerが使えるplatformでは選択したscreenまたはwindowを録画し、macOSではfpasoterm windowを選ぶことで途中のterminalからpluginへの切替、controls、popupも含めます。macOSのpicker APIがない場合も、fpasoterm自身のnative windowを記録してからrender済みpluginまたはterminal surfaceへfallbackします。WebViewの`MediaRecorder`が利用可能なら音声なしWebMまたはMP4を使います。Linux/ChromeOSのterminal fallbackでは、WebKitGTKのGStreamer runtimeをアプリ内で利用し、信頼できるPNG snapshotからWebMを生成します。GStreamer経路が利用できない場合だけanimated GIFとしてlogと同じdirectoryへ保存します。`Log → Video Show`は完了済みfileの一覧を表示し、選択したfileをOS既定viewerで開くか、確認後に選択fileまたは全video fileを削除できます。text logは削除しません。keyboard shortcutやautomatic recordingはありません。permission、`videoMaxBytes`上限、現在のplatform制限は[画面動画録画](docs/video-recording.ja.md)を参照してください。
 log panel には検索欄と `Search` ボタンがあり、表示中の log から次の一致文字列を選択してその位置へ scroll できます。`N` は次、`P` は前の一致箇所へ移動します。log text area に focus がある場合は `j` / `k` でも同じ移動ができ、矢印キーは通常の log scroll に使えます。
 
 npm registry から global install する場合:

@@ -140,6 +140,7 @@ The explicit plugin-management spellings are also available from every CLI:
 ```sh
 fpasoterm --plugin-path
 fpasoterm --plugin-list
+fpasoterm --plugins-list # alias for --plugin-list
 fpasoterm --plugin-info welcome-banner
 fpasoterm --plugin-uninstall welcome-banner
 fpasoterm --plugin-enable welcome-banner
@@ -150,11 +151,11 @@ fpasoterm --plugin-disable-all
 
 `--plugin-list` is a local-only view of the active `User/plugins` directory. It does not query
 GitHub or the public port catalog; use `--plugin-search [query]` for that remote catalog. It
-prints discovered files with their declared versions and the `enabled` entries. The
+prints discovered files with their declared versions, declared TCP bridge targets (when any), and the `enabled` entries. The
 `--plugin-enable` and `--plugin-disable` options are aliases for the existing
 `--enable-plugin` and `--disable-plugin` options.
 `--plugin-info <file>` prints the resolved source path, enabled state, declared
-version, description, load status, and renderer URL without opening a window. Pass a
+version, description, declared TCP bridge target (when any), load status, and renderer URL without opening a window. Pass a
 `.js` or `.ts` filename such as `welcome-banner.ts`. For all local
 `--plugin-*` selectors, the leading `plugins/` and the `.js`/`.ts` suffix are
 optional: use `welcome-banner` or `appearance/teal`. If both `.js` and `.ts`
@@ -203,6 +204,31 @@ leaves it disabled for review. `--enable` explicitly adds it to
 the fixed official repository, validates port/source paths, manifest metadata,
 source size, and the expected fpasoterm plugin header. Downloaded plugins still
 run in the renderer, so review and trust them before enabling them.
+
+### RDP and noVNC target at install time
+
+The RDP and noVNC local-bridge ports each require one explicit TCP destination.
+Do not install their published placeholder target and then rebuild a port just
+to set a host. Supply `--plugin-tcp-target` while installing exactly one of
+those ports instead. A bare `host:port` means `tcp://host:port`:
+
+```sh
+fpasoterm --plugin-install integration/rdp-local-bridge \
+  --plugin-tcp-target 192.0.2.25:3389 --enable
+
+fpasoterm --plugin-install integration/novnc-local-bridge \
+  --plugin-tcp-target tcp://192.0.2.10:5900 --enable
+```
+
+The installer writes the exact target both into the reviewed plugin's
+`allowed-tcp-targets` declaration and its bridge call. The native bridge still
+requires that same declared destination, so this option does not grant a
+plugin arbitrary TCP access. RDP currently accepts only `tcp://`; noVNC also
+accepts `tls://` when the VNC service itself uses TLS. To change an existing
+installation, repeat the command with `--force`. `--plugin-update-all`
+preserves the currently configured RDP/noVNC target rather than reverting it
+to a catalog placeholder. The option rejects multiple ports, unrelated ports,
+and `--plugin-install-file` to keep the target choice unambiguous.
 
 ### Local checkout or file install
 

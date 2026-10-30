@@ -19,6 +19,7 @@ const {
   migrateLegacyLogKeybindings,
   missingConfigKeys,
   pluginMetadata,
+  pluginAllowedTcpTargets,
   readPluginMetadata,
   readUserConfig,
   resolvePluginSelector,
@@ -75,13 +76,16 @@ Options:
       --doctor                   Check updates, npm audit, and config health, then exit.
       --open-log-dir             Open the configured terminal log directory, then exit.
       --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.
-      --plugin-list             List local User/plugins files and enabled plugins, then exit.
+      --plugin-list             List installed User/plugins, or local ports with --plugin-ports-dir.
+      --plugins-list            Alias for --plugin-list.
       --plugin-path             Print the active User/plugins directory, then exit.
-      --plugin-info <file>      Show a .js/.ts plugin's state, version, source, and load status.
+      --plugin-info <file>      Show an installed plugin, or a local port with --plugin-ports-dir.
       --plugin-uninstall <file> Remove comma-separated local User/plugins files, then exit.
       --plugin-search [query]   Search official public plugin ports, then exit.
       --plugin-install <ports>  Install comma-separated ports from GitHub, or --plugin-ports-dir when supplied.
-      --plugin-ports-dir <path> Use this local fpasoterm-plugins checkout or its ports/ directory with --plugin-install.
+      --plugin-ports-dir <path> Use this local checkout/ports with --plugin-install, --plugin-list, or --plugin-info.
+      --plugin-tcp-target <host:port|tcp://host:port>
+                                Set the one RDP or noVNC port target while installing it.
       --plugin-install-file <path>
                                 Copy one trusted local .js/.ts plugin into User/plugins.
       --plugin-update-all       Update installed official public plugins with newer catalog versions.
@@ -203,6 +207,7 @@ function parseArgs(argv) {
   const pluginUninstall = [];
   let pluginInstall = '';
   let pluginPortsDir = '';
+  let pluginTcpTarget = '';
   let pluginInstallFile = '';
   let pluginUpdateAll = false;
   let pluginInstallForce = false;
@@ -305,7 +310,7 @@ function parseArgs(argv) {
       continue;
     }
 
-    if (arg === '--plugin-list') {
+    if (arg === '--plugin-list' || arg === '--plugins-list') {
       pluginList = true;
       continue;
     }
@@ -335,6 +340,12 @@ function parseArgs(argv) {
 
     if (arg === '--plugin-ports-dir') {
       pluginPortsDir = requireValue(argv, index, arg);
+      index += 1;
+      continue;
+    }
+
+    if (arg === '--plugin-tcp-target') {
+      pluginTcpTarget = normalizePluginTcpTarget(requireValue(argv, index, arg));
       index += 1;
       continue;
     }
@@ -612,8 +623,20 @@ function parseArgs(argv) {
   if ((pluginInstallForce || pluginInstallEnable) && pluginInstallCount === 0) {
     throw new Error('--force and --enable require a --plugin-install command');
   }
-  if (pluginPortsDir && !pluginInstall) {
-    throw new Error('--plugin-ports-dir requires --plugin-install <category/name>');
+  if (pluginPortsDir && !pluginInstall && !pluginList && !pluginInfo) {
+    throw new Error('--plugin-ports-dir requires --plugin-install <category/name>, --plugin-list, or --plugin-info <category/name>');
+  }
+  if (pluginTcpTarget) {
+    if (!pluginInstall || pluginInstallFile) {
+      throw new Error('--plugin-tcp-target requires --plugin-install integration/rdp-local-bridge or integration/novnc-local-bridge');
+    }
+    const ids = pluginInstallPortIds(pluginInstall);
+    if (ids.length !== 1 || !pluginTcpTargetPortIds.has(ids[0])) {
+      throw new Error('--plugin-tcp-target requires exactly one supported port: integration/rdp-local-bridge or integration/novnc-local-bridge');
+    }
+    if (ids[0] === rdpLocalBridgePortId && !pluginTcpTarget.startsWith('tcp://')) {
+      throw new Error('--plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port');
+    }
   }
   if (!pluginRun && pluginArgsProvided) {
     throw new Error('--plugin-args requires --plugin-run <command>');
@@ -652,6 +675,7 @@ function parseArgs(argv) {
     pluginUninstall,
     pluginInstall,
     pluginPortsDir,
+    pluginTcpTarget,
     pluginInstallFile,
     pluginUpdateAll,
     pluginInstallForce,
@@ -702,7 +726,7 @@ function validateArgs(argv) {
   const flags = new Set([
     '--help', '-h', '--version', '-v', '--list', '-l', '--dev', '-d', '--foreground', '-F',
     '--console-diagnostics', '-C', '--show-config', '--config-check', '--config-path', '--config-example',
-    '--diagnostics', '--doctor', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugin-path', '--plugin-search', '--setup-sync', '--sync-status', '--sync-clean', '--sync-diagnostics', '--self-update',
+    '--diagnostics', '--doctor', '--open-log-dir', '--copy-diagnostics', '--profile-list', '--plugin-list', '--plugins-list', '--plugin-path', '--plugin-search', '--setup-sync', '--sync-status', '--sync-clean', '--sync-diagnostics', '--self-update',
     '--self-update-checkout', '--update-desktop', '--update-check', '--reset-window-state', '-r', '--reset-config', '-R',
     '--update-config',
     '--prune-config', '--plugin-enable-all', '--plugin-disable-all', '--plugin-update-all', '--force', '--enable',
@@ -712,7 +736,7 @@ function validateArgs(argv) {
     '--config', '-c', '--profile', '-p', '--shell', '-s', '--cwd', '-o', '--command', '-e', '--title', '-t',
     '--titlebar-color', '-b', '--close', '-q', '--enable-plugin', '--disable-plugin', '--plugin-enable', '--plugin-disable', '--plugin-info', '--plugin-uninstall', '--width', '-W',
     '--height', '-H', '--size', '-z', '--broadcast', '--broadcast-target', '--completion',
-    '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-install-file',
+    '--completion-install', '--completion-uninstall', '--plugin-install', '--plugin-ports-dir', '--plugin-tcp-target', '--plugin-install-file',
     '--plugin-run', '--plugin-args',
   ]);
 
@@ -973,7 +997,7 @@ async function fetchPublicPluginText(relativePath, maximumBytes, revision = 'mai
 }
 
 // Parses and validates the narrow port manifest contract shared by remote and local sources.
-function parsePluginPortManifest(id, manifestText, label) {
+function parsePluginPortManifest(id, manifestText, label, { checkCompatibility = true } = {}) {
   const manifest = toml.parse(manifestText)?.port;
   const required = (key) => {
     const value = typeof manifest?.[key] === 'string' ? manifest[key].trim() : '';
@@ -988,7 +1012,7 @@ function parsePluginPortManifest(id, manifestText, label) {
   if (!/^\d+\.\d+\.\d+$/.test(version) || !/^\d+\.\d+\.\d+$/.test(minimumVersion)) {
     throw new Error(`${label} port manifest has an invalid version`);
   }
-  if (comparePackageVersions(packageJson.version, minimumVersion) < 0) {
+  if (checkCompatibility && comparePackageVersions(packageJson.version, minimumVersion) < 0) {
     throw new Error(`${id} requires fpasoterm >= ${minimumVersion}; found ${packageJson.version}`);
   }
   if (!/^[^/\\]+\.(?:js|ts)$/.test(sourceName)
@@ -1004,7 +1028,82 @@ function parsePluginPortManifest(id, manifestText, label) {
     || sourceLimit > maximumDeclaredPluginPortSourceLimit) {
     throw new Error(`${label} port manifest port.maxSourceBytes must be an integer from ${defaultPluginPortSourceLimit} to ${maximumDeclaredPluginPortSourceLimit}`);
   }
-  return { version, sourceName, installPath, sourceLimit };
+  return { version, minimumVersion, sourceName, installPath, sourceLimit };
+}
+
+// These two official ports embed their one reviewed target both in the native
+// capability header and in the plugin program.  Keep the values identical: a
+// target selected by an explicit install command is not arbitrary socket
+// access, because the native bridge still accepts only the source-declared
+// exact endpoint.
+const rdpLocalBridgePortId = 'integration/rdp-local-bridge';
+const noVncLocalBridgePortId = 'integration/novnc-local-bridge';
+const pluginTcpTargetPortIds = new Set([rdpLocalBridgePortId, noVncLocalBridgePortId]);
+const pluginTcpTargetHeader = '// @fpasoterm-plugin allowed-tcp-targets:';
+
+function normalizePluginTcpTarget(value, option = '--plugin-tcp-target') {
+  const raw = String(value || '').trim();
+  const candidate = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(raw) ? raw : `tcp://${raw}`;
+  let parsed;
+  try {
+    parsed = new URL(candidate);
+  } catch {
+    throw new Error(`${option} must be host:port, tcp://host:port, or tls://host:port`);
+  }
+  if (!['tcp:', 'tls:'].includes(parsed.protocol) || !parsed.hostname || !parsed.port
+      || parsed.username || parsed.password || !['', '/'].includes(parsed.pathname)
+      || parsed.search || parsed.hash) {
+    throw new Error(`${option} must be host:port, tcp://host:port, or tls://host:port`);
+  }
+  const port = Number(parsed.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${option} must use a port from 1 through 65535`);
+  }
+  const host = parsed.hostname.toLowerCase();
+  const bracketedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${parsed.protocol.slice(0, -1)}://${bracketedHost}:${port}`;
+}
+
+function pluginTcpTargetFromSource(source, id) {
+  const matches = [...String(source).matchAll(/^\/\/ @fpasoterm-plugin allowed-tcp-targets:\s*(\S+)\s*$/gm)];
+  if (matches.length !== 1) {
+    throw new Error(`${id} must declare exactly one allowed-tcp-targets value`);
+  }
+  return normalizePluginTcpTarget(matches[0][1], `${id} source target`);
+}
+
+function configurePluginTcpTargetSource(source, id, target) {
+  if (!pluginTcpTargetPortIds.has(id)) return source;
+  const current = pluginTcpTargetFromSource(source, id);
+  const targetPattern = id === rdpLocalBridgePortId
+    ? new RegExp(`\\b((?:const|let|var)\\s+target\\s*=\\s*)${escapeRegularExpression(JSON.stringify(current))}\\s*;`)
+    : new RegExp(`(openVncBridge\\(\\{\\s*target:\\s*)${escapeRegularExpression(JSON.stringify(current))}(\\s*\\})`);
+  if (!targetPattern.test(source)) {
+    throw new Error(`${id} source target does not match its allowed-tcp-targets declaration`);
+  }
+  const headerPattern = /^\/\/ @fpasoterm-plugin allowed-tcp-targets:\s*\S+\s*$/m;
+  const replacedHeader = source.replace(headerPattern, `${pluginTcpTargetHeader} ${target}`);
+  return id === rdpLocalBridgePortId
+    ? replacedHeader.replace(targetPattern, `$1${JSON.stringify(target)};`)
+    : replacedHeader.replace(targetPattern, `$1${JSON.stringify(target)}$2`);
+}
+
+function configuredPluginTcpTarget(options, id) {
+  if (!options.pluginTcpTarget) return null;
+  if (!pluginTcpTargetPortIds.has(id)) {
+    throw new Error('--plugin-tcp-target is supported only by integration/rdp-local-bridge and integration/novnc-local-bridge');
+  }
+  if (id === rdpLocalBridgePortId && !options.pluginTcpTarget.startsWith('tcp://')) {
+    throw new Error('--plugin-tcp-target for integration/rdp-local-bridge must use tcp://host:port');
+  }
+  return options.pluginTcpTarget;
+}
+
+function installedPluginTcpTarget(pluginsDirectory, entry) {
+  if (!pluginTcpTargetPortIds.has(entry.id)) return null;
+  const sourcePath = path.resolve(pluginsDirectory, entry.installPath);
+  const source = fs.readFileSync(sourcePath, 'utf8');
+  return pluginTcpTargetFromSource(source, `installed ${entry.id}`);
 }
 
 // Writes one reviewed source into User/plugins without following an existing symlink.
@@ -1066,7 +1165,9 @@ async function installPublicPlugin(options) {
   for (const id of pluginInstallPortIds(options.pluginInstall)) {
     const manifestText = await fetchPublicPluginText(`ports/${id}/port.toml`, 64 * 1024);
     const { version, sourceName, installPath, sourceLimit } = parsePluginPortManifest(id, manifestText, 'public');
-    const source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, sourceLimit);
+    let source = await fetchPublicPluginText(`ports/${id}/${sourceName}`, sourceLimit);
+    const target = configuredPluginTcpTarget(options, id);
+    if (target) source = configurePluginTcpTargetSource(source, id, target);
     installPluginSource(options, source, installPath, `public port ${id}`, version);
   }
 }
@@ -1106,7 +1207,9 @@ async function updateAllPublicPlugins(options) {
     if (port.version !== entry.version || port.installPath !== entry.installPath) {
       throw new Error(`official catalog metadata changed for ${entry.id}; retry after reviewing the catalog`);
     }
-    const source = await fetchPublicPluginText(`ports/${entry.id}/${port.sourceName}`, port.sourceLimit, entry.revision);
+    let source = await fetchPublicPluginText(`ports/${entry.id}/${port.sourceName}`, port.sourceLimit, entry.revision);
+    const target = installedPluginTcpTarget(pluginsDirectory, entry);
+    if (target) source = configurePluginTcpTargetSource(source, entry.id, target);
     downloads.push({ entry, port, source });
   }
   for (const { entry, port, source } of downloads) {
@@ -1134,6 +1237,126 @@ function localPluginPortsDirectory(options) {
   return portsDirectory;
 }
 
+// Finds checked-in port directories without evaluating any plugin source.
+// Symlinked directories are ignored so a review command cannot walk outside
+// the requested checkout.
+function discoverLocalPluginPortIds(portsDirectory) {
+  const ids = [];
+  const visit = (directory, segments) => {
+    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+      if (!entry.isDirectory() || entry.isSymbolicLink()) continue;
+      const child = path.join(directory, entry.name);
+      const nextSegments = [...segments, entry.name];
+      if (fs.existsSync(path.join(child, 'port.toml'))) {
+        const id = nextSegments.join('/');
+        try {
+          ids.push(validatePublicPluginPortId(id));
+        } catch {
+          // An invalid directory name cannot be a reviewable public port.
+        }
+      }
+      visit(child, nextSegments);
+    }
+  };
+  visit(portsDirectory, []);
+  return [...new Set(ids)].sort();
+}
+
+function localPluginPortDetails(options, id) {
+  const portsDirectory = localPluginPortsDirectory(options);
+  const normalizedId = validatePublicPluginPortId(id);
+  const portDirectory = path.join(portsDirectory, ...normalizedId.split('/'));
+  const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
+  const manifest = parsePluginPortManifest(normalizedId, manifestText, 'local', { checkCompatibility: false });
+  const sourcePath = path.join(portDirectory, manifest.sourceName);
+  const source = readLocalPluginText(sourcePath, manifest.sourceLimit, 'local plugin source');
+  return {
+    id: normalizedId,
+    portsDirectory,
+    sourcePath,
+    source,
+    ...manifest,
+    metadata: pluginMetadata(source),
+    tcpTargets: pluginAllowedTcpTargets(source),
+    compatible: comparePackageVersions(packageJson.version, manifest.minimumVersion) >= 0,
+  };
+}
+
+function showLocalPluginPortList(options) {
+  const portsDirectory = localPluginPortsDirectory(options);
+  const ids = discoverLocalPluginPortIds(portsDirectory);
+  console.log(`Local plugin ports (${portsDirectory}):`);
+  if (ids.length === 0) {
+    console.log('  (none found)');
+    return;
+  }
+  for (const id of ids) {
+    try {
+      const port = localPluginPortDetails(options, id);
+      const targetSummary = port.tcpTargets.length ? `; TCP target ${port.tcpTargets.join(', ')}` : '';
+      const compatibility = port.compatible ? 'compatible' : `requires fpasoterm >= ${port.minimumVersion}`;
+      console.log(`  ${id} [version ${port.version}; ${compatibility}; source ${port.sourceName}${targetSummary}]`);
+    } catch (error) {
+      console.log(`  ${id} [invalid: ${error.message}]`);
+    }
+  }
+}
+
+function showLocalPluginPortInfo(options) {
+  const port = localPluginPortDetails(options, options.pluginInfo);
+  console.log(`Port: ${port.id}`);
+  console.log(`Version: ${port.version}`);
+  console.log(`Requires fpasoterm: >= ${port.minimumVersion} (${port.compatible ? 'compatible' : 'not compatible'})`);
+  console.log(`Source: ${port.sourcePath}`);
+  console.log(`Install path: plugins/${port.installPath}`);
+  console.log(`Description: ${port.metadata.description}`);
+  if (port.tcpTargets.length) {
+    console.log(`${pluginTcpTargetInfoLabel(port.tcpTargets)}: ${port.tcpTargets.join(', ')}`);
+  }
+  showLocalPluginPortInstallation(port);
+}
+
+// Public bridge ports deliberately ship inert loopback destinations so a
+// reviewed checkout cannot contact a server before installation. Do not
+// present those policy defaults as though they were protocol standard ports.
+function pluginTcpTargetInfoLabel(targets) {
+  if (targets.length !== 1) return 'TCP target';
+  if (targets[0] === 'tcp://127.0.0.1:53389') {
+    return 'Safe loopback default (not standard RDP port 3389)';
+  }
+  if (targets[0] === 'tcp://127.0.0.1:53390') {
+    return 'Safe loopback default (not standard VNC port 5900)';
+  }
+  return 'TCP target';
+}
+
+// Prints the actual install shape for this reviewed checkout. The install never
+// executes source; --enable only records the installed file in config.toml.
+function showLocalPluginPortInstallation(port) {
+  const directory = JSON.stringify(port.portsDirectory);
+  const command = `fpasoterm --plugin-install ${port.id} --plugin-ports-dir ${directory}`;
+  console.log('');
+  console.log('Installation:');
+  console.log(`  ${command} --enable`);
+  if (port.id === rdpLocalBridgePortId) {
+    console.log('');
+    console.log('Connection target (replaces the declared default above):');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:3389 --enable`);
+    console.log('  RDP uses the standard TCP port 3389; the safe default does not connect until this target is specified.');
+    console.log('  A bare host:port is normalized to tcp://host:port.');
+  } else if (port.id === noVncLocalBridgePortId) {
+    console.log('');
+    console.log('Connection target (replaces the declared default above):');
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:5900 --enable`);
+    console.log(`  ${command} --plugin-tcp-target tls://<host>:5900 --enable`);
+    console.log('  noVNC uses the standard VNC port 5900; the safe default does not connect until this target is specified.');
+    console.log('  Use the transport configured by the VNC server.');
+  }
+  console.log('');
+  console.log('  Omit --enable to install for source review only. Add --force only to replace an existing installed port.');
+  console.log('  Restart fpasoterm after installation so it loads an enabled plugin.');
+}
+
 // Reads a bounded regular local file so an arbitrary path cannot be followed through a symlink.
 function readLocalPluginText(filePath, maximumBytes, label) {
   const metadata = fs.lstatSync(filePath, { throwIfNoEntry: false });
@@ -1151,7 +1374,9 @@ function installLocalPluginPort(options) {
     const portDirectory = path.join(portsDirectory, ...id.split('/'));
     const manifestText = readLocalPluginText(path.join(portDirectory, 'port.toml'), 64 * 1024, 'local port manifest');
     const { version, sourceName, installPath, sourceLimit } = parsePluginPortManifest(id, manifestText, 'local');
-    const source = readLocalPluginText(path.join(portDirectory, sourceName), sourceLimit, 'local plugin source');
+    let source = readLocalPluginText(path.join(portDirectory, sourceName), sourceLimit, 'local plugin source');
+    const target = configuredPluginTcpTarget(options, id);
+    if (target) source = configurePluginTcpTargetSource(source, id, target);
     installPluginSource(options, source, installPath, `local port ${id}`, version);
   }
 }
@@ -1607,9 +1832,29 @@ function requireValue(argv, index, flag) {
     if (['--completion', '--completion-install', '--completion-uninstall'].includes(flag)) {
       throw new Error(`${flag} requires a shell: bash, zsh, fish, or powershell (example: fpasoterm ${flag} bash)`);
     }
+    if (flag === '--plugin-tcp-target') {
+      throw new Error(`${flag} requires host:port, tcp://host:port, or tls://host:port (example: fpasoterm --plugin-install integration/novnc-local-bridge --plugin-tcp-target tcp://host:5900 --enable)`);
+    }
+    if (flag === '--plugin-install') {
+      throw new Error(`${flag} requires a port ID (example: fpasoterm --plugin-install integration/rdp-local-bridge --plugin-tcp-target host:3389 --enable)`);
+    }
     throw new Error(`${flag} requires a value`);
   }
   return value;
+}
+
+// Keep invalid invocations concise, but always provide a route to complete
+// syntax. The two bridge options get copyable examples because they must be
+// supplied together and their native capability is intentionally exact.
+function cliUsageHint(error) {
+  const message = String(error?.message || error || '');
+  if (message.startsWith('--plugin-tcp-target')) {
+    return "\nUsage: fpasoterm --plugin-install integration/rdp-local-bridge|integration/novnc-local-bridge --plugin-tcp-target <host:port|tcp://host:port> [--plugin-ports-dir <path>] [--enable] [--force]";
+  }
+  if (message.startsWith('--plugin-install requires')) {
+    return "\nUsage: fpasoterm --plugin-install <category/name> [--plugin-ports-dir <path>] [--enable] [--force]";
+  }
+  return "\nRun 'fpasoterm --help' for full usage.";
 }
 
 // Normalizes dimension arguments before they are passed to the app process.
@@ -2027,13 +2272,29 @@ function printPluginList(targetPath, enabled, pluginUrls = []) {
     const exists = fs.existsSync(pluginPath);
     const status = loaded ? 'loadable' : exists ? 'not loadable' : 'missing';
     const version = exists ? readPluginMetadata(pluginPath).version : '(not declared)';
-    console.log(`  - ${plugin} [${status}; version ${version}]${loaded ? ` -> ${loaded.url}` : ''}`);
+    const tcpTargets = exists ? pluginTcpTargetsForPath(pluginPath) : [];
+    const targetSummary = tcpTargets.length ? `; TCP target ${tcpTargets.join(', ')}` : '';
+    console.log(`  - ${plugin} [${status}; version ${version}${targetSummary}]${loaded ? ` -> ${loaded.url}` : ''}`);
+  }
+}
+
+// Report only declarative capability metadata.  Listing plugins must never
+// execute a source file merely to discover its reviewed bridge target.
+function pluginTcpTargetsForPath(pluginPath) {
+  try {
+    return pluginAllowedTcpTargets(fs.readFileSync(pluginPath, 'utf8'));
+  } catch {
+    return [];
   }
 }
 
 // Lists every plugin file below User/plugins and the explicit enabled selection.
 function showPluginList(options) {
   applyEnv(options.env);
+  if (options.pluginPortsDir) {
+    showLocalPluginPortList(options);
+    return;
+  }
   const targetPath = configPath();
   const userConfig = readUserConfig(targetPath);
   const enabled = Array.isArray(userConfig.plugins?.enabled) ? userConfig.plugins.enabled : [];
@@ -2044,8 +2305,11 @@ function showPluginList(options) {
     console.log('  (none found)');
   } else {
     for (const plugin of available) {
-      const metadata = readPluginMetadata(path.resolve(path.dirname(targetPath), plugin));
-      console.log(`  ${plugin} [version ${metadata.version}]`);
+      const pluginPath = path.resolve(path.dirname(targetPath), plugin);
+      const metadata = readPluginMetadata(pluginPath);
+      const tcpTargets = pluginTcpTargetsForPath(pluginPath);
+      const targetSummary = tcpTargets.length ? `; TCP target ${tcpTargets.join(', ')}` : '';
+      console.log(`  ${plugin} [version ${metadata.version}${targetSummary}]`);
     }
   }
 
@@ -2069,6 +2333,10 @@ function showPluginPath(options) {
 // Prints one local plugin's resolved source and load details without opening a window.
 function showPluginInfo(options) {
   applyEnv(options.env);
+  if (options.pluginPortsDir) {
+    showLocalPluginPortInfo(options);
+    return;
+  }
   const targetPath = configPath();
   const available = discoverPluginFiles(targetPath);
   const plugin = resolvePluginSelector(options.pluginInfo, available, 'inspect');
@@ -2087,9 +2355,17 @@ function showPluginInfo(options) {
   console.log(`Source: ${sourcePath}`);
   console.log(`Description: ${metadata.description}`);
   console.log(`Load status: ${resolved ? 'loadable' : 'not loadable'}`);
+  const tcpTargets = pluginAllowedTcpTargets(source);
+  if (tcpTargets.length) {
+    console.log(`${pluginTcpTargetInfoLabel(tcpTargets)}: ${tcpTargets.join(', ')}`);
+  }
   if (resolved) {
     console.log(`Renderer URL: ${resolved.url}`);
   }
+  console.log('');
+  console.log('Installation: already installed in User/plugins.');
+  console.log('For a reviewed checkout port and its install settings, run:');
+  console.log('  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>');
 }
 
 // Expands common environment variable forms used in configuration paths.
@@ -3186,7 +3462,7 @@ try {
     });
   }
 } catch (error) {
-  console.error(`fpasoterm: ${error.message}`);
+  console.error(`fpasoterm: ${error.message}${cliUsageHint(error)}`);
   // Invalid CLI input must remain concise enough for scripts and shell history.
   // Explicit --help is the only operation that prints the full option list.
   process.exitCode = parsedArguments ? 1 : 2;
