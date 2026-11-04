@@ -353,6 +353,9 @@ provides:
   cancellation returns `null`.
 - `promptText({ title, message, approve })`: request non-secret connection text
   in memory only; cancellation returns `null`.
+- `promptConfirm({ title, message, approve, cancel })`: show a button-only
+  in-memory confirmation dialog; it returns `true` only when the user selects
+  the approval button.
 - `dismissPrompts()`: close this plugin's outstanding credential prompts, for
   example after a connection has completed.
 - `getOfficialPluginIndex()`: read metadata from the same fixed official `INDEX`

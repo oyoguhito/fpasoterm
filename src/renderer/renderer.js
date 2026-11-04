@@ -3308,6 +3308,15 @@ async function loadPlugins() {
       approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
       scope: plugin?.name || '',
     }),
+    // A confirmation deliberately has no text field.  Use it when a reviewed
+    // plugin needs an explicit, one-time user decision rather than a value.
+    promptConfirm: (options = {}) => pluginModalPrompt({
+      title: typeof options.title === 'string' && options.title.trim() ? options.title.trim().slice(0, 120) : 'Confirmation required',
+      message: typeof options.message === 'string' ? options.message.slice(0, 500) : 'Continue?',
+      approve: typeof options.approve === 'string' && options.approve.trim() ? options.approve.trim().slice(0, 40) : 'Continue',
+      cancel: typeof options.cancel === 'string' && options.cancel.trim() ? options.cancel.trim().slice(0, 40) : 'Cancel',
+      scope: plugin?.name || '',
+    }).then((result) => result === true),
     /** Closes only this plugin's outstanding credential prompts. */
     dismissPrompts: () => dismissPluginPrompts(plugin?.name || ''),
     getOfficialPluginIndex: () => window.fpasoterm.getPluginCatalog(),

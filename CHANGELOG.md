@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.17
+
+- Fixed RA2ne authentication through the reviewed noVNC bridge: after the
+  client random is sent, the native VNC relay forwards the server ciphertext
+  length and its 256-byte ciphertext in one WebSocket binary message. This
+  preserves the RFB byte stream while avoiding noVNC 1.5.0 reading before the
+  ciphertext has arrived in a separate WebSocket frame.
+- Added connection-scoped, non-secret RA2ne diagnostics that correlate the
+  native relay and noVNC client without logging keys, passwords, random values,
+  clipboard contents, or authentication tokens.
+
 ## 1.6.15
 
 - Added a built-in screen-video recording workflow with Video Start/Stop and

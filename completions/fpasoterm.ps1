@@ -24,7 +24,7 @@ $fpasotermCompletion = {
     @('--reset-window-state', 'Delete saved window size'), @('-r', 'Delete saved window size'), @('--reset-config', 'Restore default config'), @('-R', 'Restore default config'),
     @('--width', 'Override window width'), @('-W', 'Override window width'), @('--height', 'Override window height'), @('-H', 'Override window height'),
     @('--size', 'Override window size'), @('-z', 'Override window size'), @('--debug-keys', 'Enable key diagnostics'), @('-k', 'Enable key diagnostics'),
-    @('--disable-dmabuf', 'Disable Linux DMA-BUF renderer'),
+    @('--plugin-activity', 'Show live plugin command/API activity in the window'), @('--opaque-terminal', 'Force an opaque WebView background for rendering diagnostics'), @('--disable-dmabuf', 'Disable Linux DMA-BUF renderer'),
     @('--completion', 'Print completion script'), @('--completion-install', 'Install persistent completion'), @('--completion-uninstall', 'Remove persistent completion')
   )
 

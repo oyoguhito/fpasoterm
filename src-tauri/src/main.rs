@@ -17,7 +17,7 @@ use rustls::{
     ClientConfig, DigitallySignedStruct, Error as RustlsError, RootCertStore, SignatureScheme,
 };
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::env;
 use std::fs::{self, File, OpenOptions};
@@ -1421,6 +1421,10 @@ fn cli_help_text() -> String {
     .replace(
         "      --force                   Replace an existing file during a plugin install.",
         "      --plugin-update-all       Update installed official public plugins with newer catalog versions.\n      --force                   Replace an existing file during a plugin install.",
+    )
+    .replace(
+        "  -k, --debug-keys              Enable key/composition diagnostics.\n      --disable-dmabuf",
+        "  -k, --debug-keys              Enable key/composition diagnostics.\n      --plugin-activity         Show live plugin command/API activity in the window.\n      --disable-dmabuf",
     );
     format!(
         "{text}\nUpdates:\n  Latest standalone downloads: {RELEASES_LATEST_URL}\n  In fpasoterm, click the URL and confirm to open it in your browser.\n"
@@ -1803,6 +1807,7 @@ fn validate_direct_cli_args(args: &[String]) -> Result<(), String> {
         "--prune-config",
         "--debug-keys",
         "-k",
+        "--plugin-activity",
         "--opaque-terminal",
         "--disable-dmabuf",
     ];
@@ -6255,8 +6260,37 @@ fn local_plugin_port_installation(port: &PublicPluginPort, ports_root: &Path) ->
     output
 }
 
-fn installed_plugin_installation_note() -> &'static str {
-    "\nInstallation: already installed in User/plugins.\nFor a reviewed checkout port and its install settings, run:\n  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>\n"
+fn installed_plugin_installation_note(plugin: &str) -> String {
+    let file_name = Path::new(plugin)
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    let known_port = match file_name {
+        "novnc-local-bridge.js" => Some(NOVNC_LOCAL_BRIDGE_PORT_ID),
+        "rdp-local-bridge.js" => Some(RDP_LOCAL_BRIDGE_PORT_ID),
+        _ => None,
+    };
+    let Some(port) = known_port else {
+        return "\nInstallation: already installed in User/plugins.\nFor a reviewed checkout port and its install settings, run:\n  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>\n".to_string();
+    };
+
+    let command = format!("fpasoterm --plugin-install {port}");
+    let mut output = format!(
+        "\nInstallation: already installed in User/plugins. To reinstall or replace it from the official catalog:\n  {command} --enable --force\n"
+    );
+    match port {
+        RDP_LOCAL_BRIDGE_PORT_ID => output.push_str(&format!(
+            "\nConnection target:\n  {command} --plugin-tcp-target tcp://<host>:3389 --enable --force\n  Specify the trusted RDP host explicitly; the packaged loopback default is intentionally inert.\n"
+        )),
+        NOVNC_LOCAL_BRIDGE_PORT_ID => output.push_str(&format!(
+            "\nConnection target:\n  {command} --plugin-tcp-target tcp://<host>:5900 --enable --force\n  {command} --plugin-tcp-target tls://<host>:5900 --enable --force\n  Specify the trusted VNC host explicitly; choose the transport configured by the VNC server.\n"
+        )),
+        _ => {}
+    }
+    output.push_str(
+        "  Omit --force unless replacing the existing installed plugin. Restart fpasoterm after installation.\n",
+    );
+    output
 }
 
 // Installs a reviewed port from a local fpasoterm-plugins checkout without network access.
@@ -6750,7 +6784,7 @@ fn plugin_cli() {
                         tcp_targets.join(", ")
                     ));
                 }
-                print_cli_text(installed_plugin_installation_note());
+                print_cli_text(&installed_plugin_installation_note(&plugin));
             }
             Err(error) => {
                 print_cli_error(&format!("fpasoterm: {error}\n"));
@@ -11391,14 +11425,67 @@ async fn relay_plugin_websocket(
     websocket: tokio_tungstenite::WebSocketStream<TokioTcpStream>,
     remote: Box<dyn PluginRemoteStream>,
     bridge_name: &str,
+    diagnostics_app: Option<&AppHandle>,
+    bridge_trace_id: Option<&str>,
 ) -> Result<(), String> {
     let (mut websocket_writer, mut websocket_reader) = websocket.split();
     let (mut remote_reader, mut remote_writer) = tokio::io::split(remote);
     let mut buffer = vec![0_u8; 32 * 1024];
+    // Keep this purely observational and VNC-specific.  RA2ne sends the
+    // client random as U16(256) plus 256 ciphertext bytes; the next server
+    // bytes are its matching encrypted random.  Capturing the server packet
+    // immediately after the TCP read identifies the native relay boundary
+    // without retaining any plaintext, private key, or raw packet body.
+    let mut vnc_ra2_server_random_expected = false;
+    let mut vnc_ra2_server_random = Vec::with_capacity(258);
+    let mut vnc_ra2_server_random_logged = false;
+    let mut vnc_ra2_client_stream = Vec::with_capacity(1024);
+    let mut vnc_ra2_client_frames_logged = 0_u8;
+    let mut vnc_ra2_server_trace_active = false;
+    let mut vnc_ra2_server_trace_sequence = 0_u8;
+    let vnc_ra2_trace_context = bridge_trace_id
+        .map(|trace_id| format!(" bridge={trace_id}"))
+        .unwrap_or_default();
     loop {
         tokio::select! {
             message = websocket_reader.next() => match message {
-                Some(Ok(Message::Binary(bytes))) => remote_writer.write_all(&bytes).await.map_err(|error| format!("{bridge_name} write failed: {error}"))?,
+                Some(Ok(Message::Binary(bytes))) => {
+                    if bridge_name == "VNC" && !vnc_ra2_server_random_logged {
+                        if let Some(app) = diagnostics_app {
+                            if vnc_ra2_client_frames_logged < 4 {
+                                let prefix = bytes.iter().take(4).map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join("");
+                                append_diagnostic(app, &format!("plugin VNC RA2ne native relay: client WebSocket binary frame bytes={} prefix={prefix}{}", bytes.len(), vnc_ra2_trace_context));
+                                vnc_ra2_client_frames_logged += 1;
+                            }
+                        }
+                        vnc_ra2_client_stream.extend_from_slice(&bytes);
+                        if vnc_ra2_client_stream.len() > 2048 {
+                            let drop = vnc_ra2_client_stream.len() - 1024;
+                            vnc_ra2_client_stream.drain(..drop);
+                        }
+                        if let Some(public_key_offset) = vnc_ra2_client_stream
+                            .windows(4)
+                            .position(|prefix| prefix == [0, 0, 8, 0])
+                        {
+                            let client_random_offset = public_key_offset + 516;
+                            let client_random_end = client_random_offset + 258;
+                            if !vnc_ra2_server_random_expected
+                                && vnc_ra2_client_stream.len() >= client_random_end
+                                && vnc_ra2_client_stream[client_random_offset] == 1
+                                && vnc_ra2_client_stream[client_random_offset + 1] == 0
+                            {
+                                vnc_ra2_server_random_expected = true;
+                                vnc_ra2_server_random.clear();
+                                vnc_ra2_server_trace_active = true;
+                                vnc_ra2_server_trace_sequence = 0;
+                                if let Some(app) = diagnostics_app {
+                                    append_diagnostic(app, &format!("plugin VNC RA2ne native relay: observed RA2 client public key and client-encrypted-random; awaiting server-encrypted-random from TCP{}", vnc_ra2_trace_context));
+                                }
+                            }
+                        }
+                    }
+                    remote_writer.write_all(&bytes).await.map_err(|error| format!("{bridge_name} write failed: {error}"))?
+                },
                 Some(Ok(Message::Close(_))) | None => break,
                 Some(Ok(Message::Ping(bytes))) => websocket_writer.send(Message::Pong(bytes)).await.map_err(|error| error.to_string())?,
                 Some(Ok(Message::Pong(_))) => {},
@@ -11408,7 +11495,69 @@ async fn relay_plugin_websocket(
             read = remote_reader.read(&mut buffer) => {
                 let read = read.map_err(|error| format!("{bridge_name} read failed: {error}"))?;
                 if read == 0 { break; }
-                websocket_writer.send(Message::Binary(buffer[..read].to_vec())).await.map_err(|error| format!("local WebSocket write failed: {error}"))?;
+                let native_trace_sequence = if bridge_name == "VNC"
+                    && vnc_ra2_server_trace_active
+                    && vnc_ra2_server_trace_sequence < 4
+                {
+                    vnc_ra2_server_trace_sequence += 1;
+                    let sequence = vnc_ra2_server_trace_sequence;
+                    if let Some(app) = diagnostics_app {
+                        let digest = Sha256::digest(&buffer[..read]);
+                        let sha256 = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+                        let prefix = buffer[..read].iter().take(4).map(|byte| format!("{byte:02x}")).collect::<Vec<_>>().join("");
+                        append_diagnostic(app, &format!("plugin VNC RA2ne native relay: server TCP read sequence={sequence} bytes={read} prefix={prefix} sha256={sha256}{}", vnc_ra2_trace_context));
+                    }
+                    Some(sequence)
+                } else {
+                    None
+                };
+                let mut websocket_message = None;
+                if bridge_name == "VNC" && vnc_ra2_server_random_expected
+                    && !vnc_ra2_server_random_logged
+                {
+                    let remaining = 258_usize.saturating_sub(vnc_ra2_server_random.len());
+                    let take = remaining.min(read);
+                    vnc_ra2_server_random.extend_from_slice(&buffer[..take]);
+                    if read > take {
+                        vnc_ra2_server_random.extend_from_slice(&buffer[take..read]);
+                    }
+                    if vnc_ra2_server_random.len() >= 258 {
+                        vnc_ra2_server_random_expected = false;
+                        vnc_ra2_server_random_logged = true;
+                        vnc_ra2_server_trace_active = false;
+                        if let Some(app) = diagnostics_app {
+                            if vnc_ra2_server_random[0] == 1 && vnc_ra2_server_random[1] == 0 {
+                                let digest = Sha256::digest(&vnc_ra2_server_random[2..]);
+                                let sha256 = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+                                append_diagnostic(app, &format!("plugin VNC RA2ne native relay: direction=server-to-client packet=server-encrypted-random bytes=256 sha256={sha256}{}", vnc_ra2_trace_context));
+                            } else {
+                                append_diagnostic(app, &format!("plugin VNC RA2ne native relay: unexpected ServerRandom length prefix={},{}{}", vnc_ra2_server_random[0], vnc_ra2_server_random[1], vnc_ra2_trace_context));
+                            }
+                        }
+                        // noVNC 1.5.0 awaits the two-byte RA2ne ciphertext
+                        // length but reads the following ciphertext without a
+                        // second availability check. RFB is a byte stream, so
+                        // combining these reads into one binary WebSocket
+                        // message preserves protocol bytes while ensuring the
+                        // complete message is in noVNC's receive queue before
+                        // its handler runs.
+                        websocket_message = Some(std::mem::take(&mut vnc_ra2_server_random));
+                    }
+                }
+                if let Some(sequence) = native_trace_sequence {
+                    if let Some(app) = diagnostics_app {
+                        if let Some(message) = websocket_message.as_deref() {
+                            let digest = Sha256::digest(&message[2..258]);
+                            let sha256 = digest.iter().map(|byte| format!("{byte:02x}")).collect::<String>();
+                            append_diagnostic(app, &format!("plugin VNC RA2ne native relay: WebSocket binary send coalesced=true sequence={sequence} bytes={} server-encrypted-random-sha256={sha256}{}", message.len(), vnc_ra2_trace_context));
+                        }
+                    }
+                }
+                if let Some(message) = websocket_message {
+                    websocket_writer.send(Message::Binary(message)).await.map_err(|error| format!("local WebSocket write failed: {error}"))?;
+                } else if !(bridge_name == "VNC" && vnc_ra2_server_random_expected) {
+                    websocket_writer.send(Message::Binary(buffer[..read].to_vec())).await.map_err(|error| format!("local WebSocket write failed: {error}"))?;
+                }
             }
         }
     }
@@ -11422,6 +11571,8 @@ async fn serve_plugin_tcp_websocket_bridge(
     token: String,
     path_segment: &'static str,
     bridge_name: &'static str,
+    diagnostics_app: AppHandle,
+    bridge_trace_id: String,
 ) {
     // Plugin bridge commands are invoked on the WebView IPC thread, which is
     // not a Tokio context on Linux/WebKit. Convert the standard loopback
@@ -11470,7 +11621,15 @@ async fn serve_plugin_tcp_websocket_bridge(
             return;
         }
     };
-    if let Err(error) = relay_plugin_websocket(websocket, remote, bridge_name).await {
+    if let Err(error) = relay_plugin_websocket(
+        websocket,
+        remote,
+        bridge_name,
+        Some(&diagnostics_app),
+        Some(&bridge_trace_id),
+    )
+    .await
+    {
         eprintln!(
             "plugin {bridge_name} bridge {}: {error}",
             target.canonical()
@@ -11586,12 +11745,14 @@ async fn serve_plugin_rdp_clean_path_bridge(
         );
         return;
     }
-    if let Err(error) = relay_plugin_websocket(websocket, Box::new(remote), "RDP").await {
+    if let Err(error) = relay_plugin_websocket(websocket, Box::new(remote), "RDP", None, None).await
+    {
         eprintln!("plugin RDP bridge {}: {error}", target.canonical());
     }
 }
 
 fn plugin_tcp_websocket_bridge_open(
+    diagnostics_app: AppHandle,
     request: PluginTcpBridgeRequest,
     bridge_name: &'static str,
     path_segment: &'static str,
@@ -11622,19 +11783,32 @@ fn plugin_tcp_websocket_bridge_open(
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect::<String>();
+    let mut trace_bytes = [0_u8; 8];
+    rand::rngs::OsRng.fill_bytes(&mut trace_bytes);
+    let bridge_trace_id = trace_bytes
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
     tauri::async_runtime::spawn(serve_plugin_tcp_websocket_bridge(
         listener,
         target,
         token.clone(),
         path_segment,
         bridge_name,
+        diagnostics_app,
+        bridge_trace_id.clone(),
     ));
-    Ok(format!("ws://{address}/{path_segment}/{token}"))
+    Ok(format!(
+        "ws://{address}/{path_segment}/{token}?trace={bridge_trace_id}"
+    ))
 }
 
 #[tauri::command]
-fn plugin_vnc_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, String> {
-    plugin_tcp_websocket_bridge_open(request, "VNC", "vnc")
+fn plugin_vnc_bridge_open(
+    diagnostics_app: AppHandle,
+    request: PluginTcpBridgeRequest,
+) -> Result<String, String> {
+    plugin_tcp_websocket_bridge_open(diagnostics_app, request, "VNC", "vnc")
 }
 
 #[tauri::command]
@@ -12471,6 +12645,7 @@ mod tests {
             "-R",
             "--debug-keys",
             "-k",
+            "--plugin-activity",
             "--disable-dmabuf",
         ];
         for flag in flags {
@@ -12720,6 +12895,22 @@ mod tests {
                 validate_direct_cli_args(&[option.to_string()]).is_err(),
                 "Node-only option {option} must not launch the packaged GUI"
             );
+        }
+    }
+
+    #[test]
+    fn direct_cli_help_and_completions_list_plugin_activity() {
+        let help = cli_help_text();
+        assert!(help.contains("--plugin-activity         Show live plugin command/API activity"));
+        assert!(help.contains("--opaque-terminal         Force an opaque WebView background"));
+        for completion in [
+            COMPLETION_BASH,
+            COMPLETION_ZSH,
+            COMPLETION_FISH,
+            COMPLETION_POWERSHELL,
+        ] {
+            assert!(completion.contains("plugin-activity"));
+            assert!(completion.contains("opaque-terminal"));
         }
     }
 
@@ -13183,6 +13374,22 @@ maxSourceBytes = 8388608
         );
         assert!(!installation.contains("--plugin-tcp-target"));
         fs::remove_dir_all(root).expect("remove local port fixture");
+    }
+
+    #[test]
+    fn installed_bridge_plugin_info_includes_targeted_reinstall_commands() {
+        let novnc = installed_plugin_installation_note("plugins/integration/novnc-local-bridge.js");
+        assert!(novnc.contains("--plugin-install integration/novnc-local-bridge"));
+        assert!(novnc.contains("--plugin-tcp-target tcp://<host>:5900"));
+        assert!(novnc.contains("--plugin-tcp-target tls://<host>:5900"));
+
+        let rdp = installed_plugin_installation_note("plugins/integration/rdp-local-bridge.js");
+        assert!(rdp.contains("--plugin-install integration/rdp-local-bridge"));
+        assert!(rdp.contains("--plugin-tcp-target tcp://<host>:3389"));
+
+        let generic = installed_plugin_installation_note("plugins/example.ts");
+        assert!(!generic.contains("--plugin-tcp-target"));
+        assert!(generic.contains("--plugin-ports-dir <checkout-or-ports>"));
     }
 
     #[test]

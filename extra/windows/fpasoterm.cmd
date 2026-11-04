@@ -24,7 +24,7 @@ for %%F in (
   --enable-plugin --disable-plugin --plugin-enable --plugin-disable
   --plugin-enable-all --plugin-disable-all
   --reset-window-state -r --reset-config -R --update-config --prune-config
-  --setup-sync --foreground -F
+  --setup-sync --foreground -F --console-diagnostics -C
   --broadcast --broadcast-target --broadcast-sync
 ) do if /I "%~1"=="%%F" set "FPASOTERM_WAIT=1"
 shift
