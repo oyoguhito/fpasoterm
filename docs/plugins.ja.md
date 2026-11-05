@@ -242,6 +242,8 @@ install 後の plugin では declaration file をローカルへコピーし、r
   cancel時は`null`を返す。
 - `promptText({ title, message, approve })`: secretではない接続用textをmemory上だけで
   入力する。cancel時は`null`を返す。
+- `promptConfirm({ title, message, approve, cancel })`: 入力欄なしの確認dialogを表示する。
+  承認buttonを選んだ時だけ`true`を返す。
 - `dismissPrompts()`: このpluginが表示中のcredential promptを閉じる。接続完了後などに使う。
 - `getOfficialPluginIndex()`: `fpasoterm --plugin-search` と同じ固定公式
   `INDEX`からmetadataを取得します。plugin sourceのdownload、install、enable、実行は

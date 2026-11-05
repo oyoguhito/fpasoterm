@@ -111,6 +111,8 @@ _fpasoterm() {
     '(-H --height)'{-H,--height}'[override window height]:pixels:' \
     '(-z --size)'{-z,--size}'[override window size]:width x height:' \
     '(-k --debug-keys)'{-k,--debug-keys}'[enable key diagnostics]' \
+    '--plugin-activity[show live plugin command/API activity in the window]' \
+    '--opaque-terminal[force an opaque WebView background for rendering diagnostics]' \
     '--disable-dmabuf[disable the Linux DMA-BUF renderer]'
 }
 
