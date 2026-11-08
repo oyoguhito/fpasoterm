@@ -10,6 +10,9 @@
 - Kept the RA2ne binary-frame compatibility relay while removing its
   investigation-only logging hooks after the interoperability fix was
   confirmed.
+- Retried a transient macOS DMG detach failure once during artifact packaging,
+  so a temporary `hdiutil` busy state does not discard an otherwise completed
+  build.
 
 ## 1.6.17
 

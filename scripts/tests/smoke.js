@@ -809,13 +809,17 @@ assert.doesNotMatch(runScript, /--foreground/);
 const buildArtifacts = read('scripts/build-artifacts.js');
 assert.match(buildArtifacts, /--bundles', 'deb,rpm'/);
 assert.match(buildArtifacts, /entry\.name\.includes\(version\)/);
+assert.match(buildArtifacts, /function runMacBundleBuildWithRetry\(buildArgs\)/);
+assert.match(buildArtifacts, /if \(process\.platform !== 'darwin'\) throw firstError/);
+assert.match(buildArtifacts, /macOS bundle build failed; retrying once/);
+assert.match(buildArtifacts, /Atomics\.wait\(new Int32Array\(new SharedArrayBuffer\(4\)\), 0, 0, 5000\)/);
 assert.match(buildArtifacts, /--source-only/);
 assert.match(buildArtifacts, /--bundles-only/);
 assert.match(buildArtifacts, /FPASOTERM_ARTIFACT_LABEL/);
 assert.match(buildArtifacts, /labelArtifactName/);
 assert.match(buildArtifacts, /copyWindowsCommandWrapper/);
 assert.match(buildArtifacts, /fpasoterm\.cmd/);
-assert.match(buildArtifacts, /run\('npm', buildArgs\)/);
+assert.match(buildArtifacts, /runMacBundleBuildWithRetry\(buildArgs\)/);
 assert.match(buildArtifacts, /function npmInvocation/);
 assert.match(buildArtifacts, /npm-cli\.js/);
 assert.match(buildArtifacts, /spawnSync/);
@@ -865,16 +869,20 @@ assert.match(powershellCompletion, /--plugin-ports-dir/);
 assert.match(powershellCompletion, /\$quoteCharacters = \[char\[\]\]@\(39, 34\)/);
 assert.match(powershellCompletion, /\.Trim\(\$quoteCharacters\)/);
 if (process.platform === 'win32') {
+  const powershellCompletionPath = path.join(root, 'completions', 'fpasoterm.ps1');
   const powershellParseResult = spawnSync(
     'powershell.exe',
     [
       '-NoProfile',
       '-NonInteractive',
       '-Command',
-      '[ScriptBlock]::Create([System.IO.File]::ReadAllText($args[0])) | Out-Null',
-      path.join(root, 'completions', 'fpasoterm.ps1'),
+      '[ScriptBlock]::Create([System.IO.File]::ReadAllText($env:FPASOTERM_TEST_COMPLETION_PATH)) | Out-Null',
     ],
-    { encoding: 'utf8', windowsHide: true },
+    {
+      encoding: 'utf8',
+      env: { ...process.env, FPASOTERM_TEST_COMPLETION_PATH: powershellCompletionPath },
+      windowsHide: true,
+    },
   );
   assert.equal(
     powershellParseResult.status,
