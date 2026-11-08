@@ -862,6 +862,26 @@ assert.match(fishCompletion, /__fpasoterm_public_plugin_ports/);
 assert.match(fishCompletion, /__fpasoterm_local_plugin_ports/);
 assert.match(powershellCompletion, /\$previous -eq '--plugin-install'/);
 assert.match(powershellCompletion, /--plugin-ports-dir/);
+assert.match(powershellCompletion, /\$quoteCharacters = \[char\[\]\]@\(39, 34\)/);
+assert.match(powershellCompletion, /\.Trim\(\$quoteCharacters\)/);
+if (process.platform === 'win32') {
+  const powershellParseResult = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-NonInteractive',
+      '-Command',
+      '[ScriptBlock]::Create([System.IO.File]::ReadAllText($args[0])) | Out-Null',
+      path.join(root, 'completions', 'fpasoterm.ps1'),
+    ],
+    { encoding: 'utf8', windowsHide: true },
+  );
+  assert.equal(
+    powershellParseResult.status,
+    0,
+    `PowerShell completion must parse: ${powershellParseResult.stderr || powershellParseResult.stdout}`,
+  );
+}
 assert.match(read('src/renderer/index.html'), /id="plugin-catalog"/);
 assert.match(read('src/renderer/index.html'), /id="plugin-catalog-search"/);
 assert.match(read('src/renderer/index.html'), /id="plugin-catalog-updates-only"/);
@@ -1030,15 +1050,10 @@ const rustMain = read('src-tauri/src/main.rs');
 assert.match(rustMain, /fn screen_video_recording_window_snapshot/);
 assert.match(rustMain, /fpasoterm_macos_window_snapshot_png_async/);
 assert.match(rustMain, /run_on_main_thread/);
-assert.match(rustMain, /plugin VNC RA2ne native relay: client WebSocket binary frame bytes=/);
-assert.match(rustMain, /observed RA2 client public key and client-encrypted-random/);
-assert.match(rustMain, /packet=server-encrypted-random bytes=256 sha256=\{sha256\}/);
-assert.match(rustMain, /server TCP read sequence=\{sequence\} bytes=\{read\}/);
-assert.match(rustMain, /WebSocket binary send coalesced=true sequence=\{sequence\} bytes=\{\}/);
-assert.match(rustMain, /Sha256::digest\(&vnc_ra2_server_random\[2\.\.\]\)/);
 assert.match(rustMain, /websocket_message = Some\(std::mem::take\(&mut vnc_ra2_server_random\)\)/);
-assert.match(rustMain, /bridge_trace_id: Option<&str>/);
-assert.match(rustMain, /\?trace=\{bridge_trace_id\}/);
+assert.match(rustMain, /noVNC 1\.5\.0[\s\S]*complete[\s\S]*RA2ne response as one WebSocket message/);
+assert.doesNotMatch(rustMain, /plugin VNC RA2ne native relay:/);
+assert.doesNotMatch(rustMain, /bridge_trace_id/);
 const macosVideoSource = read('src-tauri/src/macos_video.m');
 assert.doesNotMatch(macosVideoSource, /CGWindowListCreateImage/);
 assert.doesNotMatch(macosVideoSource, /kCGWindow/);
@@ -2201,6 +2216,32 @@ assert.match(pluginTypes, /tcp:\/\/host:port[\s\S]*openRdpBridge:/);
 assert.doesNotThrow(() => new Function(read('examples/plugins/local-asset-canvas.ts')));
 
 const renderer = read('src/renderer/renderer.js');
+const pluginCanvasOverlayRenderer = renderer.slice(
+  renderer.indexOf('function openPluginCanvasOverlay'),
+  renderer.indexOf('function openPluginElementOverlay'),
+);
+const pluginElementOverlayRenderer = renderer.slice(
+  renderer.indexOf('function openPluginElementOverlay'),
+  renderer.indexOf('function pluginModalPrompt'),
+);
+const pluginWebPanelRenderer = renderer.slice(
+  renderer.indexOf('function openPluginWebPanel'),
+  renderer.indexOf('async function loadPlugins'),
+);
+for (const pluginOverlayRenderer of [
+  pluginCanvasOverlayRenderer,
+  pluginElementOverlayRenderer,
+  pluginWebPanelRenderer,
+]) {
+  assert.doesNotMatch(pluginOverlayRenderer, /overlay\.addEventListener\('click'/);
+  assert.doesNotMatch(pluginOverlayRenderer, /overlay\.onclick = \(event\)/);
+  assert.doesNotMatch(pluginOverlayRenderer, /dialog\.addEventListener\('keydown'/);
+}
+assert.match(pluginElementOverlayRenderer, /sole way this overlay is dismissed/);
+assert.match(pluginCanvasOverlayRenderer, /explicit click on its Close control only/);
+assert.match(pluginCanvasOverlayRenderer, /closeButton\.tabIndex = -1/);
+assert.match(pluginElementOverlayRenderer, /closeButton\.tabIndex = -1/);
+assert.match(pluginWebPanelRenderer, /closeButton\.tabIndex = -1/);
 assert.match(renderer, /const onClose = typeof resolved\.onClose === 'function'/);
 assert.match(renderer, /if \(onClose\)[\s\S]*onClose\(\)[\s\S]*overlay\.remove\(\)/);
 const embeddedDefaultConfig = read('src-tauri/default-config.toml');
@@ -2262,8 +2303,6 @@ assert.match(renderer, /closeConfirmationMessage\.textContent = `Close \$\{title
 assert.match(renderer, /dialog\.classList\.add\('is-confirming'\)/);
 assert.match(renderer, /is-confirming > header > button \{ display: none; \}/);
 assert.match(renderer, /fpasoterm-plugin-canvas-close-confirmation\[hidden\] \{ display: none !important; \}/);
-assert.match(renderer, /event\.code === 'Tab' \|\| event\.key === 'Tab'/);
-assert.match(renderer, /dialog\.addEventListener\('keydown', \(event\) => \{[\s\S]*?\}, true\)/);
 assert.match(read('src-tauri/tauri.conf.json'), /'wasm-unsafe-eval'/);
 assert.match(read('src-tauri/tauri.conf.json'), /'unsafe-eval'/);
 assert.match(renderer, /pluginAssetMaxBytes = 64 \* 1024 \* 1024/);

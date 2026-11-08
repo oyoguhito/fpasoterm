@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.6.18
+
+- Fixed the Windows PowerShell completion script so quoted local port paths
+  parse correctly in both Windows PowerShell and PowerShell 7.
+- Kept remote-desktop plugin overlays focused on the remote surface: Escape,
+  Tab, Shift+Tab, and arrow keys are no longer intercepted by a host dialog,
+  and only an explicit title-bar Close click dismisses the overlay.
+- Kept the RA2ne binary-frame compatibility relay while removing its
+  investigation-only logging hooks after the interoperability fix was
+  confirmed.
+
 ## 1.6.17
 
 - Fixed RA2ne authentication through the reviewed noVNC bridge: after the
@@ -7,9 +18,6 @@
   length and its 256-byte ciphertext in one WebSocket binary message. This
   preserves the RFB byte stream while avoiding noVNC 1.5.0 reading before the
   ciphertext has arrived in a separate WebSocket frame.
-- Added connection-scoped, non-secret RA2ne diagnostics that correlate the
-  native relay and noVNC client without logging keys, passwords, random values,
-  clipboard contents, or authentication tokens.
 
 ## 1.6.15
 

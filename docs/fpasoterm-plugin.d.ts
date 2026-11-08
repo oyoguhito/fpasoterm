@@ -57,7 +57,7 @@ type FpasotermPluginApi = {
     size: number;
     bytes: ArrayBuffer;
   } | null>;
-  /** Opens a focus-trapped canvas modal; `confirmClose` asks before closing. */
+  /** Opens a canvas surface. Escape, backdrop clicks, and navigation keys do not close it. */
   openCanvasOverlay: (options?: {
     title?: string;
     width?: number;
@@ -68,7 +68,7 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
-  /** Opens a focus-trapped local DOM host. It does not provide navigation or network access. */
+  /** Opens a local DOM host. It does not provide navigation or network access; its Close button is explicit. */
   openElementOverlay: (options?: {
     title?: string;
     width?: number;
@@ -86,7 +86,7 @@ type FpasotermPluginApi = {
      */
     captureKeys: (handler: (event: KeyboardEvent) => boolean) => () => void;
   };
-  /** Opens a focus-trapped HTTPS iframe panel for this plugin's declared, application-approved origins. */
+  /** Opens an HTTPS iframe panel for this plugin's declared, application-approved origins; its Close button is explicit. */
   openWebPanel: (options: {
     title?: string;
     url: string;

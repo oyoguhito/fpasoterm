@@ -41,9 +41,13 @@ $fpasotermCompletion = {
   if ($previous -eq '--plugin-install') {
     $elements = @($commandAst.CommandElements | ForEach-Object { $_.Extent.Text })
     $portsDirectory = ''
+    # PowerShell does not use backslash to escape a quote. Keep the two trim
+    # characters as numeric chars so this completion file parses in both
+    # Windows PowerShell and PowerShell 7.
+    $quoteCharacters = [char[]]@(39, 34)
     for ($index = 0; $index -lt $elements.Count; $index += 1) {
       if ($elements[$index] -eq '--plugin-ports-dir' -and $index + 1 -lt $elements.Count) {
-        $portsDirectory = $elements[$index + 1].Trim("'\"")
+        $portsDirectory = $elements[$index + 1].Trim($quoteCharacters)
         break
       }
     }

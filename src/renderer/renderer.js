@@ -2847,6 +2847,9 @@ function openPluginCanvasOverlay(options = {}) {
   heading.textContent = title;
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
+  // Remote desktop navigation owns Tab while this canvas is active. Keep the
+  // explicit mouse Close control out of that navigation order.
+  closeButton.tabIndex = -1;
   canvas.width = width;
   canvas.height = height;
   canvas.tabIndex = 0;
@@ -2884,30 +2887,11 @@ function openPluginCanvasOverlay(options = {}) {
     canvas.focus();
   });
   closeConfirmationOkButton.addEventListener('click', closeImmediately);
-  overlay.addEventListener('click', (event) => {
-    if (event.target === overlay) close();
-  });
-  // Capture Tab inside the modal before WebView or plugin handlers can move
-  // focus outside the canvas dialog.
-  dialog.addEventListener('keydown', (event) => {
-    if (event.code === 'Escape' || event.key === 'Escape') {
-      event.preventDefault();
-      if (!closeConfirmation.hidden) {
-        closeConfirmation.hidden = true;
-        dialog.classList.remove('is-confirming');
-        canvas.focus();
-      } else {
-        close();
-      }
-    } else if (event.code === 'Tab' || event.key === 'Tab') {
-      event.preventDefault();
-      const focusable = closeConfirmation.hidden
-        ? [closeButton, canvas]
-        : [closeConfirmationCancelButton, closeConfirmationOkButton];
-      const index = focusable.indexOf(document.activeElement);
-      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
-    }
-  }, true);
+  // A plugin canvas can represent a remote desktop. Escape, Tab, arrows, and
+  // background clicks are all meaningful input there, so closing this surface
+  // is deliberately an explicit click on its Close control only. In
+  // particular, do not install a modal Tab trap before the canvas receives
+  // the event; it would steal remote keyboard navigation.
   dialog.addEventListener('focusout', () => {
     queueMicrotask(() => {
       // The native chooser is outside this dialog in the WebView's document.
@@ -2985,6 +2969,9 @@ function openPluginElementOverlay(options = {}) {
   heading.textContent = title;
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
+  // A remote canvas or DOM renderer must retain its Tab sequence. The title
+  // bar Close control remains clickable, but is not a Tab destination.
+  closeButton.tabIndex = -1;
   content.className = 'fpasoterm-plugin-element-content';
   content.tabIndex = 0;
   content.style.height = `${size(resolved.height, 600)}px`;
@@ -2999,16 +2986,10 @@ function openPluginElementOverlay(options = {}) {
     term.focus();
   };
   closeButton.addEventListener('click', close);
-  overlay.addEventListener('click', (event) => { if (event.target === overlay) close(); });
-  dialog.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') { event.preventDefault(); close(); return; }
-    if (event.key === 'Tab') {
-      event.preventDefault();
-      const focusable = [closeButton, content];
-      const index = focusable.indexOf(document.activeElement);
-      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
-    }
-  }, true);
+  // Remote plugins own their keyboard input while this surface is focused.
+  // Do not turn Escape, Tab, arrows, or a click on the surrounding dimmer
+  // into a host-side close/focus action. The explicit Close button is the
+  // sole way this overlay is dismissed.
   header.append(heading, closeButton);
   dialog.append(header, content);
   overlay.append(dialog);
@@ -3143,6 +3124,9 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
   loadButton.textContent = 'Load content';
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
+  // Keep iframe navigation inside its content instead of sending a final Tab
+  // to Close. The title-bar control remains an explicit mouse action.
+  closeButton.tabIndex = -1;
   status.className = 'fpasoterm-plugin-web-status';
   // An iframe failure is intentionally not allowed to turn this into an
   // indistinguishable black surface.  The embedded page is cross-origin, so
@@ -3205,25 +3189,8 @@ function openPluginWebPanel(options = {}, declaredOrigins = []) {
     term.focus();
   };
   closeButton.addEventListener('click', close);
-  overlay.onclick = (event) => {
-    if (event.target === overlay) close();
-  };
-  dialog.addEventListener('keydown', (event) => {
-    if (event.code === 'Escape' || event.key === 'Escape') {
-      event.preventDefault();
-      close();
-    } else if (event.code === 'Tab' || event.key === 'Tab') {
-      event.preventDefault();
-      const focusable = frame.hidden ? [loadButton, closeButton] : [closeButton, frame];
-      const index = focusable.indexOf(document.activeElement);
-      focusable[(index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length].focus();
-    }
-  }, true);
-  dialog.addEventListener('focusout', () => {
-    queueMicrotask(() => {
-      if (!closed && !dialog.contains(document.activeElement)) closeButton.focus();
-    });
-  });
+  // Plugin panels must not consume navigation keys from their content or
+  // close on Escape/a backdrop click. Closing is intentionally explicit.
   const actions = document.createElement('div');
   actions.append(loadButton, closeButton);
   header.append(heading, actions);

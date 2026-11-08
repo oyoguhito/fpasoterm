@@ -330,20 +330,22 @@ provides:
   and in-memory `ArrayBuffer`. It never returns a filesystem path, directory
   handle, or persistent read permission. The maximum request is 64 MiB;
   cancellation returns `null`.
-- `openCanvasOverlay({ title, width, height })`: open a focus-trapped, keyboard
-  accessible canvas modal. It returns the canvas plus
-  `close()` and `focus()`. Escape, the Close button, and clicking the backdrop
-  close the modal and return focus to the terminal.
-- `openWebPanel({ title, url, width, height })`: open a focus-trapped HTTPS
-  iframe panel for an origin declared with `allowed-origins` and approved by
-  fpasoterm. The call must be a direct user action; the panel can be closed
-  with Escape, Close, or its backdrop. It is not a general-purpose browser.
-- `openElementOverlay({ title, width, height })`: open a focus-trapped local
-  DOM host without navigation or network access; useful for a reviewed renderer
-  library such as noVNC. Its `captureKeys(handler)` method claims keyboard
-  events while the overlay is open. Return `true` from `handler` only when the
-  plugin handled the event and must prevent a local fpasoterm shortcut; call
-  the returned release function when the claim is no longer needed.
+- `openCanvasOverlay({ title, width, height })`: open a keyboard-accessible
+  canvas surface. It returns the canvas plus `close()` and `focus()`. It never
+  closes from Escape, Tab, arrow keys, or a backdrop click: the visible Close
+  button is the sole user close action, so a remote-desktop plugin can own
+  those input keys.
+- `openWebPanel({ title, url, width, height })`: open an HTTPS iframe panel for
+  an origin declared with `allowed-origins` and approved by fpasoterm. The call
+  must be a direct user action. It closes only through its visible Close button
+  and is not a general-purpose browser.
+- `openElementOverlay({ title, width, height })`: open a local DOM host without
+  navigation or network access; useful for a reviewed renderer library such as
+  noVNC. Like the canvas surface, its visible Close button is the only user
+  close action. Its `captureKeys(handler)` method claims keyboard events while
+  the overlay is open. Return `true` from `handler` only when the plugin handled
+  the event and must prevent a local fpasoterm shortcut; call the returned
+  release function when the claim is no longer needed.
 - `openVncBridge({ target })`: after an explicit user action and confirmation,
   open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
 - `openRdpBridge({ target })`: a declared-target, confirmed one-time
