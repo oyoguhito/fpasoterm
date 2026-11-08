@@ -223,17 +223,18 @@ install 後の plugin では declaration file をローカルへコピーし、r
   開き、選択したassetの名前、media type、size、memory上の`ArrayBuffer`だけを返す。
   filesystem path、directory handle、永続read権限は返さない。上限は64 MiBで、cancelは
   `null`を返す。
-- `openCanvasOverlay({ title, width, height })`: keyboard操作可能なcanvas modalを開く。
-  canvasと`close()`、`focus()`を返す。Escape、Close button、backdrop
-  clickで閉じ、terminalへfocusを戻す。
+- `openCanvasOverlay({ title, width, height })`: keyboard操作可能なcanvas surfaceを開く。
+  canvasと`close()`、`focus()`を返す。Escape、Tab、矢印キー、backdrop clickでは閉じず、
+  visibleなClose buttonだけがuserによる終了操作となる。remote desktop pluginがこれらの
+  input keyを確実に受け取るためである。
 - `openWebPanel({ title, url, width, height })`: `allowed-origins`で宣言し、fpasotermが
-  承認したoriginだけをiframeで表示するkeyboard操作可能なHTTPS panelを開く。userの直接操作から
-  呼び出し、Escape、Close button、backdrop clickで閉じる。汎用browser APIではない。
+  承認したoriginだけをiframeで表示するHTTPS panelを開く。userの直接操作から呼び出し、
+  visibleなClose buttonだけで閉じる。汎用browser APIではない。
 - `openElementOverlay({ title, width, height })`: navigation/network権限を持たない
-  local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。返された
-  `captureKeys(handler)`はoverlay表示中のkeyboard eventを取得する。plugin側で処理し、
-  local fpasoterm shortcutへ渡してはいけないeventだけ`true`を返す。不要になった時は
-  戻り値のrelease functionを呼ぶ。
+  local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。canvas surfaceと同様に
+  visibleなClose buttonだけがuserによる終了操作となる。返された`captureKeys(handler)`は
+  overlay表示中のkeyboard eventを取得する。plugin側で処理し、local fpasoterm shortcutへ
+  渡してはいけないeventだけ`true`を返す。不要になった時は戻り値のrelease functionを呼ぶ。
 - `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
   `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
 - `openRdpBridge({ target })`: review済みRDP WebAssembly client用に、宣言済み接続先へ
