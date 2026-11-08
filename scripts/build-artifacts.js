@@ -68,6 +68,20 @@ function run(command, args, options = {}) {
   }
 }
 
+// create-dmg can leave its temporary disk image busy for a moment on shared
+// macOS runners. Retry the complete Tauri bundle command once so a transient
+// hdiutil eject race does not discard an otherwise successful macOS artifact.
+function runMacBundleBuildWithRetry(buildArgs) {
+  try {
+    run('npm', buildArgs);
+  } catch (firstError) {
+    if (process.platform !== 'darwin') throw firstError;
+    console.warn('macOS bundle build failed; retrying once after a short hdiutil recovery delay.');
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5000);
+    run('npm', buildArgs);
+  }
+}
+
 // Copies source entries while excluding generated or dependency directories.
 function copyEntry(entry, targetRoot) {
   fs.cpSync(path.join(root, entry), path.join(targetRoot, entry), {
@@ -131,7 +145,7 @@ if (!sourceOnly) {
     // reproducible, and keep the source archives platform-independent.
     buildArgs.push('--', '--bundles', 'deb,rpm');
   }
-  run('npm', buildArgs);
+  runMacBundleBuildWithRetry(buildArgs);
   copyWindowsCommandWrapper();
 
   const bundleDir = path.join(root, 'src-tauri', 'target', 'release', 'bundle');
