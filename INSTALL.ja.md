@@ -45,6 +45,14 @@ Linux では Tauri/WebKitGTK の開発用 package が必要です。
 sudo apt install build-essential curl libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
+sourceをcompileしない導入済みGUI runtimeでは、WebKitGTK runtime packageだけで足ります。
+
+```sh
+sudo apt install libwebkit2gtk-4.1-0
+```
+
+desktop起動後にwindowが表示されない場合は`fpasoterm --doctor`を実行してください。利用可能なLinux runtimeを`ldd`で確認し、同じ結果を`~/.cache/fpasoterm/launcher.log`へ記録します。OS packageは変更せず、明示的な復旧commandだけを表示します。
+
 依存関係を入れた後、通常の開発起動は次の通りです。
 
 ```sh

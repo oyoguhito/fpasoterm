@@ -278,6 +278,11 @@ assert.match(bin, /--update-check/);
 assert.match(bin, /--doctor/);
 assert.match(bin, /runDoctor/);
 assert.match(bin, /npmAuditSummary/);
+assert.match(bin, /function nativeRuntimeDependencyStatus/);
+assert.match(bin, /function nativeRuntimeDependencyLines/);
+assert.match(bin, /reportMissingNativeRuntimeDependencies/);
+assert.match(bin, /notify-send/);
+assert.match(bin, /libwebkit2gtk-4\.1-0/);
 assert.match(bin, /installPublicPlugin/);
 assert.match(bin, /--plugin-tcp-target/);
 assert.match(bin, /--plugins-list/);
@@ -462,6 +467,32 @@ assert.equal(shortVersionResult.status, 0, shortVersionResult.stderr);
 assert.equal(shortVersionResult.stdout.trim(), versionResult.stdout.trim());
 const launcherSource = fs.readFileSync(path.join(root, 'bin', 'fpasoterm'), 'utf8');
 assert.match(launcherSource, /function runtimeVersionText\(\)[\s\S]*?findRuntimeVersionBinary\(\)[\s\S]*?spawnSync\(tauriBinary, \['--version'\]/);
+const nativeRuntimeDiagnosticSource = launcherSource.match(
+  /const linuxRuntimeLibraryPackages[\s\S]*?(?=\/\/ Returns one stable build identifier)/,
+);
+assert.ok(nativeRuntimeDiagnosticSource, 'launcher should retain the Linux native-runtime diagnostic helpers');
+const nativeRuntimeDiagnostics = vm.runInNewContext(
+  `(() => {${nativeRuntimeDiagnosticSource[0]}; return { nativeRuntimeDependencyStatus, nativeRuntimeDependencyLines }; })()`,
+  {
+    process: { platform: 'linux' },
+    fs: { existsSync: () => true },
+    spawnSync: () => ({
+      status: 1,
+      stdout: 'libwebkit2gtk-4.1.so.0 => not found\\nlibgtk-3.so.0 => /lib/libgtk-3.so.0\\n',
+      stderr: '',
+    }),
+    spawn: () => ({ on: () => {}, unref: () => {} }),
+    appendLauncherLog: () => {},
+    console: { error: () => {} },
+  },
+);
+const missingNativeRuntime = nativeRuntimeDiagnostics.nativeRuntimeDependencyStatus('/tmp/fpasoterm');
+assert.equal(missingNativeRuntime.status, 'missing');
+assert.deepEqual([...missingNativeRuntime.missing], ['libwebkit2gtk-4.1.so.0']);
+assert.match(
+  nativeRuntimeDiagnostics.nativeRuntimeDependencyLines(missingNativeRuntime).join('\n'),
+  /sudo apt install libwebkit2gtk-4\.1-0/,
+);
 
 const bashCompletionResult = runCli('--completion', 'bash');
 assert.equal(bashCompletionResult.status, 0, bashCompletionResult.stderr);
@@ -514,6 +545,7 @@ assert.equal(diagnosticsResult.status, 0, diagnosticsResult.stderr);
 assert.match(diagnosticsResult.stdout, /## fpasoterm diagnostics/);
 assert.match(diagnosticsResult.stdout, /- config path:/);
 assert.match(diagnosticsResult.stdout, /- logging:/);
+assert.match(diagnosticsResult.stdout, /- native runtime:/);
 fs.writeFileSync(cliConfigPath, [
   '[terminal]',
   'fontSize = 14',
@@ -1627,6 +1659,9 @@ assert.match(readme, /--version/);
 assert.match(readme, /fpasoterm -v/);
 assert.match(readme, /--reset-window-state/);
 assert.match(readme, /--disable-dmabuf/);
+assert.match(readme, /fpasoterm --doctor/);
+assert.match(readme, /libwebkit2gtk-4\.1-0/);
+assert.match(readmeJa, /libwebkit2gtk-4\.1-0/);
 assert.match(readme, /OSC 777|033\]777/);
 assert.match(readme, /POSIX shell/);
 assert.match(readme, /Windows PowerShell and cmd\.exe do not run those `printf` examples as-is/);

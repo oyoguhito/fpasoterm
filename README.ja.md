@@ -61,6 +61,14 @@ fpasoterm
 
 source checkoutまたはnpm packageの初回起動でlocal Cargo buildが必要な場合は、CLIを接続したまま`phase 1/3`の準備、`phase 2/3`のcompiler progress、`phase 3/3`のnative window起動を表示します。Cargo errorもこのterminalへ表示し、window process起動後にpromptが戻ります。runtime解決、Cargo build、desktop spawnの経過時間とcompiler outputはLinux/macOSでは`~/.cache/fpasoterm/launcher.log`、Windowsでは`%LOCALAPPDATA%\\fpasoterm\\launcher.log`にも記録します。desktop processの終了まで待機したい場合だけ、`--foreground --console-diagnostics`を使ってください。
 
+desktop entryから起動してもwindowが表示されないLinux環境では、read-onlyの次の確認を実行してください。
+
+```sh
+fpasoterm --doctor
+```
+
+Linuxのlauncherはbuilt runtimeを`ldd`で確認します。`libwebkit2gtk-4.1.so.0`が不足している場合は、GUI runtime向けに`sudo apt install libwebkit2gtk-4.1-0`、source build向けに追加で`libwebkit2gtk-4.1-dev`を案内します。desktopのみから起動した場合も、可能ならsystem notificationを表示し、必ず`~/.cache/fpasoterm/launcher.log`へ復旧方法を記録します。
+
 オプション一覧:
 
 ```sh
