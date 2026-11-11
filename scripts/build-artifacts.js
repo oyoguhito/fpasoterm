@@ -27,6 +27,7 @@ const packageEntries = [
   'INSTALL.md',
   'README.md',
   'LICENSE',
+  'THIRD_PARTY_NOTICES.md',
   'package.json',
   'package-lock.json',
 ];

@@ -70,3 +70,7 @@ Verify:
 - Release notes should mention the tested ChromeOS Linux condition.
 - The icon asset exists at `extra/logo/fpasoterm.png`.
 - `LICENSE` exists and package metadata says `MIT`.
+- `npm pack --dry-run` lists `LICENSE`, `THIRD_PARTY_NOTICES.md`, and the
+  vendor license files under `src/renderer/vendor/`.
+- Confirm a native bundle contains `THIRD_PARTY_NOTICES.md` as a Tauri
+  resource.

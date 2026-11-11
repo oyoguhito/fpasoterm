@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.0
+
+- Added read-only Linux GUI-runtime preflight diagnostics. `--doctor`,
+  `--diagnostics`, launcher logs, and desktop-start failure reporting now show
+  the missing WebKitGTK/GTK shared library and an explicit repair command
+  without modifying system packages.
+- Added MIT and third-party distribution notices to npm, portable source, and
+  native Tauri bundles. The copied xterm.js assets retain their upstream
+  license text, and MPL-covered Rust components include source-availability
+  guidance.
+
 ## 1.6.18
 
 - Fixed the Windows PowerShell completion script so quoted local port paths

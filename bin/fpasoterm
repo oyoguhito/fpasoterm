@@ -73,7 +73,7 @@ Options:
       --config-path              Print the active config.toml path, then exit.
       --config-example           Print the active config.toml.example contents, then exit.
       --diagnostics              Print a Markdown diagnostics report, then exit.
-      --doctor                   Check updates, npm audit, and config health, then exit.
+      --doctor                   Check updates, npm audit, config health, and Linux runtime dependencies.
       --open-log-dir             Open the configured terminal log directory, then exit.
       --copy-diagnostics         Copy the Markdown diagnostics report to the clipboard, then exit.
       --plugin-list             List installed User/plugins, or local ports with --plugin-ports-dir.
@@ -802,6 +802,137 @@ function findRuntimeVersionBinary() {
   return '';
 }
 
+// Maps the Linux runtime libraries Tauri/WebKitGTK commonly loads to the
+// Debian-family runtime packages. The launcher uses this only for a
+// read-only diagnostic; package installation always remains an explicit user
+// action.
+const linuxRuntimeLibraryPackages = Object.freeze({
+  'libwebkit2gtk-4.1.so.0': 'libwebkit2gtk-4.1-0',
+  'libjavascriptcoregtk-4.1.so.0': 'libjavascriptcoregtk-4.1-0',
+  'libsoup-3.0.so.0': 'libsoup-3.0-0',
+  'libgtk-3.so.0': 'libgtk-3-0',
+  'libgdk-3.so.0': 'libgtk-3-0',
+  'libayatana-appindicator3.so.1': 'libayatana-appindicator3-1',
+});
+
+// Checks a built native runtime without executing it. This catches a missing
+// shared object before a desktop launch silently exits at the dynamic loader.
+function nativeRuntimeDependencyStatus(binary) {
+  if (process.platform !== 'linux') {
+    return { status: 'not-applicable', binary: '' };
+  }
+  if (!binary || !fs.existsSync(binary)) {
+    return { status: 'unavailable', binary: '', detail: 'no local native runtime is available' };
+  }
+
+  const result = spawnSync('ldd', [binary], {
+    encoding: 'utf8',
+    timeout: 5_000,
+    windowsHide: true,
+  });
+  if (result.error) {
+    return { status: 'unavailable', binary, detail: result.error.message };
+  }
+
+  const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+  const missing = [...new Set(
+    [...output.matchAll(/^\s*(\S+)\s+=>\s+not found\b/gm)].map((match) => match[1]),
+  )];
+  if (missing.length > 0) {
+    return {
+      status: 'missing',
+      binary,
+      missing,
+      packages: [...new Set(missing.map((library) => linuxRuntimeLibraryPackages[library]).filter(Boolean))],
+    };
+  }
+  if (result.status !== 0) {
+    return {
+      status: 'unavailable',
+      binary,
+      detail: `ldd exited with code ${result.status ?? 'unknown'}`,
+    };
+  }
+  return { status: 'ok', binary };
+}
+
+// Formats the dependency check for --doctor, --diagnostics, and the launcher
+// log. Debian/Ubuntu/ChromeOS commands are deliberately shown only as advice,
+// never executed by fpasoterm.
+function nativeRuntimeDependencyLines(status) {
+  if (status.status === 'not-applicable') {
+    return ['- native runtime: not checked (shared-library check is Linux-only)'];
+  }
+  if (status.status === 'unavailable') {
+    return [`- native runtime: not checked (${status.detail})`];
+  }
+  if (status.status === 'ok') {
+    return [`- native runtime: ready (ldd: ${status.binary})`];
+  }
+
+  const lines = [
+    `- native runtime: missing shared libraries: ${status.missing.join(', ')}`,
+  ];
+  if (status.packages.length > 0) {
+    lines.push(`- Linux runtime repair (Debian/Ubuntu/ChromeOS): sudo apt install ${status.packages.join(' ')}`);
+  } else {
+    lines.push(`- Linux runtime repair: install packages that provide the missing libraries, then run ldd ${status.binary}`);
+  }
+  if (status.missing.includes('libwebkit2gtk-4.1.so.0')) {
+    lines.push('- local source-build repair: sudo apt install libwebkit2gtk-4.1-dev');
+  }
+  return lines;
+}
+
+// Desktop launchers normally have no visible terminal. Send a best-effort
+// notification for an actionable loader failure while retaining launcher.log
+// as the reliable fallback when a notification daemon is unavailable.
+function notifyLinuxRuntimeDependencyFailure(status) {
+  if (process.platform !== 'linux' || status.status !== 'missing') {
+    return;
+  }
+  const repair = status.packages.length > 0
+    ? `Install: sudo apt install ${status.packages.join(' ')}`
+    : 'Run fpasoterm --doctor for package guidance.';
+  try {
+    const notification = spawn('notify-send', [
+      '--urgency=critical',
+      'fpasoterm could not start',
+      `Missing: ${status.missing.join(', ')}\n${repair}\nDetails: fpasoterm --doctor`,
+    ], {
+      detached: true,
+      stdio: 'ignore',
+      windowsHide: true,
+    });
+    notification.on('error', (error) => appendLauncherLog(`launcher runtime notification unavailable=${error.message}`));
+    notification.unref();
+    appendLauncherLog('launcher runtime notification requested');
+  } catch (error) {
+    appendLauncherLog(`launcher runtime notification unavailable=${error.message}`);
+  }
+}
+
+// Reports a preflight error before the dynamic loader attempts to start the
+// native process. Returning false lets callers keep a normal GUI launch from
+// disappearing without an explanation.
+function reportMissingNativeRuntimeDependencies(binary, { notify = false } = {}) {
+  const status = nativeRuntimeDependencyStatus(binary);
+  if (status.status !== 'missing') {
+    return { status, missing: false };
+  }
+  const lines = nativeRuntimeDependencyLines(status);
+  for (const line of lines) {
+    appendLauncherLog(`launcher ${line.slice(2)}`);
+    console.error(`fpasoterm: ${line.slice(2)}`);
+  }
+  console.error('fpasoterm: the native window was not started. Run fpasoterm --doctor for this report.');
+  appendLauncherLog('launcher native runtime was not started because shared libraries are missing');
+  if (notify) {
+    notifyLinuxRuntimeDependencyFailure(status);
+  }
+  return { status, missing: true };
+}
+
 // Returns one stable build identifier for CLI output and diagnostics reports.
 function versionText() {
   if (fs.existsSync(path.join(root, '.jj'))) {
@@ -890,6 +1021,7 @@ function npmAuditSummary() {
 async function runDoctor(options) {
   applyEnv(options.env);
   const config = validateUserConfig(configPath());
+  const nativeRuntime = nativeRuntimeDependencyStatus(findRuntimeVersionBinary());
   console.log('## fpasoterm doctor');
   console.log('');
   console.log(`- version: ${versionText()}`);
@@ -914,8 +1046,9 @@ async function runDoctor(options) {
 
   const audit = npmAuditSummary();
   console.log(`- npm audit: ${audit.status} (${audit.detail})`);
+  for (const line of nativeRuntimeDependencyLines(nativeRuntime)) console.log(line);
   console.log('');
-  console.log('Doctor is read-only. Review findings, then run --self-update or fix config.toml explicitly.');
+  console.log('Doctor is read-only. Review findings, then install missing OS packages, run --self-update, or fix config.toml explicitly.');
 }
 
 // Searches public port metadata only; source is neither downloaded nor executed.
@@ -2099,6 +2232,7 @@ function diagnosticsMarkdown(options) {
   applyEnv(options.env);
   const targetPath = configPath();
   const checked = validateUserConfig(targetPath);
+  const nativeRuntime = nativeRuntimeDependencyStatus(findRuntimeVersionBinary());
   const userConfig = checked.error ? {} : readUserConfig(targetPath);
   const resolved = mergeConfig(platformDefaultConfig(), userConfig);
   const enabledPlugins = Array.isArray(userConfig.plugins?.enabled) ? userConfig.plugins.enabled : [];
@@ -2130,6 +2264,7 @@ function diagnosticsMarkdown(options) {
     `- logging: ${resolved.logging?.enabled === false ? 'disabled' : 'enabled'} (${logDirectory})`,
     `- sync: ${resolved.sync?.enabled ? `enabled (${resolved.sync.provider || 'folder'}:${resolved.sync.channel || 'default'})` : 'disabled'}`,
     `- debug log: ${path.join(path.dirname(targetPath), 'logs', 'fpasoterm-debug.log')}`,
+    ...nativeRuntimeDependencyLines(nativeRuntime),
     ...(checked.error ? ['', '### configuration errors', `- ${checked.error}`] : []),
     ...(checked.warnings.length > 0 ? ['', '### configuration warnings', ...checked.warnings.map((warning) => `- ${warning}`)] : []),
     '',
@@ -3211,6 +3346,13 @@ function waitForDesktopStartup(child, timeoutMs = 1000) {
 // Starts the desktop runtime. By default the child is detached so the shell prompt returns.
 async function launch(options) {
   validateLaunchProfile(options);
+  const existingRuntime = findRuntimeVersionBinary();
+  if (existingRuntime && reportMissingNativeRuntimeDependencies(existingRuntime, {
+    notify: !options.foreground && !process.stdout.isTTY,
+  }).missing) {
+    process.exitCode = 1;
+    return;
+  }
   let preparedBinary;
   // Re-exec before a possible cargo build so normal launches return the caller
   // prompt consistently on macOS, Linux, and Windows.
@@ -3252,6 +3394,12 @@ async function launch(options) {
   appendLaunchPhase('resolving-runtime');
   const tauriBinary = preparedBinary || await buildTauriBinary(options);
   appendLaunchPhase('runtime-ready');
+  if (reportMissingNativeRuntimeDependencies(tauriBinary, {
+    notify: !options.foreground && !process.stdout.isTTY,
+  }).missing) {
+    process.exitCode = 1;
+    return;
+  }
   const command = tauriBinary;
   const args = options.runtimeArgs;
   const env = runtimeEnv(options);

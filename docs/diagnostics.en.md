@@ -37,6 +37,13 @@ not support `--self-update`; when an update is available they direct users to
 the GitHub Release download page. They report npm audit as unavailable because
 they do not include an npm package manifest.
 
+On Linux, the Node launcher also checks an available native runtime with `ldd`.
+If a GUI-only launch cannot load WebKitGTK, `--doctor` reports the missing
+shared library and an explicit Debian/Ubuntu/ChromeOS repair command. The
+launcher never installs packages itself. When a desktop launch detects a
+missing library before it opens a window, it records the same result in
+`~/.cache/fpasoterm/launcher.log` and makes a best-effort desktop notification.
+
 ## Diagnostics Report
 
 ```sh
@@ -50,6 +57,8 @@ version and build commit, operating system and architecture, config path and
 status, enabled plugins, configured or saved terminal size, font size, logging
 path, sync state, and debug-log path. Review the output before posting it:
 plugin names and local paths may be private.
+On Linux it also contains the same read-only native-runtime dependency check as
+`--doctor`.
 
 `--copy-diagnostics` writes the same Markdown to the operating-system text
 clipboard. It uses the native Windows clipboard, `pbcopy` on macOS, and

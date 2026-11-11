@@ -35,6 +35,8 @@ configと更新確認を実行しますが、`--self-update`は利用できま�
 Releaseのdownload pageを案内します。npm package manifestを持たないためnpm auditは
 `unavailable`として表示します。
 
+LinuxのNode launcherでは、利用可能なnative runtimeに対して`ldd`によるread-onlyの共有library確認も行います。GUIのみの起動でWebKitGTKをloadできない場合、`--doctor`は不足libraryとDebian/Ubuntu/ChromeOS向けの明示的な復旧commandを表示します。fpasoterm自身がOS packageを導入することはありません。windowを開く前に不足を検出したdesktop起動では、同じ結果を`~/.cache/fpasoterm/launcher.log`へ記録し、可能な場合はdesktop notificationも表示します。
+
 ## 診断report
 
 ```sh
@@ -47,6 +49,7 @@ fpasoterm --copy-diagnostics
 OS/architecture、config path/status、有効plugin、設定済みまたは保存済みterminal size、font size、
 logging path、sync状態、debug log pathを含みます。plugin名やlocal pathがprivateな場合があるため、
 Issueへ投稿する前に内容を確認してください。
+Linuxでは`--doctor`と同じnative runtime依存関係のread-only確認も含まれます。
 
 `--copy-diagnostics`は同じMarkdownをOSのtext clipboardへ書き込みます。Windowsはnative clipboard、
 macOSは`pbcopy`、Linuxは`wl-copy`、`xclip`、`xsel`を順に使います。利用可能なclipboard providerが

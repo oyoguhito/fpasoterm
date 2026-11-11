@@ -69,3 +69,7 @@ FPASOTERM_DEBUG_KEYS=1 ./scripts/run
 - リリースノートには検証済みの ChromeOS Linux 条件を明記する。
 - icon asset が `extra/logo/fpasoterm.png` に存在する。
 - `LICENSE` が存在し、package metadata が `MIT` になっている。
+- `npm pack --dry-run` に `LICENSE`、`THIRD_PARTY_NOTICES.md`、
+  `src/renderer/vendor/` 配下の vendor license file が含まれる。
+- native bundle に Tauri resource として `THIRD_PARTY_NOTICES.md` が
+  含まれることを確認する。

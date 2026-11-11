@@ -69,6 +69,19 @@ Reinstall `libwebkit2gtk-4.1-dev`, then verify it without setting
 pkg-config --modversion libsoup-3.0 javascriptcoregtk-4.1
 ```
 
+If the desktop entry does not open a window, run the read-only check below:
+
+```sh
+fpasoterm --doctor
+```
+
+On Linux, the launcher checks the built runtime with `ldd`. A missing
+`libwebkit2gtk-4.1.so.0` is reported with the GUI runtime repair command
+`sudo apt install libwebkit2gtk-4.1-0`; local source builds additionally need
+`libwebkit2gtk-4.1-dev`. A desktop-only launch also requests a best-effort
+system notification and always records the actionable result in
+`~/.cache/fpasoterm/launcher.log`.
+
 Node.js and Rust are managed by mise in this workspace. You can also use system installations.
 
 ## Run

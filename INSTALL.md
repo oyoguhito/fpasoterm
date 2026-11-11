@@ -50,6 +50,18 @@ Linux development requires the Tauri/WebKitGTK system packages:
 sudo apt install build-essential curl libgtk-3-dev libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev
 ```
 
+For an installed GUI runtime that does not need to compile source, the WebKitGTK
+runtime package is sufficient:
+
+```sh
+sudo apt install libwebkit2gtk-4.1-0
+```
+
+If no window appears after a desktop launch, run `fpasoterm --doctor`. It checks
+an available Linux runtime with `ldd`, logs the same result to
+`~/.cache/fpasoterm/launcher.log`, and gives an explicit repair command without
+changing system packages.
+
 ```sh
 npm install
 ./scripts/run
