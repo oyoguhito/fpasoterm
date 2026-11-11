@@ -43,6 +43,11 @@
   "bundle": {
     "active": true,
     "targets": "all",
+    "license": "MIT",
+    "licenseFile": "../LICENSE",
+    "resources": {
+      "../THIRD_PARTY_NOTICES.md": "THIRD_PARTY_NOTICES.md"
+    },
     "icon": [
       "../extra/logo/fpasoterm.png",
       "../extra/macos/fpasoterm.icns",
