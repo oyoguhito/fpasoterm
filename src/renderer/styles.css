@@ -186,6 +186,49 @@ body {
   font-size: 16px;
 }
 
+#plugin-panels {
+  position: relative;
+}
+
+#plugin-panels-toggle {
+  width: auto !important;
+  min-width: 70px;
+  padding: 0 6px !important;
+}
+
+#plugin-panels-items {
+  position: absolute;
+  top: 28px;
+  right: 0;
+  z-index: 14020;
+  display: grid;
+  min-width: 176px;
+  max-width: min(320px, calc(100vw - 12px));
+  gap: 4px;
+  padding: 6px;
+  border: 1px solid rgba(255, 255, 255, 0.34);
+  border-radius: 6px;
+  background: rgba(17, 21, 26, 0.96);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.36);
+  app-region: no-drag;
+  -webkit-app-region: no-drag;
+}
+
+#plugin-panels-items[hidden],
+#plugin-panels[hidden] {
+  display: none;
+}
+
+#plugin-panels-items button {
+  width: 100%;
+  min-width: 0;
+  padding: 3px 8px;
+  overflow: hidden;
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 #window-menu-items {
   position: absolute;
   top: 28px;

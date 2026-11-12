@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.7.1
+
+- Restored Windows PowerShell live diagnostics for GUI-subsystem builds when
+  launched with `--foreground --console-diagnostics`, including terminal I/O
+  and resize records.
+- Kept the Diagnostics filter focused while live messages arrive in WebView2.
+- Added non-destructive **Minimize** and titlebar **Panels** controls for local
+  plugin overlays, so RDP/noVNC sessions can be restored or switched without
+  reconnecting. Moved the OSC 52 recovery copy action under Diagnostics.
+
 ## 1.7.0
 
 - Added read-only Linux GUI-runtime preflight diagnostics. `--doctor`,

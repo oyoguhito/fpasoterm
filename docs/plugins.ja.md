@@ -232,9 +232,12 @@ install 後の plugin では declaration file をローカルへコピーし、r
   visibleなClose buttonだけで閉じる。汎用browser APIではない。
 - `openElementOverlay({ title, width, height })`: navigation/network権限を持たない
   local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。canvas surfaceと同様に
-  visibleなClose buttonだけがuserによる終了操作となる。返された`captureKeys(handler)`は
-  overlay表示中のkeyboard eventを取得する。plugin側で処理し、local fpasoterm shortcutへ
-  渡してはいけないeventだけ`true`を返す。不要になった時は戻り値のrelease functionを呼ぶ。
+  Escape、Tab、矢印キー、backdrop clickでは閉じない。visibleな**Minimize** buttonはlocal DOMと
+  remote sessionを維持したまま隠し、titlebarの**Panels** pickerから再表示・切替できる。
+  visibleな**Close** buttonだけが明示的な最終終了操作となる。返された`captureKeys(handler)`は
+  overlay表示中のkeyboard eventを取得する。最小化中はkeyboard captureを解放し、再表示時に
+  同じhandlerを戻す。plugin側で処理し、local fpasoterm shortcutへ渡してはいけないeventだけ
+  `true`を返す。不要になった時は戻り値のrelease functionを呼ぶ。
 - `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
   `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
 - `openRdpBridge({ target })`: review済みRDP WebAssembly client用に、宣言済み接続先へ
