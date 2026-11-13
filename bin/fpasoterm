@@ -2497,10 +2497,40 @@ function showPluginInfo(options) {
   if (resolved) {
     console.log(`Renderer URL: ${resolved.url}`);
   }
+  showInstalledPluginInstallation(plugin);
+}
+
+// Installed bridge sources retain only a configured endpoint, not the port
+// metadata used at installation time. Recognize the two reviewed filenames so
+// --plugin-info remains an actionable recovery/reinstall guide rather than
+// sending a user to inspect a checkout merely to rediscover host:port syntax.
+function showInstalledPluginInstallation(plugin) {
+  const fileName = path.basename(plugin);
+  const port = fileName === 'rdp-local-bridge.js'
+    ? rdpLocalBridgePortId
+    : fileName === 'novnc-local-bridge.js'
+      ? noVncLocalBridgePortId
+      : null;
+  if (!port) {
+    console.log('');
+    console.log('Installation: already installed in User/plugins.');
+    console.log('For a reviewed checkout port and its install settings, run:');
+    console.log('  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>');
+    return;
+  }
+
+  const command = `fpasoterm --plugin-install ${port}`;
   console.log('');
-  console.log('Installation: already installed in User/plugins.');
-  console.log('For a reviewed checkout port and its install settings, run:');
-  console.log('  fpasoterm --plugin-info <category/name> --plugin-ports-dir <checkout-or-ports>');
+  console.log('Installation: already installed in User/plugins. Reinstall or replace it from the official catalog with:');
+  if (port === rdpLocalBridgePortId) {
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:3389 --enable --force`);
+    console.log('  Specify the trusted RDP host explicitly; the packaged loopback default is intentionally inert.');
+  } else {
+    console.log(`  ${command} --plugin-tcp-target tcp://<host>:5900 --enable --force`);
+    console.log(`  ${command} --plugin-tcp-target tls://<host>:5900 --enable --force`);
+    console.log('  Specify the trusted VNC host explicitly; choose the transport configured by the VNC server.');
+  }
+  console.log('  Omit --force unless replacing the existing installed plugin. Restart fpasoterm after installation.');
 }
 
 // Expands common environment variable forms used in configuration paths.

@@ -160,6 +160,10 @@ version, description, declared TCP bridge target (when any), load status, and re
 `--plugin-*` selectors, the leading `plugins/` and the `.js`/`.ts` suffix are
 optional: use `welcome-banner` or `appearance/teal`. If both `.js` and `.ts`
 would match, provide an extension or a more specific path.
+For installed RDP and noVNC bridges, it also prints copyable official-catalog
+reinstall commands with `--plugin-tcp-target tcp://<host>:port` (and the
+noVNC `tls://` alternative), plus `--enable --force` when replacing the
+current file.
 `--plugin-uninstall <file>` removes one or comma-separated local plugin source
 files from `User/plugins`, removes their generated cache files, and removes the
 same entries from `plugins.enabled`. It never contacts the public catalog and
@@ -341,11 +345,15 @@ provides:
   and is not a general-purpose browser.
 - `openElementOverlay({ title, width, height })`: open a local DOM host without
   navigation or network access; useful for a reviewed renderer library such as
-  noVNC. Like the canvas surface, its visible Close button is the only user
-  close action. Its `captureKeys(handler)` method claims keyboard events while
-  the overlay is open. Return `true` from `handler` only when the plugin handled
-  the event and must prevent a local fpasoterm shortcut; call the returned
-  release function when the claim is no longer needed.
+  noVNC. Escape, Tab, arrow keys, and a backdrop click never close it. Its
+  visible **Minimize** control keeps the local DOM and the remote session alive;
+  users restore or switch retained panels from the titlebar **Panels** picker.
+  The visible **Close** control is the deliberate, final close action. Its
+  `captureKeys(handler)` method claims keyboard events while the overlay is
+  visible; a minimized overlay releases keyboard capture and restores the same
+  handler when shown again. Return `true` from `handler` only when the plugin
+  handled the event and must prevent a local fpasoterm shortcut; call the
+  returned release function when the claim is no longer needed.
 - `openVncBridge({ target })`: after an explicit user action and confirmation,
   open one loopback WebSocket to an exact `allowed-tcp-targets` declaration.
 - `openRdpBridge({ target })`: a declared-target, confirmed one-time

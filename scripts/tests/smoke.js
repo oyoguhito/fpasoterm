@@ -708,6 +708,29 @@ assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
 assert.match(pluginInfoResult.stdout, /Installation: already installed in User\/plugins/);
 
+fs.mkdirSync(path.join(cliPluginsDir, 'integration'), { recursive: true });
+fs.writeFileSync(path.join(cliPluginsDir, 'integration', 'rdp-local-bridge.js'), [
+  '// @fpasoterm-plugin version: 0.2.0',
+  '// @fpasoterm-plugin description: RDP local bridge',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.25:3389',
+  '',
+].join('\n'));
+fs.writeFileSync(path.join(cliPluginsDir, 'integration', 'novnc-local-bridge.js'), [
+  '// @fpasoterm-plugin version: 0.2.0',
+  '// @fpasoterm-plugin description: noVNC local bridge',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.10:5900',
+  '',
+].join('\n'));
+const rdpPluginInfoResult = runCli('--plugin-info', 'integration/rdp-local-bridge');
+assert.equal(rdpPluginInfoResult.status, 0, rdpPluginInfoResult.stderr);
+assert.match(rdpPluginInfoResult.stdout, /--plugin-install integration\/rdp-local-bridge --plugin-tcp-target tcp:\/\/\<host\>:3389 --enable --force/);
+assert.match(rdpPluginInfoResult.stdout, /trusted RDP host explicitly/);
+const novncPluginInfoResult = runCli('--plugin-info', 'integration/novnc-local-bridge');
+assert.equal(novncPluginInfoResult.status, 0, novncPluginInfoResult.stderr);
+assert.match(novncPluginInfoResult.stdout, /--plugin-install integration\/novnc-local-bridge --plugin-tcp-target tcp:\/\/\<host\>:5900 --enable --force/);
+assert.match(novncPluginInfoResult.stdout, /--plugin-tcp-target tls:\/\/\<host\>:5900 --enable --force/);
+fs.rmSync(path.join(cliPluginsDir, 'integration'), { recursive: true, force: true });
+
 const localReviewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-review-'));
 const localReviewPort = path.join(localReviewRoot, 'ports', 'integration', 'review-target');
 fs.mkdirSync(localReviewPort, { recursive: true });
@@ -945,6 +968,13 @@ assert.match(read('src/renderer/renderer.js'), /function dispatchPluginElementKe
 assert.match(read('src/renderer/renderer.js'), /document\.addEventListener\('keyup', dispatchPluginElementKeyCapture, true\)/);
 assert.match(read('src/renderer/renderer.js'), /capture\.capturedCodes\.delete\(event\.code\)/);
 assert.match(read('src/renderer/renderer.js'), /capturedCodes: new Set\(\)/);
+assert.match(read('src/renderer/index.html'), /id="plugin-panels"/);
+assert.match(read('src/renderer/index.html'), /id="plugin-panels-toggle"/);
+assert.match(read('src/renderer/renderer.js'), /function refreshPluginPanels\(\)/);
+assert.match(read('src/renderer/renderer.js'), /minimizeButton\.textContent = 'Minimize'/);
+assert.match(read('src/renderer/renderer.js'), /function registerPluginElementPanel\(panel\)/);
+assert.match(read('src/renderer/renderer.js'), /onVisibilityChange/);
+assert.match(read('src/renderer/renderer.js'), /releaseActiveKeyCapture\(\);\s*overlay\.hidden = true/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
@@ -1190,6 +1220,12 @@ assert.match(rustMain, /reset_window_state_cli/);
 assert.match(rustMain, /print_cli_text_windows/);
 assert.match(rustMain, /AttachConsole/);
 assert.match(rustMain, /CONOUT\$/);
+assert.match(rustMain, /fn write_console_diagnostic/);
+assert.match(rustMain, /write_console_diagnostic\(&format!\("\{message\}\\n"\)\)/);
+assert.match(rustMain, /print_cli_text_windows\(text\)/);
+assert.match(rustMain, /write_console_diagnostic\(&format!\(\s*"terminal_read/);
+assert.match(rustMain, /write_console_diagnostic\(&format!\("terminal_write bytes=/);
+assert.match(rustMain, /write_console_diagnostic\(&format!\(\s*"terminal_resize/);
 assert.match(rustMain, /portable_pty/);
 assert.match(rustMain, /ChildKiller/);
 assert.match(rustMain, /terminal_start/);
@@ -2222,6 +2258,9 @@ assert.match(pluginTypes, /terminalGraphics: boolean/);
 assert.match(read('src/renderer/renderer.js'), /terminalGraphics: Boolean\(imageAddon \|\| sixelImageAddon\)/);
 assert.match(pluginTypes, /onReady:/);
 assert.match(pluginTypes, /registerCommand:/);
+assert.match(pluginTypes, /minimize: \(\) => void/);
+assert.match(pluginTypes, /restore: \(\) => void/);
+assert.match(pluginTypes, /onVisibilityChange:/);
 assert.match(pluginTypes, /plugin-run/);
 assert.match(read('src/renderer/renderer.js'), /normalizePluginCommandOwner/);
 assert.match(read('src/renderer/renderer.js'), /resolvePluginCommand/);
@@ -2365,6 +2404,7 @@ assert.match(renderer, /terminalKittyDiagnosticPayload = false;[\s\S]*?terminalS
 assert.match(renderer, /function resetTerminalImageAddons\(\) \{[\s\S]*?imageAddon\?\.reset\?\.\(\);[\s\S]*?sixelImageAddon\?\.reset\?\.\(\)/);
 assert.doesNotMatch(read('src/renderer/index.html'), /id="drag-region" data-tauri-drag-region/);
 assert.match(read('src/renderer/styles.css'), /\.resize-edge-top \{[\s\S]*?height: 10px;[\s\S]*?z-index: 10003;/);
+assert.match(read('src/renderer/styles.css'), /\.fpasoterm-plugin-element-overlay\[hidden\]\s*\{\s*display: none;/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
 assert.match(renderer, /pluginMenuSection\.hidden = false/);

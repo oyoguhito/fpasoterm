@@ -20,6 +20,10 @@
             <button id="terminal-graphics-zoom-100" type="button">100%</button>
           </div>
         </div>
+        <div id="plugin-panels" hidden>
+          <button id="plugin-panels-toggle" type="button" aria-label="Show plugin panels" aria-expanded="false">Panels</button>
+          <div id="plugin-panels-items" role="menu" aria-label="Plugin panels" hidden></div>
+        </div>
         <div id="window-menu">
           <span id="terminal-log-status" hidden aria-live="polite">Logging</span>
           <span id="screen-video-status" hidden aria-live="polite">Recording</span>
@@ -50,13 +54,13 @@
                 <button id="diagnostics-log" type="button" role="menuitem" aria-label="Show runtime diagnostics log">Diagnostics Log</button>
                 <button id="font-glyph-test" type="button" role="menuitem" aria-label="Show font and glyph diagnostics">Font / Glyph Test</button>
                 <button id="terminal-capability-test" type="button" role="menuitem" aria-label="Show terminal capability diagnostics">Capability Test</button>
+                <button id="terminal-copy-last-osc52" type="button" role="menuitem" aria-label="Copy the latest trusted terminal OSC 52 text to the host clipboard" disabled>Copy Last OSC 52</button>
                 <button id="terminal-kill" type="button" role="menuitem" aria-label="Force-stop the current terminal process" aria-keyshortcuts="Control+Shift+K">Kill (k)</button>
                 <button id="terminal-reset" type="button" role="menuitem" aria-label="Clear the screen, reset terminal display state, and redraw the shell prompt" aria-keyshortcuts="Control+Shift+0">Clear + Display Reset (0)</button>
               </div>
             </div>
             <button id="terminal-copy" type="button" role="menuitem" aria-label="Copy selected text" aria-keyshortcuts="Control+Shift+C">Copy (c)</button>
             <button id="terminal-paste" type="button" role="menuitem" aria-label="Paste clipboard text" aria-keyshortcuts="Control+Shift+V">Paste (v)</button>
-            <button id="terminal-copy-last-osc52" type="button" role="menuitem" aria-label="Copy the latest trusted terminal OSC 52 text to the host clipboard" disabled>Copy Last OSC 52</button>
             <div id="plugin-menu-section" class="window-menu-submenu" data-menu-submenu="plugins">
               <button id="plugin-menu-toggle" class="window-menu-submenu-toggle" type="button" role="menuitem" aria-haspopup="menu" aria-controls="plugin-command-items" aria-expanded="false">Plugins</button>
               <div id="plugin-command-items" class="window-menu-submenu-items" role="menu" hidden>

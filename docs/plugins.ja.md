@@ -116,7 +116,7 @@ fpasoterm --plugin-disable-all
 ```
 
 `--plugin-list`（`--plugins-list`もalias）はactiveな `User/plugins` directoryだけを対象にする **local list** です。GitHubや公開port catalogへの問い合わせは行いません。remote catalogは `--plugin-search [query]` を使用してください。検出した fileと宣言されたversion、宣言済みTCP bridge target（あれば）、および `enabled` を表示します。`--plugin-enable` と `--plugin-disable` は、既存の `--enable-plugin` と `--disable-plugin` の alias です。
-`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、宣言済みTCP bridge target（あれば）、load status、renderer URL を表示します。localの`--plugin-*` selectorでは、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。たとえば`welcome-banner`や`appearance/teal`を指定できます。`.js`と`.ts`の両方が一致する場合はextensionまたはより具体的なpathを指定してください。
+`--plugin-info <file>` は window を起動せずに、source path、有効状態、宣言version、description、宣言済みTCP bridge target（あれば）、load status、renderer URL を表示します。localの`--plugin-*` selectorでは、`plugins/` prefixと`.js`/`.ts` suffixを省略できます。たとえば`welcome-banner`や`appearance/teal`を指定できます。`.js`と`.ts`の両方が一致する場合はextensionまたはより具体的なpathを指定してください。導入済みのRDP/noVNC bridgeでは、`--plugin-tcp-target tcp://<host>:port`（noVNCは`tls://`も可）を含む、そのままcopyできる公式catalogからの再導入commandも表示します。既存fileを置き換える場合は`--enable --force`を使用します。
 `--plugin-uninstall <file>` は `User/plugins` のlocal plugin sourceを1件またはcomma区切りで削除し、生成済みcacheと同じ`plugins.enabled` entryも削除します。公開catalogには接続せず、曖昧なname、traversal、symlink化されたplugin fileはerrorにします。削除後は開いているfpasoterm windowを再起動してください。他のplugin変更optionとの同時指定はできません。
 `--plugin-enable-all` は検出済みの全 `.js` / `.ts` fileを有効化します。`User/plugins`にplugin sourceが無い場合は、空のlistを成功扱いにせずerrorを表示します。`--plugin-disable-all` は `plugins.enabled` だけを空にし、plugin sourceやcache fileは削除しません。
 
@@ -232,9 +232,12 @@ install 後の plugin では declaration file をローカルへコピーし、r
   visibleなClose buttonだけで閉じる。汎用browser APIではない。
 - `openElementOverlay({ title, width, height })`: navigation/network権限を持たない
   local DOM hostを開く。review済みのnoVNCのようなrenderer library向け。canvas surfaceと同様に
-  visibleなClose buttonだけがuserによる終了操作となる。返された`captureKeys(handler)`は
-  overlay表示中のkeyboard eventを取得する。plugin側で処理し、local fpasoterm shortcutへ
-  渡してはいけないeventだけ`true`を返す。不要になった時は戻り値のrelease functionを呼ぶ。
+  Escape、Tab、矢印キー、backdrop clickでは閉じない。visibleな**Minimize** buttonはlocal DOMと
+  remote sessionを維持したまま隠し、titlebarの**Panels** pickerから再表示・切替できる。
+  visibleな**Close** buttonだけが明示的な最終終了操作となる。返された`captureKeys(handler)`は
+  overlay表示中のkeyboard eventを取得する。最小化中はkeyboard captureを解放し、再表示時に
+  同じhandlerを戻す。plugin側で処理し、local fpasoterm shortcutへ渡してはいけないeventだけ
+  `true`を返す。不要になった時は戻り値のrelease functionを呼ぶ。
 - `openVncBridge({ target })`: 直接のuser操作と確認後、完全一致の
   `allowed-tcp-targets`へ一度だけloopback WebSocketを開く。
 - `openRdpBridge({ target })`: review済みRDP WebAssembly client用に、宣言済み接続先へ

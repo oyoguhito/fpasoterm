@@ -57,6 +57,9 @@ const terminalGraphicsZoomInButton = document.getElementById('terminal-graphics-
 const terminalGraphicsZoomPresets = document.getElementById('terminal-graphics-zoom-presets');
 const terminalGraphicsZoom50Button = document.getElementById('terminal-graphics-zoom-50');
 const terminalGraphicsZoom100Button = document.getElementById('terminal-graphics-zoom-100');
+const pluginPanelsElement = document.getElementById('plugin-panels');
+const pluginPanelsToggleButton = document.getElementById('plugin-panels-toggle');
+const pluginPanelsItems = document.getElementById('plugin-panels-items');
 const keybindingPrefixElement = document.getElementById('keybinding-prefix');
 const terminalLogStatusElement = document.getElementById('terminal-log-status');
 const screenVideoStatusElement = document.getElementById('screen-video-status');
@@ -150,6 +153,64 @@ let terminalKeyboardCopyMark = null;
 // is active. Register this before terminal/menu handlers so a WebView that
 // routes keys directly to a canvas still has one deterministic host path.
 let activePluginElementKeyCapture = null;
+// Element overlays remain mounted while minimized so long-running RDP/VNC
+// sessions keep their sockets, credentials, and remote desktop state.  The
+// titlebar's Panels picker is the durable way to restore or switch them.
+const pluginElementPanels = new Map();
+let nextPluginElementPanelId = 1;
+
+function setPluginPanelsOpen(open) {
+  if (!pluginPanelsToggleButton || !pluginPanelsItems) return;
+  const show = Boolean(open) && pluginElementPanels.size > 0;
+  pluginPanelsItems.hidden = !show;
+  pluginPanelsToggleButton.setAttribute('aria-expanded', show ? 'true' : 'false');
+}
+
+function refreshPluginPanels() {
+  if (!pluginPanelsElement || !pluginPanelsToggleButton || !pluginPanelsItems) return;
+  const panels = [...pluginElementPanels.values()];
+  pluginPanelsElement.hidden = panels.length === 0;
+  pluginPanelsToggleButton.textContent = `Panels (${panels.length})`;
+  pluginPanelsToggleButton.setAttribute('aria-label', `Show ${panels.length} plugin panel${panels.length === 1 ? '' : 's'}`);
+  if (panels.length === 0) {
+    setPluginPanelsOpen(false);
+    pluginPanelsItems.replaceChildren();
+    return;
+  }
+  const entries = panels.map((panel) => {
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.role = 'menuitem';
+    button.textContent = panel.minimized ? `${panel.title} (minimized)` : panel.title;
+    button.setAttribute('aria-label', panel.minimized ? `Restore ${panel.title}` : `Show ${panel.title}`);
+    button.addEventListener('click', () => {
+      for (const other of pluginElementPanels.values()) {
+        if (other !== panel) other.minimize();
+      }
+      panel.restore();
+      setPluginPanelsOpen(false);
+    });
+    return button;
+  });
+  pluginPanelsItems.replaceChildren(...entries);
+}
+
+function registerPluginElementPanel(panel) {
+  // A newly opened remote surface becomes the foreground panel. Retain older
+  // surfaces rather than stacking two full-window overlays on top of each
+  // other; the Panels picker restores either one without reconnecting.
+  for (const other of pluginElementPanels.values()) {
+    other.minimize();
+  }
+  pluginElementPanels.set(panel.id, panel);
+  refreshPluginPanels();
+}
+
+function unregisterPluginElementPanel(id) {
+  pluginElementPanels.delete(id);
+  refreshPluginPanels();
+}
+
 function dispatchPluginElementKeyCapture(event) {
   const capture = activePluginElementKeyCapture;
   if (!capture) return;
@@ -1005,13 +1066,10 @@ function appendDiagnosticLine(message) {
   if (diagnosticsPanelMode !== 'diagnostics') {
     return;
   }
-  showDiagnosticsTextArea();
-  setTerminalLogPickerVisible(false);
-  setDiagnosticsFilterVisible(true);
-  setDiagnosticsCopyVisible(true);
-  if (diagnosticsTitleElement) {
-    diagnosticsTitleElement.textContent = 'Diagnostics';
-  }
+  // The Diagnostics view already owns these controls.  Toggling `hidden` on
+  // the filter for every incoming line blurs it in WebView2, making a live
+  // diagnostics search impossible to type.  Visibility is established when
+  // the view is explicitly opened or switched, never by a background update.
   scheduleDiagnosticRender({ scrollToEnd: true });
   if (!diagnosticsPanelDismissed) {
     diagnosticsPanel.hidden = false;
@@ -2942,23 +3000,53 @@ function openPluginElementOverlay(options = {}) {
   const dialog = document.createElement('section');
   const header = document.createElement('header');
   const heading = document.createElement('h2');
+  const actions = document.createElement('div');
+  const minimizeButton = document.createElement('button');
   const closeButton = document.createElement('button');
   const content = document.createElement('div');
   const onClose = typeof resolved.onClose === 'function' ? resolved.onClose : null;
   let closed = false;
+  let minimized = false;
+  let capturedKeyHandler = null;
+  let capturedKeyToken = null;
+  const visibilityListeners = new Set();
+  const panelId = nextPluginElementPanelId++;
   const keyCaptureOwner = Symbol('plugin-element-key-capture');
-  const releaseKeyCapture = () => {
+  const releaseActiveKeyCapture = () => {
     if (activePluginElementKeyCapture?.owner === keyCaptureOwner) {
       activePluginElementKeyCapture = null;
     }
   };
+  const activateKeyCapture = () => {
+    if (closed || minimized || !capturedKeyHandler) return;
+    activePluginElementKeyCapture = {
+      owner: keyCaptureOwner,
+      handler: capturedKeyHandler,
+      capturedCodes: new Set(),
+    };
+  };
   const captureKeys = (handler) => {
+    releaseActiveKeyCapture();
     if (typeof handler !== 'function') {
-      releaseKeyCapture();
+      capturedKeyHandler = null;
+      capturedKeyToken = null;
       return () => {};
     }
-    activePluginElementKeyCapture = { owner: keyCaptureOwner, handler, capturedCodes: new Set() };
-    return releaseKeyCapture;
+    const token = Symbol('plugin-element-key-registration');
+    capturedKeyHandler = handler;
+    capturedKeyToken = token;
+    activateKeyCapture();
+    return () => {
+      if (capturedKeyToken !== token) return;
+      releaseActiveKeyCapture();
+      capturedKeyHandler = null;
+      capturedKeyToken = null;
+    };
+  };
+  const notifyVisibility = (visible) => {
+    for (const listener of visibilityListeners) {
+      try { listener(visible); } catch (error) { recordPluginActivity(`plugin overlay visibility callback failed: ${error}`); }
+    }
   };
   overlay.className = 'fpasoterm-plugin-element-overlay';
   dialog.className = 'fpasoterm-plugin-element-dialog';
@@ -2967,35 +3055,92 @@ function openPluginElementOverlay(options = {}) {
   dialog.setAttribute('aria-modal', 'true');
   dialog.setAttribute('aria-label', title);
   heading.textContent = title;
+  minimizeButton.type = 'button';
+  minimizeButton.textContent = 'Minimize';
   closeButton.type = 'button';
   closeButton.textContent = 'Close';
   // A remote canvas or DOM renderer must retain its Tab sequence. The title
-  // bar Close control remains clickable, but is not a Tab destination.
+  // bar controls remain clickable, but are not Tab destinations.
+  minimizeButton.tabIndex = -1;
   closeButton.tabIndex = -1;
   content.className = 'fpasoterm-plugin-element-content';
   content.tabIndex = 0;
   content.style.height = `${size(resolved.height, 600)}px`;
+  const minimize = () => {
+    if (closed || minimized) return;
+    minimized = true;
+    // Do not let an invisible desktop keep receiving keyboard shortcuts.
+    // Keep the registered handler, however, so restore is seamless.
+    releaseActiveKeyCapture();
+    overlay.hidden = true;
+    notifyVisibility(false);
+    refreshPluginPanels();
+    focusTerminalInput();
+  };
+  const restore = () => {
+    if (closed) return;
+    minimized = false;
+    overlay.hidden = false;
+    activateKeyCapture();
+    notifyVisibility(true);
+    refreshPluginPanels();
+    content.focus({ preventScroll: true });
+  };
+  const onVisibilityChange = (listener) => {
+    if (typeof listener !== 'function') return () => {};
+    visibilityListeners.add(listener);
+    queueMicrotask(() => {
+      if (!closed && visibilityListeners.has(listener)) {
+        try { listener(!minimized); } catch (error) { recordPluginActivity(`plugin overlay visibility callback failed: ${error}`); }
+      }
+    });
+    return () => visibilityListeners.delete(listener);
+  };
   const close = () => {
     if (closed) return;
     closed = true;
-    releaseKeyCapture();
+    releaseActiveKeyCapture();
+    capturedKeyHandler = null;
+    capturedKeyToken = null;
+    notifyVisibility(false);
+    visibilityListeners.clear();
+    unregisterPluginElementPanel(panelId);
     if (onClose) {
       try { onClose(); } catch (error) { recordPluginActivity(`plugin overlay close callback failed: ${error}`); }
     }
     overlay.remove();
     term.focus();
   };
+  const panel = Object.freeze({
+    id: panelId,
+    title,
+    get minimized() { return minimized; },
+    minimize,
+    restore,
+  });
+  minimizeButton.addEventListener('click', minimize);
   closeButton.addEventListener('click', close);
   // Remote plugins own their keyboard input while this surface is focused.
   // Do not turn Escape, Tab, arrows, or a click on the surrounding dimmer
   // into a host-side close/focus action. The explicit Close button is the
   // sole way this overlay is dismissed.
-  header.append(heading, closeButton);
+  actions.append(minimizeButton, closeButton);
+  header.append(heading, actions);
   dialog.append(header, content);
   overlay.append(dialog);
   document.body.append(overlay);
+  registerPluginElementPanel(panel);
   content.focus();
-  return Object.freeze({ element: content, close, focus: () => content.focus(), captureKeys });
+  return Object.freeze({
+    element: content,
+    close,
+    minimize,
+    restore,
+    focus: restore,
+    isMinimized: () => minimized,
+    onVisibilityChange,
+    captureKeys,
+  });
 }
 
 function pluginModalPrompt({ title, message, inputType = null, approve = 'Continue', cancel = 'Cancel', scope = '' }) {
@@ -6246,6 +6391,10 @@ pluginMenuToggleButton.addEventListener('click', () => {
   setWindowMenuSubmenuOpen('plugins', pluginCommandItems.hidden);
 });
 
+pluginPanelsToggleButton?.addEventListener('click', () => {
+  setPluginPanelsOpen(pluginPanelsItems?.hidden !== false);
+});
+
 // Displays public port metadata without installing or enabling unreviewed code.
 pluginCatalogButton.addEventListener('click', () => {
   window.fpasoterm.getPluginCatalog().then((catalog) => {
@@ -6710,6 +6859,9 @@ diagnosticsPanel.addEventListener('keydown', (event) => {
 document.addEventListener('pointerdown', (event) => {
   if (windowMenu && !windowMenuItems.hidden && !windowMenu.contains(event.target)) {
     setWindowMenuOpen(false);
+  }
+  if (pluginPanelsElement && pluginPanelsItems && !pluginPanelsItems.hidden && !pluginPanelsElement.contains(event.target)) {
+    setPluginPanelsOpen(false);
   }
   if (!terminalGraphicsZoomPresets.hidden && !terminalGraphicsZoomElement.contains(event.target)) {
     terminalGraphicsZoomPresets.hidden = true;
