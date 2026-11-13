@@ -708,6 +708,29 @@ assert.match(pluginInfoResult.stdout, /Description: Test plugin/);
 assert.match(pluginInfoResult.stdout, /TCP target: tcp:\/\/192\.0\.2\.25:3389/);
 assert.match(pluginInfoResult.stdout, /Installation: already installed in User\/plugins/);
 
+fs.mkdirSync(path.join(cliPluginsDir, 'integration'), { recursive: true });
+fs.writeFileSync(path.join(cliPluginsDir, 'integration', 'rdp-local-bridge.js'), [
+  '// @fpasoterm-plugin version: 0.2.0',
+  '// @fpasoterm-plugin description: RDP local bridge',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.25:3389',
+  '',
+].join('\n'));
+fs.writeFileSync(path.join(cliPluginsDir, 'integration', 'novnc-local-bridge.js'), [
+  '// @fpasoterm-plugin version: 0.2.0',
+  '// @fpasoterm-plugin description: noVNC local bridge',
+  '// @fpasoterm-plugin allowed-tcp-targets: tcp://192.0.2.10:5900',
+  '',
+].join('\n'));
+const rdpPluginInfoResult = runCli('--plugin-info', 'integration/rdp-local-bridge');
+assert.equal(rdpPluginInfoResult.status, 0, rdpPluginInfoResult.stderr);
+assert.match(rdpPluginInfoResult.stdout, /--plugin-install integration\/rdp-local-bridge --plugin-tcp-target tcp:\/\/\<host\>:3389 --enable --force/);
+assert.match(rdpPluginInfoResult.stdout, /trusted RDP host explicitly/);
+const novncPluginInfoResult = runCli('--plugin-info', 'integration/novnc-local-bridge');
+assert.equal(novncPluginInfoResult.status, 0, novncPluginInfoResult.stderr);
+assert.match(novncPluginInfoResult.stdout, /--plugin-install integration\/novnc-local-bridge --plugin-tcp-target tcp:\/\/\<host\>:5900 --enable --force/);
+assert.match(novncPluginInfoResult.stdout, /--plugin-tcp-target tls:\/\/\<host\>:5900 --enable --force/);
+fs.rmSync(path.join(cliPluginsDir, 'integration'), { recursive: true, force: true });
+
 const localReviewRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-review-'));
 const localReviewPort = path.join(localReviewRoot, 'ports', 'integration', 'review-target');
 fs.mkdirSync(localReviewPort, { recursive: true });

@@ -160,6 +160,10 @@ version, description, declared TCP bridge target (when any), load status, and re
 `--plugin-*` selectors, the leading `plugins/` and the `.js`/`.ts` suffix are
 optional: use `welcome-banner` or `appearance/teal`. If both `.js` and `.ts`
 would match, provide an extension or a more specific path.
+For installed RDP and noVNC bridges, it also prints copyable official-catalog
+reinstall commands with `--plugin-tcp-target tcp://<host>:port` (and the
+noVNC `tls://` alternative), plus `--enable --force` when replacing the
+current file.
 `--plugin-uninstall <file>` removes one or comma-separated local plugin source
 files from `User/plugins`, removes their generated cache files, and removes the
 same entries from `plugins.enabled`. It never contacts the public catalog and
