@@ -725,6 +725,14 @@ body {
   background: rgba(0, 0, 0, .58);
 }
 
+/* The overlay's explicit display:grid rule overrides the browser's generic
+ * [hidden] rule. A minimized remote session must leave the full-screen
+ * hit-area entirely, otherwise it keeps intercepting the terminal, Catalog,
+ * and titlebar controls while looking unchanged. */
+.fpasoterm-plugin-element-overlay[hidden] {
+  display: none;
+}
+
 .fpasoterm-plugin-element-dialog,
 .fpasoterm-plugin-prompt-dialog {
   max-width: calc(100vw - 32px);

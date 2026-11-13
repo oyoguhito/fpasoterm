@@ -2381,6 +2381,7 @@ assert.match(renderer, /terminalKittyDiagnosticPayload = false;[\s\S]*?terminalS
 assert.match(renderer, /function resetTerminalImageAddons\(\) \{[\s\S]*?imageAddon\?\.reset\?\.\(\);[\s\S]*?sixelImageAddon\?\.reset\?\.\(\)/);
 assert.doesNotMatch(read('src/renderer/index.html'), /id="drag-region" data-tauri-drag-region/);
 assert.match(read('src/renderer/styles.css'), /\.resize-edge-top \{[\s\S]*?height: 10px;[\s\S]*?z-index: 10003;/);
+assert.match(read('src/renderer/styles.css'), /\.fpasoterm-plugin-element-overlay\[hidden\]\s*\{\s*display: none;/);
 assert.match(renderer, /plugin command registered id=/);
 assert.match(renderer, /function updatePluginMenuVisibility\(\)/);
 assert.match(renderer, /pluginMenuSection\.hidden = false/);
