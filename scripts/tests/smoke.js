@@ -977,7 +977,9 @@ assert.match(read('src/renderer/renderer.js'), /onVisibilityChange/);
 assert.match(read('src/renderer/renderer.js'), /releaseActiveKeyCapture\(\);\s*overlay\.hidden = true/);
 assert.match(read('src/renderer/renderer.js'), /function isTextEntryControl\(element\) \{\s*const terminalTextarea = terminalElement\.querySelector\('\.xterm-helper-textarea'\)/);
 assert.match(read('src/renderer/renderer.js'), /if \(isTextEntryControl\(event\.target\)\) \{\s*return;/);
-assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{[\s\S]*?if \(isTextEntryControl\(event\.target\)\)/);
+assert.match(read('src/renderer/renderer.js'), /const isInterrupt =\s*event\.ctrlKey &&\s*!event\.shiftKey[\s\S]*?sendTerminalInput\('\\x03', 'interrupt fallback'\);[\s\S]*?\}, true\);/);
+assert.match(read('src/renderer/renderer.js'), /const isPaste = matchesKeybinding\(event, 'paste'\);[\s\S]*?terminalPasteFallbackTimer = setTimeout[\s\S]*?\}, 120\);\s*\}, true\);/);
+assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{\s*event\.preventDefault\(\);\s*\/\/[^\n]*\n[\s\S]*?event\.stopImmediatePropagation\(\);[\s\S]*?if \(isTextEntryControl\(event\.target\)\)[\s\S]*?\}, true\);\s*\n\s*window\.addEventListener\('copy'/);
 assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
 assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*diagnosticsCopyButton,\s*pluginCatalogSearchElement,\s*pluginCatalogUpdatesOnlyButton,\s*terminalLogShowSelectedButton/);
 

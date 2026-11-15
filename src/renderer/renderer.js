@@ -1944,6 +1944,10 @@ function installTerminalPasteHandlers() {
     });
   });
 
+  // xterm can consume its target-phase key event before a bubbling window
+  // listener sees it. Capture Copy at the window just like Paste, so the
+  // configured Ctrl+Shift+C shortcut reaches the same clipboard path as the
+  // visible menu action on every WebView platform.
   window.addEventListener('keydown', (event) => {
     const isKeyboardCopyMark =
       event.ctrlKey &&
@@ -1977,6 +1981,10 @@ function installTerminalPasteHandlers() {
     }
     if (isCopyShortcut && selectedClipboardText()) {
       event.preventDefault();
+      // The clipboard write is started directly from this trusted key gesture.
+      // Do not let xterm subsequently consume or forward Ctrl+Shift+C to the
+      // shell after the host copy has already been requested.
+      event.stopImmediatePropagation();
       copyTerminalSelection().catch((error) => {
         showDiagnostic(`terminal copy failed: ${error}`);
       });
@@ -2054,7 +2062,7 @@ function installTerminalPasteHandlers() {
     }
     // The capture handler schedules a fallback. Do not cancel the native paste
     // action here or ChromeOS cannot provide event.clipboardData to the terminal.
-  });
+  }, true);
 
   window.addEventListener('copy', (event) => {
     const text = selectedClipboardText();
