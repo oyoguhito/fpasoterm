@@ -68,7 +68,7 @@ type FpasotermPluginApi = {
     close: () => void;
     focus: () => void;
   };
-  /** Opens a local DOM host. It does not provide navigation or network access; its Close button is explicit. */
+  /** Opens a local DOM host. It does not provide navigation or network access. */
   openElementOverlay: (options?: {
     title?: string;
     width?: number;
@@ -77,8 +77,17 @@ type FpasotermPluginApi = {
     onClose?: () => void;
   }) => {
     element: HTMLDivElement;
+    /** Permanently closes the overlay and invokes onClose. */
     close: () => void;
+    /** Hides the overlay without ending its session; the titlebar Panels picker can restore it. */
+    minimize: () => void;
+    /** Shows a minimized overlay and restores its retained keyboard capture. */
+    restore: () => void;
+    /** Restores and focuses the overlay. */
     focus: () => void;
+    isMinimized: () => boolean;
+    /** Receives false while minimized and true after restoration. */
+    onVisibilityChange: (listener: (visible: boolean) => void) => () => void;
     /**
      * Claims keyboard events while this overlay is open. Return true after
      * handling an event to prevent fpasoterm's local shortcuts from receiving

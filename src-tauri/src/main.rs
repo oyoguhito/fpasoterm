@@ -7375,7 +7375,7 @@ fn append_diagnostic(app: &AppHandle, message: &str) {
         }
     }
     if console_diagnostics_enabled() {
-        eprintln!("{message}");
+        write_console_diagnostic(&format!("{message}\n"));
     }
 
     let _ = app.emit(
@@ -7391,6 +7391,23 @@ fn append_diagnostic(app: &AppHandle, message: &str) {
 fn console_diagnostics_enabled() -> bool {
     env::var("FPASOTERM_CONSOLE_DIAGNOSTICS").as_deref() == Ok("1")
         || cli_has_flag(&["--console-diagnostics", "-C"])
+}
+
+// Mirrors live diagnostics to the invoking shell.  A Windows release binary
+// uses the GUI subsystem, so Rust's inherited stderr is not connected to the
+// parent PowerShell console.  Reuse the console-aware writer that CLI commands
+// use there; Unix can retain ordinary stderr semantics.
+fn write_console_diagnostic(text: &str) {
+    #[cfg(windows)]
+    {
+        print_cli_text_windows(text);
+    }
+    #[cfg(not(windows))]
+    {
+        let mut stderr = std::io::stderr().lock();
+        let _ = stderr.write_all(text.as_bytes());
+        let _ = stderr.flush();
+    }
 }
 
 // Produces a UTC timestamp without pulling in an additional Rust time crate.
@@ -8034,10 +8051,10 @@ fn terminal_start(
                         diagnostic_reads += 1;
                         diagnostic_bytes += read as u64;
                         if diagnostic_started.elapsed() >= Duration::from_secs(1) {
-                            eprintln!(
-                                "terminal_read reads={diagnostic_reads} bytes={diagnostic_bytes} interval_ms={}",
+                            write_console_diagnostic(&format!(
+                                "terminal_read reads={diagnostic_reads} bytes={diagnostic_bytes} interval_ms={}\n",
                                 diagnostic_started.elapsed().as_millis()
-                            );
+                            ));
                             diagnostic_reads = 0;
                             diagnostic_bytes = 0;
                             diagnostic_started = Instant::now();
@@ -8293,8 +8310,8 @@ fn write_terminal_input(
     let terminal = terminal_state.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
         let mut writer = session.writer.lock().map_err(|error| error.to_string())?;
-        if env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1") {
-            eprintln!("terminal_write bytes={}", data.len());
+        if console_diagnostics_enabled() && env::var("FPASOTERM_DEBUG_KEYS").as_deref() == Ok("1") {
+            write_console_diagnostic(&format!("terminal_write bytes={}\n", data.len()));
         }
         writer
             .write_all(data.as_bytes())
@@ -8892,10 +8909,10 @@ fn terminal_resize(state: State<AppState>, size: TerminalSize) -> Result<(), Str
     let terminal = state.terminal.lock().map_err(|error| error.to_string())?;
     if let Some(session) = terminal.as_ref() {
         if console_diagnostics_enabled() {
-            eprintln!(
-                "terminal_resize cols={} rows={} pixel_width={} pixel_height={}",
+            write_console_diagnostic(&format!(
+                "terminal_resize cols={} rows={} pixel_width={} pixel_height={}\n",
                 size.cols, size.rows, size.pixel_width, size.pixel_height
-            );
+            ));
         }
         session
             .master
@@ -11767,12 +11784,12 @@ fn plugin_rdp_bridge_open(request: PluginTcpBridgeRequest) -> Result<String, Str
 fn config_get() -> RuntimeConfig {
     let config = runtime_config();
     if console_diagnostics_enabled() {
-        eprintln!(
-            "config_get title={} titlebarColor={} shell={}",
+        write_console_diagnostic(&format!(
+            "config_get title={} titlebarColor={} shell={}\n",
             config.config.window.title,
             config.config.window.titlebar_color,
             configured_shell(&config.config).unwrap_or_default()
-        );
+        ));
     }
     config
 }
