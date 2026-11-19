@@ -341,7 +341,17 @@
       const expected = pixelCount * (command.f === 32 ? 4 : 3);
       if (bytes.byteLength !== expected) throw new Error('raw pixel payload has an invalid length');
       if (command.f === 32) {
-        return createImageBitmap(new ImageData(new Uint8ClampedArray(bytes), width, height));
+        // Keep direct RGBA frames as ImageData instead of round-tripping them
+        // through createImageBitmap.  WebView2 can successfully construct the
+        // ImageBitmap yet paint it as an opaque black canvas on Windows.  A
+        // canvas putImageData call is the native raw-pixel presentation path
+        // and is also independent of the browser's image decoder.
+        return {
+          width,
+          height,
+          imageData: new ImageData(new Uint8ClampedArray(bytes), width, height),
+          close() {},
+        };
       }
       const rgba = new Uint8ClampedArray(pixelCount * 4);
       for (let source = 0, target = 0; source < bytes.length; source += 3, target += 4) {
@@ -350,7 +360,12 @@
         rgba[target + 2] = bytes[source + 2];
         rgba[target + 3] = 255;
       }
-      return createImageBitmap(new ImageData(rgba, width, height));
+      return {
+        width,
+        height,
+        imageData: new ImageData(rgba, width, height),
+        close() {},
+      };
     }
 
     _storeImage(id, bitmap) {
@@ -437,7 +452,8 @@
       placement.canvas.height = bitmap.height;
       const context = placement.canvas.getContext('2d', { alpha: true });
       context?.clearRect(0, 0, bitmap.width, bitmap.height);
-      context?.drawImage(bitmap, 0, 0);
+      if (bitmap.imageData) context?.putImageData(bitmap.imageData, 0, 0);
+      else context?.drawImage(bitmap, 0, 0);
     }
 
     _renderPlacements() {

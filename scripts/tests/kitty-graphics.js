@@ -90,6 +90,40 @@ function testFrameAnchorIsCapturedBeforeAsyncDecode() {
 
 testFrameAnchorIsCapturedBeforeAsyncDecode();
 
+async function testRawRgbaBypassesImageBitmapDecode() {
+  const originalImageData = global.ImageData;
+  const originalCreateImageBitmap = global.createImageBitmap;
+  let imageBitmapCalls = 0;
+  class TestImageData {
+    constructor(data, width, height) {
+      this.data = data;
+      this.width = width;
+      this.height = height;
+    }
+  }
+  global.ImageData = TestImageData;
+  global.createImageBitmap = async () => {
+    imageBitmapCalls += 1;
+    throw new Error('raw pixels must not use createImageBitmap');
+  };
+  try {
+    const addon = new KittyGraphicsAddon();
+    const image = await addon._createBitmap(
+      { f: 32, s: 1, v: 1 },
+      Uint8Array.from([1, 2, 3, 4]),
+    );
+    assert.equal(image.width, 1);
+    assert.equal(image.height, 1);
+    assert.deepEqual(Array.from(image.imageData.data), [1, 2, 3, 4]);
+    assert.equal(imageBitmapCalls, 0);
+  } finally {
+    if (originalImageData === undefined) delete global.ImageData;
+    else global.ImageData = originalImageData;
+    if (originalCreateImageBitmap === undefined) delete global.createImageBitmap;
+    else global.createImageBitmap = originalCreateImageBitmap;
+  }
+}
+
 function testActiveChangeIsDeduplicated() {
   const states = [];
   const addon = new KittyGraphicsAddon({ onActiveChange: (active) => states.push(active) });
@@ -339,6 +373,7 @@ async function testLatestFrameWins() {
 }
 
 Promise.all([
+  testRawRgbaBypassesImageBitmapDecode(),
   testLatestFrameWins(),
   testResetInvalidatesInFlightDecode(),
   testDeleteInvalidatesInFlightDecode(),
