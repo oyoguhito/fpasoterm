@@ -90,6 +90,21 @@ function testFrameAnchorIsCapturedBeforeAsyncDecode() {
 
 testFrameAnchorIsCapturedBeforeAsyncDecode();
 
+function testRawTransferReceiptIsDiagnosed() {
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon._receive(
+    { a: 'T', f: 32, s: 2, v: 1, c: 10, r: 5, i: 7, m: 1 },
+    'AAAA',
+    'T',
+  );
+  assert.deepEqual(diagnostics, [
+    'Kitty graphics transfer received id=7 action=T format=32 2x1 cells=10x5',
+  ]);
+}
+
+testRawTransferReceiptIsDiagnosed();
+
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
   const originalCreateImageBitmap = global.createImageBitmap;

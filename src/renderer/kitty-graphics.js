@@ -216,6 +216,15 @@
     }
 
     _receive(command, payload, action) {
+      // Only the first chunk carries a format field.  Record that boundary so
+      // diagnostics can distinguish an application that never emitted a Kitty
+      // frame from one whose subsequent decode or placement failed.
+      if (command.f !== undefined) {
+        const dimensions = command.s && command.v ? ` ${command.s}x${command.v}` : '';
+        this.onDiagnostic(
+          `Kitty graphics transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'}`,
+        );
+      }
       if (command.m === 1) {
         if (!this.chunks) this.chunks = { command: { ...command }, payload: '' };
         this.chunks.payload += payload;

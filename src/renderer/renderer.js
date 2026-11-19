@@ -146,6 +146,7 @@ let diagnosticRenderPending = false;
 let diagnosticRenderScrollToEnd = false;
 let diagnosticsPaused = false;
 let diagnosticsPausedNewLines = 0;
+let diagnosticsPausedSnapshot = null;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -1012,18 +1013,22 @@ function installCompositionObserver() {
 // case-insensitive substring. This deliberately behaves like a lightweight
 // grep: punctuation in a query has no special meaning.
 function filteredDiagnosticLines() {
-  return diagnosticsFilterQuery
-    ? diagnosticLines.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
+  const source = diagnosticsPaused && diagnosticsPausedSnapshot
+    ? diagnosticsPausedSnapshot
     : diagnosticLines;
+  return diagnosticsFilterQuery
+    ? source.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
+    : source;
 }
 
 function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
   if (!diagnosticsFilterStatusElement) {
     return;
   }
-  const count = diagnosticsFilterQuery
-    ? `${lines.length}/${diagnosticLines.length}`
-    : `${diagnosticLines.length}`;
+  const sourceCount = diagnosticsPaused && diagnosticsPausedSnapshot
+    ? diagnosticsPausedSnapshot.length
+    : diagnosticLines.length;
+  const count = diagnosticsFilterQuery ? `${lines.length}/${sourceCount}` : `${sourceCount}`;
   const pause = diagnosticsPaused
     ? `Paused${diagnosticsPausedNewLines > 0 ? ` +${diagnosticsPausedNewLines}` : ''}`
     : '';
@@ -1076,9 +1081,14 @@ function applyDiagnosticsFilter() {
 // This keeps keyboard diagnostics available for later inspection while the
 // displayed snapshot remains stable enough to search and copy.
 function setDiagnosticsPaused(paused) {
-  diagnosticsPaused = Boolean(paused);
+  const nextPaused = Boolean(paused);
+  if (nextPaused && !diagnosticsPaused) {
+    diagnosticsPausedSnapshot = diagnosticLines.slice();
+  }
+  diagnosticsPaused = nextPaused;
   if (!diagnosticsPaused) {
     diagnosticsPausedNewLines = 0;
+    diagnosticsPausedSnapshot = null;
   }
   if (diagnosticsPauseButton) {
     diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
@@ -1094,6 +1104,9 @@ function setDiagnosticsPaused(paused) {
 
 function clearDiagnosticsView() {
   diagnosticLines.length = 0;
+  if (diagnosticsPausedSnapshot) {
+    diagnosticsPausedSnapshot.length = 0;
+  }
   diagnosticsPausedNewLines = 0;
   diagnosticRenderScrollToEnd = false;
   renderDiagnosticLines();

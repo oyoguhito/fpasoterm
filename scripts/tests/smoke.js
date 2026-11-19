@@ -2556,6 +2556,8 @@ assert.match(renderer, /const diagnosticsClearButton = document\.getElementById\
 assert.match(renderer, /function setDiagnosticsPaused\(paused\)/);
 assert.match(renderer, /function clearDiagnosticsView\(\)/);
 assert.match(renderer, /Paused\$\{diagnosticsPausedNewLines/);
+assert.match(renderer, /let diagnosticsPausedSnapshot = null/);
+assert.match(renderer, /diagnosticsPausedSnapshot = diagnosticLines\.slice\(\)/);
 assert.match(renderer, /function showDiagnosticsPanel\(\)/);
 assert.match(renderer, /function closeDiagnosticsPanel\(\)/);
 assert.match(renderer, /if \(!diagnosticsPanelDismissed\)/);
