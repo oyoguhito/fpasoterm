@@ -15,6 +15,8 @@ const terminalLogSearchStatusElement = document.getElementById('terminal-log-sea
 const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
 const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
 const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
+const diagnosticsPauseButton = document.getElementById('diagnostics-pause');
+const diagnosticsClearButton = document.getElementById('diagnostics-clear');
 const diagnosticsCopyButton = document.getElementById('diagnostics-copy');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
 const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
@@ -142,6 +144,8 @@ const MAX_DIAGNOSTIC_LINES = 1000;
 let diagnosticsFilterQuery = '';
 let diagnosticRenderPending = false;
 let diagnosticRenderScrollToEnd = false;
+let diagnosticsPaused = false;
+let diagnosticsPausedNewLines = 0;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -1004,23 +1008,36 @@ function installCompositionObserver() {
   }, true);
 }
 
-// Renders the diagnostics history, optionally narrowed by a literal
+// Returns the diagnostics history, optionally narrowed by a literal
 // case-insensitive substring. This deliberately behaves like a lightweight
 // grep: punctuation in a query has no special meaning.
-function renderDiagnosticLines({ scrollToEnd = false } = {}) {
-  const lines = diagnosticsFilterQuery
+function filteredDiagnosticLines() {
+  return diagnosticsFilterQuery
     ? diagnosticLines.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
     : diagnosticLines;
+}
+
+function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
+  if (!diagnosticsFilterStatusElement) {
+    return;
+  }
+  const count = diagnosticsFilterQuery
+    ? `${lines.length}/${diagnosticLines.length}`
+    : `${diagnosticLines.length}`;
+  const pause = diagnosticsPaused
+    ? `Paused${diagnosticsPausedNewLines > 0 ? ` +${diagnosticsPausedNewLines}` : ''}`
+    : '';
+  diagnosticsFilterStatusElement.textContent = [pause, count].filter(Boolean).join(' · ');
+}
+
+function renderDiagnosticLines({ scrollToEnd = false } = {}) {
+  const lines = filteredDiagnosticLines();
   diagnosticsElement.value = lines.length > 0
     ? lines.join('\n')
     : diagnosticsFilterQuery
       ? '(No diagnostics match this filter.)'
       : '';
-  if (diagnosticsFilterStatusElement) {
-    diagnosticsFilterStatusElement.textContent = diagnosticsFilterQuery
-      ? `${lines.length}/${diagnosticLines.length}`
-      : `${diagnosticLines.length}`;
-  }
+  updateDiagnosticsFilterStatus(lines);
   if (scrollToEnd) {
     diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
   }
@@ -1039,6 +1056,10 @@ function scheduleDiagnosticRender({ scrollToEnd = false } = {}) {
     diagnosticRenderPending = false;
     const follow = diagnosticRenderScrollToEnd;
     diagnosticRenderScrollToEnd = false;
+    if (diagnosticsPaused) {
+      updateDiagnosticsFilterStatus();
+      return;
+    }
     renderDiagnosticLines({ scrollToEnd: follow });
   });
 }
@@ -1047,6 +1068,34 @@ function scheduleDiagnosticRender({ scrollToEnd = false } = {}) {
 // changes only the pending query; click Filter or press Enter to scan lines.
 function applyDiagnosticsFilter() {
   diagnosticsFilterQuery = String(diagnosticsFilterElement?.value || '').trim().toLocaleLowerCase();
+  renderDiagnosticLines();
+  diagnosticsElement.scrollTop = 0;
+}
+
+// Pause only the live view, not backend collection or the terminal itself.
+// This keeps keyboard diagnostics available for later inspection while the
+// displayed snapshot remains stable enough to search and copy.
+function setDiagnosticsPaused(paused) {
+  diagnosticsPaused = Boolean(paused);
+  if (!diagnosticsPaused) {
+    diagnosticsPausedNewLines = 0;
+  }
+  if (diagnosticsPauseButton) {
+    diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Resume' : 'Pause';
+    diagnosticsPauseButton.setAttribute(
+      'aria-label',
+      diagnosticsPaused ? 'Resume live diagnostics rendering' : 'Pause live diagnostics rendering',
+    );
+  }
+  diagnosticRenderScrollToEnd = false;
+  renderDiagnosticLines({ scrollToEnd: !diagnosticsPaused });
+}
+
+function clearDiagnosticsView() {
+  diagnosticLines.length = 0;
+  diagnosticsPausedNewLines = 0;
+  diagnosticRenderScrollToEnd = false;
   renderDiagnosticLines();
   diagnosticsElement.scrollTop = 0;
 }
@@ -1064,6 +1113,11 @@ function appendDiagnosticLine(message) {
     diagnosticLines.shift();
   }
   if (diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  if (diagnosticsPaused) {
+    diagnosticsPausedNewLines += 1;
+    updateDiagnosticsFilterStatus();
     return;
   }
   // The Diagnostics view already owns these controls.  Toggling `hidden` on
@@ -1090,6 +1144,7 @@ function showLiveDiagnosticsView() {
   setTerminalEncodingControlsVisible(false);
   showDiagnosticsTextArea();
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsLiveControlsVisible(true);
   setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
@@ -1113,6 +1168,7 @@ function closeDiagnosticsPanel() {
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   setDiagnosticsFilterVisible(false);
+  setDiagnosticsLiveControlsVisible(false);
   setDiagnosticsCopyVisible(false);
   setPluginCatalogSearchVisible(false);
   setScreenVideoPickerVisible(false);
@@ -1137,6 +1193,11 @@ function setDiagnosticsFilterVisible(visible) {
   if (diagnosticsFilterElement) diagnosticsFilterElement.hidden = !visible;
   if (diagnosticsFilterApplyButton) diagnosticsFilterApplyButton.hidden = !visible;
   if (diagnosticsFilterStatusElement) diagnosticsFilterStatusElement.hidden = !visible;
+}
+
+function setDiagnosticsLiveControlsVisible(visible) {
+  if (diagnosticsPauseButton) diagnosticsPauseButton.hidden = !visible;
+  if (diagnosticsClearButton) diagnosticsClearButton.hidden = !visible;
 }
 
 // Copies backend-retained diagnostics without selecting text in the panel or
@@ -3921,6 +3982,8 @@ function diagnosticsPanelFocusItems() {
     terminalLogSearchNextButton,
     diagnosticsFilterElement,
     diagnosticsFilterApplyButton,
+    diagnosticsPauseButton,
+    diagnosticsClearButton,
     diagnosticsCopyButton,
     pluginCatalogSearchElement,
     pluginCatalogUpdatesOnlyButton,
@@ -6502,6 +6565,18 @@ terminalLogSearchElement.addEventListener('input', () => {
 diagnosticsFilterApplyButton?.addEventListener('click', () => {
   if (diagnosticsPanelMode === 'diagnostics') {
     applyDiagnosticsFilter();
+  }
+});
+
+diagnosticsPauseButton?.addEventListener('click', () => {
+  if (diagnosticsPanelMode === 'diagnostics') {
+    setDiagnosticsPaused(!diagnosticsPaused);
+  }
+});
+
+diagnosticsClearButton?.addEventListener('click', () => {
+  if (diagnosticsPanelMode === 'diagnostics') {
+    clearDiagnosticsView();
   }
 });
 
