@@ -981,7 +981,7 @@ assert.match(read('src/renderer/renderer.js'), /const isInterrupt =\s*event\.ctr
 assert.match(read('src/renderer/renderer.js'), /const isPaste = matchesKeybinding\(event, 'paste'\);[\s\S]*?terminalPasteFallbackTimer = setTimeout[\s\S]*?\}, 120\);\s*\}, true\);/);
 assert.match(read('src/renderer/renderer.js'), /const isCopyShortcut = matchesKeybinding\(event, 'copy'\);\s*if \(isCopyShortcut && terminalKeyboardCopyMark\) \{[\s\S]*?if \(isCopyShortcut && selectedClipboardText\(\)\) \{\s*event\.preventDefault\(\);\s*\/\/[^\n]*\n[\s\S]*?event\.stopImmediatePropagation\(\);[\s\S]*?if \(isTextEntryControl\(event\.target\)\)[\s\S]*?\}, true\);\s*\n\s*window\.addEventListener\('copy'/);
 assert.match(read('src/renderer/renderer.js'), /Keep catalog and log search text fields free for ordinary query input/);
-assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*diagnosticsCopyButton,\s*pluginCatalogSearchElement,\s*pluginCatalogUpdatesOnlyButton,\s*terminalLogShowSelectedButton/);
+assert.match(read('src/renderer/renderer.js'), /terminalLogSearchNextButton,\s*diagnosticsFilterElement,\s*diagnosticsFilterApplyButton,\s*diagnosticsPauseButton,\s*diagnosticsClearButton,\s*diagnosticsCopyButton,\s*pluginCatalogSearchElement,\s*pluginCatalogUpdatesOnlyButton,\s*terminalLogShowSelectedButton/);
 
 const localPortsFixture = fs.mkdtempSync(path.join(os.tmpdir(), 'fpasoterm-plugin-ports-'));
 const localPortManifest = path.join(localPortsFixture, 'ports', 'productivity', 'clipboard-translate', 'port.toml');
