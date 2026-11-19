@@ -293,7 +293,12 @@
           : null;
         this._flushDeleteSnapshots(job.deleteThrough, command.i, placementId);
         this._respond(command, 'OK', true);
-        this.onDiagnostic(`Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height}`);
+        const paintPath = bitmap.imageData
+          ? 'raw-rgba-putImageData'
+          : 'image-bitmap-drawImage';
+        this.onDiagnostic(
+          `Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`,
+        );
       } catch (error) {
         if (job.generation !== this.generation) return;
         // Successful replacements flush the same snapshots after paint. A
@@ -451,9 +456,16 @@
       placement.canvas.width = bitmap.width;
       placement.canvas.height = bitmap.height;
       const context = placement.canvas.getContext('2d', { alpha: true });
-      context?.clearRect(0, 0, bitmap.width, bitmap.height);
-      if (bitmap.imageData) context?.putImageData(bitmap.imageData, 0, 0);
-      else context?.drawImage(bitmap, 0, 0);
+      if (!context) throw new Error('2D canvas context is unavailable');
+      context.clearRect(0, 0, bitmap.width, bitmap.height);
+      if (bitmap.imageData) {
+        if (typeof context.putImageData !== 'function') {
+          throw new Error('2D canvas putImageData is unavailable');
+        }
+        context.putImageData(bitmap.imageData, 0, 0);
+      } else {
+        context.drawImage(bitmap, 0, 0);
+      }
     }
 
     _renderPlacements() {

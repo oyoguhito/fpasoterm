@@ -124,6 +124,27 @@ async function testRawRgbaBypassesImageBitmapDecode() {
   }
 }
 
+function testRawRgbaPaintsViaPutImageData() {
+  const painted = [];
+  const addon = new KittyGraphicsAddon();
+  const imageData = { width: 1, height: 1, data: Uint8ClampedArray.from([1, 2, 3, 4]) };
+  addon.images.set(7, { width: 1, height: 1, imageData, close() {} });
+  const canvas = {
+    getContext: () => ({
+      clearRect: (...args) => painted.push(['clear', ...args]),
+      putImageData: (...args) => painted.push(['put', ...args]),
+      drawImage: () => { throw new Error('raw pixels must not use drawImage'); },
+    }),
+  };
+  addon._paintPlacement({ imageId: 7, canvas });
+  assert.deepEqual(painted, [
+    ['clear', 0, 0, 1, 1],
+    ['put', imageData, 0, 0],
+  ]);
+}
+
+testRawRgbaPaintsViaPutImageData();
+
 function testActiveChangeIsDeduplicated() {
   const states = [];
   const addon = new KittyGraphicsAddon({ onActiveChange: (active) => states.push(active) });

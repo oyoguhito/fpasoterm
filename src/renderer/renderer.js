@@ -2696,7 +2696,7 @@ function createTerminal() {
         onActiveChange: handleTerminalGraphicsActiveChange,
       });
       term.loadAddon(imageAddon);
-      showDiagnostic('experimental bounded Kitty graphics renderer enabled');
+      showDiagnostic('experimental bounded Kitty graphics renderer enabled (raw RGBA uses direct canvas)');
     } catch (error) {
       imageAddon = undefined;
       showDiagnostic(`Kitty graphics renderer unavailable: ${error?.message || error}`);
