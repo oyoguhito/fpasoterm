@@ -2766,6 +2766,7 @@ function createTerminal() {
           maxPlacements: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
         },
         onDiagnostic: (message) => showDebugDiagnostic(message),
+        onFrameDiagnostic: (message) => showDiagnostic(message),
         onErrorDiagnostic: (message) => showDiagnostic(message),
         onActiveChange: handleTerminalGraphicsActiveChange,
       });

@@ -125,7 +125,15 @@
       this.onErrorDiagnostic = typeof options.onErrorDiagnostic === 'function'
         ? options.onErrorDiagnostic
         : this.onDiagnostic;
+      // A complete browser frame can be too noisy for the ordinary live log,
+      // but the first one is the critical protocol boundary when diagnosing a
+      // black graphics pane. Keep it visible even when --debug-keys is off.
+      this.onFrameDiagnostic = typeof options.onFrameDiagnostic === 'function'
+        ? options.onFrameDiagnostic
+        : this.onDiagnostic;
       this.onActiveChange = typeof options.onActiveChange === 'function' ? options.onActiveChange : () => {};
+      this.firstTransferReported = false;
+      this.firstRenderReported = false;
       this.active = false;
       this.images = new Map();
       this.placements = new Map();
@@ -221,9 +229,13 @@
       // frame from one whose subsequent decode or placement failed.
       if (command.f !== undefined) {
         const dimensions = command.s && command.v ? ` ${command.s}x${command.v}` : '';
-        this.onDiagnostic(
-          `Kitty graphics transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'}`,
-        );
+        const message = `Kitty graphics transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'} compression=${command.o || 'none'}`;
+        if (!this.firstTransferReported) {
+          this.firstTransferReported = true;
+          this.onFrameDiagnostic(message);
+        } else {
+          this.onDiagnostic(message);
+        }
       }
       if (command.m === 1) {
         if (!this.chunks) this.chunks = { command: { ...command }, payload: '' };
@@ -305,9 +317,13 @@
         const paintPath = bitmap.imageData
           ? 'raw-rgba-putImageData'
           : 'image-bitmap-drawImage';
-        this.onDiagnostic(
-          `Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`,
-        );
+        const message = `Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
+        if (!this.firstRenderReported) {
+          this.firstRenderReported = true;
+          this.onFrameDiagnostic(message);
+        } else {
+          this.onDiagnostic(message);
+        }
       } catch (error) {
         if (job.generation !== this.generation) return;
         // Successful replacements flush the same snapshots after paint. A

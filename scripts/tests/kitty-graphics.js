@@ -99,11 +99,31 @@ function testRawTransferReceiptIsDiagnosed() {
     'T',
   );
   assert.deepEqual(diagnostics, [
-    'Kitty graphics transfer received id=7 action=T format=32 2x1 cells=10x5',
+    'Kitty graphics transfer received id=7 action=T format=32 2x1 cells=10x5 compression=none',
   ]);
 }
 
 testRawTransferReceiptIsDiagnosed();
+
+function testFirstCompressedTransferUsesVisibleDiagnostic() {
+  const debugDiagnostics = [];
+  const frameDiagnostics = [];
+  const addon = new KittyGraphicsAddon({
+    onDiagnostic: (message) => debugDiagnostics.push(message),
+    onFrameDiagnostic: (message) => frameDiagnostics.push(message),
+  });
+  addon._receive(
+    { a: 'T', f: 32, s: 2, v: 1, c: 10, r: 5, i: 8, o: 'z', m: 1 },
+    'AAAA',
+    'T',
+  );
+  assert.deepEqual(frameDiagnostics, [
+    'Kitty graphics transfer received id=8 action=T format=32 2x1 cells=10x5 compression=z',
+  ]);
+  assert.deepEqual(debugDiagnostics, []);
+}
+
+testFirstCompressedTransferUsesVisibleDiagnostic();
 
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
