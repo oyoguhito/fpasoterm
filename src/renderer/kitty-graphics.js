@@ -314,9 +314,11 @@
           : null;
         this._flushDeleteSnapshots(job.deleteThrough, command.i, placementId);
         this._respond(command, 'OK', true);
-        const paintPath = bitmap.imageData
-          ? 'raw-rgba-putImageData'
-          : 'image-bitmap-drawImage';
+        const paintPath = bitmap.imageUrl
+          ? 'png-html-image'
+          : bitmap.imageData
+            ? 'raw-rgba-putImageData'
+            : 'image-bitmap-drawImage';
         const message = `Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
         if (!this.firstRenderReported) {
           this.firstRenderReported = true;
@@ -363,7 +365,29 @@
 
     async _createBitmap(command, bytes) {
       if (command.f === 100 || command.f === undefined) {
-        return createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        // Use the WebView's normal <img> compositor for PNG. On affected
+        // Windows WebView2 versions, createImageBitmap can decode successfully
+        // yet draw an opaque black canvas. An element also avoids a second
+        // image decode and 2D canvas copy before the overlay is presented.
+        const imageUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+        try {
+          const image = new Image();
+          image.decoding = 'async';
+          image.src = imageUrl;
+          await image.decode();
+          if (!(image.naturalWidth > 0) || !(image.naturalHeight > 0)) {
+            throw new Error('PNG has no intrinsic dimensions');
+          }
+          return {
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+            imageUrl,
+            close: () => URL.revokeObjectURL(imageUrl),
+          };
+        } catch (error) {
+          URL.revokeObjectURL(imageUrl);
+          throw error;
+        }
       }
       const width = command.s;
       const height = command.v;
@@ -424,16 +448,25 @@
     }
 
     _createPlacement(imageId, command, anchor = this._captureAnchor()) {
-      if (!this.images.has(imageId) || !this._ensureLayer()) return null;
+      const bitmap = this.images.get(imageId);
+      if (!bitmap || !this._ensureLayer()) return null;
       const placementId = this._placementIdFor(imageId, command);
       const existing = this.placements.get(placementId);
       // terminal-browser updates the same implicit image repeatedly. Reusing
       // its canvas keeps the previous frame visible until the new bitmap is
       // painted; removing and appending a canvas for every frame produces a
       // visible blank interval, especially through Herdr pass-through.
-      const canvas = existing?.canvas || document.createElement('canvas');
-      if (!existing) {
+      const tagName = bitmap.imageUrl ? 'IMG' : 'CANVAS';
+      let canvas = existing?.canvas;
+      if (!canvas || canvas.tagName !== tagName) {
+        canvas?.remove?.();
+        canvas = document.createElement(tagName.toLowerCase());
         canvas.className = 'fpasoterm-kitty-placement';
+        if (tagName === 'IMG') {
+          canvas.alt = '';
+          canvas.decoding = 'async';
+          canvas.draggable = false;
+        }
         this.layer.appendChild(canvas);
       }
       canvas.dataset.imageId = String(imageId);
@@ -478,6 +511,10 @@
     _paintPlacement(placement) {
       const bitmap = this.images.get(placement.imageId);
       if (!bitmap) return;
+      if (bitmap.imageUrl) {
+        if (placement.canvas.src !== bitmap.imageUrl) placement.canvas.src = bitmap.imageUrl;
+        return;
+      }
       placement.canvas.width = bitmap.width;
       placement.canvas.height = bitmap.height;
       const context = placement.canvas.getContext('2d', { alpha: true });

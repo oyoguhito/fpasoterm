@@ -180,6 +180,21 @@ function testRawRgbaPaintsViaPutImageData() {
 
 testRawRgbaPaintsViaPutImageData();
 
+function testPngPaintsViaHtmlImageElement() {
+  const addon = new KittyGraphicsAddon();
+  addon.images.set(7, {
+    width: 1,
+    height: 1,
+    imageUrl: 'blob:fpasoterm-test',
+    close() {},
+  });
+  const image = { src: '' };
+  addon._paintPlacement({ imageId: 7, canvas: image });
+  assert.equal(image.src, 'blob:fpasoterm-test');
+}
+
+testPngPaintsViaHtmlImageElement();
+
 function testActiveChangeIsDeduplicated() {
   const states = [];
   const addon = new KittyGraphicsAddon({ onActiveChange: (active) => states.push(active) });
