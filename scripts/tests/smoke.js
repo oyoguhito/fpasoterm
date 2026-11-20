@@ -1236,6 +1236,7 @@ assert.match(rustMain, /terminal_resize/);
 assert.match(rustMain, /diagnostics:event/);
 assert.match(rustMain, /command\.env\("TERM", "xterm-256color"\)/);
 assert.match(rustMain, /command\.env\("COLORTERM", "truecolor"\)/);
+assert.match(rustMain, /command\.env\("FPASOTERM_GRAPHICS_TRANSPORT", "osc-v1"\)/);
 assert.match(rustMain, /fn configure_utf8_terminal_locale/);
 assert.match(rustMain, /TerminalEncoding::ShiftJis/);
 assert.match(rustMain, /TerminalEncoding::EucJp/);

@@ -223,13 +223,45 @@
       return true;
     }
 
-    _receive(command, payload, action) {
+    // Windows ConPTY consumes APC (`ESC _`) sequences before a terminal host
+    // can parse them.  fpasobrowser therefore puts the same Kitty control and
+    // base64 payload in fpasoterm's private OSC 777 channel on Windows.  Keep
+    // parsing here so both transports share validation, chunk assembly,
+    // decode limits, placement, and diagnostics.
+    receiveFpasotermOsc(value) {
+      const prefix = 'graphics;v=1;';
+      const body = String(value || '');
+      if (!body.startsWith(prefix)) return false;
+      const message = body.slice(prefix.length);
+      const separator = message.indexOf(';');
+      if (separator < 1) {
+        this.onErrorDiagnostic('fpasoterm graphics rejected: missing Kitty control data');
+        return true;
+      }
+      const control = message.slice(0, separator);
+      const payload = message.slice(separator + 1);
+      const command = parseKittyControl(control);
+      try {
+        const action = validateKittyCommand(command, payload.length, this.limits);
+        if (action === 'd') this._delete(command);
+        else if (action === 'p') this._placeStored(command);
+        else this._receive(command, payload, action, 'fpasoterm-osc');
+      } catch (error) {
+        this._flushDeleteSnapshots(this.deleteSequence);
+        this._respond(command, `EINVAL:${error.message}`, false);
+        this.onErrorDiagnostic(`fpasoterm graphics rejected: ${error.message}`);
+      }
+      return true;
+    }
+
+    _receive(command, payload, action, transport = 'kitty') {
       // Only the first chunk carries a format field.  Record that boundary so
       // diagnostics can distinguish an application that never emitted a Kitty
       // frame from one whose subsequent decode or placement failed.
       if (command.f !== undefined) {
         const dimensions = command.s && command.v ? ` ${command.s}x${command.v}` : '';
-        const message = `Kitty graphics transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'} compression=${command.o || 'none'}`;
+        const protocol = transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const message = `${protocol} transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'} compression=${command.o || 'none'}`;
         if (!this.firstTransferReported) {
           this.firstTransferReported = true;
           this.onFrameDiagnostic(message);
@@ -268,6 +300,7 @@
         anchor,
         generation: this.generation,
         deleteThrough: this.deleteSequence,
+        transport,
       });
     }
 
@@ -319,7 +352,8 @@
           : bitmap.imageData
             ? 'raw-rgba-putImageData'
             : 'image-bitmap-drawImage';
-        const message = `Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
+        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const message = `${protocol} rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
         if (!this.firstRenderReported) {
           this.firstRenderReported = true;
           this.onFrameDiagnostic(message);

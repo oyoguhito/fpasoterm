@@ -1405,6 +1405,8 @@ function normalizeTerminalStateAfterAlternateScreenExit(data) {
   // when the alternate screen is left so the restored shell is visible.
   terminalKittyDiagnosticPayload = false;
   terminalSixelDiagnosticPayload = false;
+  terminalFpasotermGraphicsDiagnosticPayload = false;
+  pendingFpasotermGraphicsOsc.length = 0;
   resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   showDebugDiagnostic('renderer normalized terminal state after alternate-screen exit');
@@ -1413,6 +1415,8 @@ function normalizeTerminalStateAfterAlternateScreenExit(data) {
 
 let terminalKittyDiagnosticPayload = false;
 let terminalSixelDiagnosticPayload = false;
+let terminalFpasotermGraphicsDiagnosticPayload = false;
+const pendingFpasotermGraphicsOsc = [];
 
 // PTY reads may split one Kitty APC across hundreds of chunks. Track whether
 // the current chunk is inside ESC_G ... ESC\\ instead of checking only for
@@ -1466,8 +1470,38 @@ function containsSixelGraphicsPayload(data) {
   return containsGraphics;
 }
 
+// fpasobrowser uses this private OSC 777 envelope only on Windows, where
+// ConPTY discards the APC introducer used by the public Kitty protocol. Keep
+// the payload out of ordinary diagnostic/canvas work just like native Kitty
+// chunks; OSC may be split across PTY reads.
+function containsFpasotermGraphicsPayload(data) {
+  let containsGraphics = terminalFpasotermGraphicsDiagnosticPayload;
+  let offset = 0;
+  const prefix = '\x1b]777;graphics;v=1;';
+  while (offset < data.length) {
+    if (terminalFpasotermGraphicsDiagnosticPayload) {
+      containsGraphics = true;
+      const bell = data.indexOf('\x07', offset);
+      const st = data.indexOf('\x1b\\', offset);
+      const end = [bell, st].filter((value) => value >= 0).sort((left, right) => left - right)[0];
+      if (end === undefined) break;
+      terminalFpasotermGraphicsDiagnosticPayload = false;
+      offset = end + (end === bell ? 1 : 2);
+      continue;
+    }
+    const start = data.indexOf(prefix, offset);
+    if (start < 0) break;
+    containsGraphics = true;
+    terminalFpasotermGraphicsDiagnosticPayload = true;
+    offset = start + prefix.length;
+  }
+  return containsGraphics;
+}
+
 function containsTerminalGraphicsPayload(data) {
-  return containsKittyGraphicsPayload(data) || containsSixelGraphicsPayload(data);
+  return containsKittyGraphicsPayload(data)
+    || containsSixelGraphicsPayload(data)
+    || containsFpasotermGraphicsPayload(data);
 }
 
 // Restores local xterm display state after a full-screen program leaves the
@@ -1480,6 +1514,8 @@ function resetTerminalDisplayState() {
   terminalModeSequenceTail = '';
   terminalKittyDiagnosticPayload = false;
   terminalSixelDiagnosticPayload = false;
+  terminalFpasotermGraphicsDiagnosticPayload = false;
+  pendingFpasotermGraphicsOsc.length = 0;
   resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   clearImePreedit();
@@ -1517,6 +1553,10 @@ function queueTerminalOutput(data) {
   processRuntimeOsc(normalizedData);
   mirrorTerminalData(normalizedData);
   term.write(normalizedData, () => {
+    // The OSC bridge's placement is anchored at the terminal cursor. Run it
+    // after xterm has consumed the adjacent CSI H rather than before this
+    // queued write, otherwise a frame can inherit the previous status row.
+    flushFpasotermGraphicsOsc();
     removeXtermVisualOverlays();
     if (!containsTerminalGraphics) {
       logXtermCanvasDiagnostics();
@@ -2612,7 +2652,11 @@ function processRuntimeOsc(data) {
   let lastMatchEnd = 0;
   while ((match = oscPattern.exec(pendingOscData)) !== null) {
     if (match[1] === '777') {
-      applyFpasotermOsc(match[2]);
+      if (String(match[2]).startsWith('graphics;v=1;')) {
+        pendingFpasotermGraphicsOsc.push(match[2]);
+      } else {
+        applyFpasotermOsc(match[2]);
+      }
     } else if (match[1] === '52') {
       const separator = match[2].indexOf(';');
       if (separator !== -1) {
@@ -2633,6 +2677,17 @@ function processRuntimeOsc(data) {
   }
   if (pendingOscData.length > 8192 || !/\x1b\](777|52|7|133|9|99);/.test(pendingOscData)) {
     pendingOscData = pendingOscData.slice(-64);
+  }
+}
+
+function flushFpasotermGraphicsOsc() {
+  if (!pendingFpasotermGraphicsOsc.length) return;
+  const pending = pendingFpasotermGraphicsOsc.splice(0);
+  for (const command of pending) {
+    if (!imageAddon?.receiveFpasotermOsc?.(command)) {
+      showDiagnostic('fpasoterm graphics bridge is unavailable; use --backend half-block');
+      break;
+    }
   }
 }
 

@@ -125,6 +125,31 @@ function testFirstCompressedTransferUsesVisibleDiagnostic() {
 
 testFirstCompressedTransferUsesVisibleDiagnostic();
 
+function testFpasotermOscBridgeReusesKittyChunkAssembly() {
+  let queued;
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon.terminal = {
+    buffer: { active: { baseY: 0, cursorY: 0, cursorX: 0 } },
+    input() {},
+  };
+  addon.queue = { push: (_key, job) => { queued = job; } };
+  assert.equal(addon.receiveFpasotermOsc('not-graphics;v=1;a=T,f=32,s=1,v=1;AQIDBA=='), false);
+  assert.equal(
+    addon.receiveFpasotermOsc('graphics;v=1;a=T,f=32,s=1,v=1,i=17,m=1;AQID'),
+    true,
+  );
+  assert.equal(queued, undefined);
+  assert.equal(addon.receiveFpasotermOsc('graphics;v=1;m=0;BA=='), true);
+  assert.deepEqual(queued.command, { a: 'T', f: 32, s: 1, v: 1, i: 17, m: 0 });
+  assert.equal(queued.payload, 'AQIDBA==');
+  assert.deepEqual(diagnostics, [
+    'fpasoterm graphics transfer received id=17 action=T format=32 1x1 cells=autoxauto compression=none',
+  ]);
+}
+
+testFpasotermOscBridgeReusesKittyChunkAssembly();
+
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
   const originalCreateImageBitmap = global.createImageBitmap;
