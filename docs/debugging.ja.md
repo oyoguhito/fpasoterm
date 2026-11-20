@@ -59,16 +59,16 @@ current fpasobrowserはprivate OSC bridgeを選びます。両方を更新して
 .\fpasobrowser.cmd --backend kitty --debug
 ```
 
-`fpasobrowser debug: ... transport=fpasoterm-osc-png`が表示され、Diagnosticsを
+`fpasobrowser debug: ... transport=fpasoterm-osc-rgba-zlib`が表示され、Diagnosticsを
 `graphics`でfilterしたとき、最初のframeで`fpasoterm graphics transfer received`と
-`fpasoterm graphics rendered ... paint=png-html-image`が表示されればbridgeとPNG描画が
+`fpasoterm graphics rendered ... paint=raw-rgba-putImageData`が表示されればbridgeとCanvas描画が
 完了しています。`FPASOTERM_GRAPHICS_TRANSPORT`が無い古いfpasotermでは、`auto`と
 `--backend kitty`は`half-block`へfallbackします。
 
 ConPTYの長いOSC sequenceが画像payloadを壊す経路を避けるため、fpasobrowserはbridgeの
-PNGを短いOSC packetに分割します。`fpasoterm graphics decode failed`には
-`png-bytes`、`signature`、`iend`が付くため、`signature=invalid`または`iend=missing`なら
-transport途中の欠落、両方`ok`ならWebViewのPNG decoderを優先して調べます。
+zlib圧縮raw RGBAを短いOSC packetに分割します。`transfer received`で`format=32`と
+`compression=z`、`rendered`で`paint=raw-rgba-putImageData`が確認点です。PNG signatureや
+WebViewのPNG decoderはこのWindows bridge経路を通りません。
 
 ChromeOS/BaguetteでWebKitGTKの描画に問題がある場合は以下を使用します。
 
