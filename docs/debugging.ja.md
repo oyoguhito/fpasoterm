@@ -65,6 +65,11 @@ current fpasobrowserはprivate OSC bridgeを選びます。両方を更新して
 完了しています。`FPASOTERM_GRAPHICS_TRANSPORT`が無い古いfpasotermでは、`auto`と
 `--backend kitty`は`half-block`へfallbackします。
 
+ConPTYの長いOSC sequenceが画像payloadを壊す経路を避けるため、fpasobrowserはbridgeの
+PNGを短いOSC packetに分割します。`fpasoterm graphics decode failed`には
+`png-bytes`、`signature`、`iend`が付くため、`signature=invalid`または`iend=missing`なら
+transport途中の欠落、両方`ok`ならWebViewのPNG decoderを優先して調べます。
+
 ChromeOS/BaguetteでWebKitGTKの描画に問題がある場合は以下を使用します。
 
 ```sh

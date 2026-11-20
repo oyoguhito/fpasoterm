@@ -3,6 +3,7 @@ const {
   DEFAULT_LIMITS,
   KittyGraphicsAddon,
   LatestJobQueue,
+  describePngBytes,
   parseKittyControl,
   validateKittyCommand,
 } = require('../../src/renderer/kitty-graphics.js');
@@ -20,6 +21,10 @@ assert.throws(() => validateKittyCommand(parseKittyControl('a=T,f=99'), 8), /pix
 assert.throws(
   () => validateKittyCommand(parseKittyControl('a=T,f=100'), DEFAULT_LIMITS.maxEncodedBytes + 1),
   /encoded payload/,
+);
+assert.equal(
+  describePngBytes(Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])),
+  'png-bytes=8 signature=ok iend=missing',
 );
 
 function testCapabilityQuery() {

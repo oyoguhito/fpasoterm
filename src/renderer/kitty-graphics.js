@@ -93,6 +93,16 @@
     return bytes;
   }
 
+  function describePngBytes(bytes) {
+    const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+    const iend = [0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
+    const hasPrefix = bytes.length >= pngSignature.length
+      && pngSignature.every((value, index) => bytes[index] === value);
+    const hasIend = bytes.length >= iend.length
+      && iend.every((value, index) => bytes[bytes.length - iend.length + index] === value);
+    return `png-bytes=${bytes.length} signature=${hasPrefix ? 'ok' : 'invalid'} iend=${hasIend ? 'ok' : 'missing'}`;
+  }
+
   async function inflateZlib(bytes, maxDecodedBytes) {
     if (typeof DecompressionStream !== 'function') throw new Error('zlib is unavailable');
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
@@ -315,6 +325,7 @@
     async _decodeAndDisplay(job) {
       const { command } = job;
       this.activeDecodeImageIds.add(command.i);
+      let imageDiagnostics = '';
       try {
         if (this._jobWasDeleted(job)) {
           this._discardDeletedJob(job);
@@ -322,6 +333,7 @@
         }
         let bytes = decodeBase64(job.payload, this.limits.maxDecodedBytes);
         if (command.o === 'z') bytes = await inflateZlib(bytes, this.limits.maxDecodedBytes);
+        if (command.f === 100 || command.f === undefined) imageDiagnostics = describePngBytes(bytes);
         if (job.generation !== this.generation) return;
         if (this._jobWasDeleted(job)) {
           this._discardDeletedJob(job);
@@ -367,7 +379,9 @@
         // keeping a stale placement visible until the fallback timer expires.
         this._flushDeleteSnapshots(job.deleteThrough);
         this._respond(command, `EINVAL:${error.message}`, false);
-        this.onErrorDiagnostic(`Kitty graphics decode failed: ${error.message}`);
+        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const details = imageDiagnostics ? ` (${imageDiagnostics})` : '';
+        this.onErrorDiagnostic(`${protocol} decode failed: ${error.message}${details}`);
       } finally {
         this.activeDecodeImageIds.delete(command.i);
         this._pruneImageDeleteSequences();
@@ -763,5 +777,12 @@
     }
   }
 
-  return { DEFAULT_LIMITS, KittyGraphicsAddon, LatestJobQueue, parseKittyControl, validateKittyCommand };
+  return {
+    DEFAULT_LIMITS,
+    KittyGraphicsAddon,
+    LatestJobQueue,
+    describePngBytes,
+    parseKittyControl,
+    validateKittyCommand,
+  };
 }));
