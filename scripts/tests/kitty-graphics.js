@@ -5,6 +5,7 @@ const {
   LatestJobQueue,
   describePngBytes,
   parseKittyControl,
+  pngDimensions,
   validateKittyCommand,
 } = require('../../src/renderer/kitty-graphics.js');
 
@@ -25,6 +26,13 @@ assert.throws(
 assert.equal(
   describePngBytes(Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])),
   'png-bytes=8 signature=ok iend=missing',
+);
+assert.deepEqual(
+  pngDimensions(Uint8Array.from([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13,
+    73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 3,
+  ])),
+  { width: 2, height: 3 },
 );
 
 function testCapabilityQuery() {
@@ -186,6 +194,30 @@ async function testRawRgbaBypassesImageBitmapDecode() {
     else global.ImageData = originalImageData;
     if (originalCreateImageBitmap === undefined) delete global.createImageBitmap;
     else global.createImageBitmap = originalCreateImageBitmap;
+  }
+}
+
+async function testPngDefersDecodeToTheConnectedImageElement() {
+  const originalImage = global.Image;
+  global.Image = class DisconnectedImageMustNotBeCreated {
+    constructor() { throw new Error('PNG must not decode on a detached Image'); }
+  };
+  try {
+    const addon = new KittyGraphicsAddon();
+    const image = await addon._createBitmap(
+      { f: 100 },
+      Uint8Array.from([
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13,
+        73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 3,
+      ]),
+    );
+    assert.equal(image.width, 2);
+    assert.equal(image.height, 3);
+    assert.match(image.imageUrl, /^blob:/);
+    image.close();
+  } finally {
+    if (originalImage === undefined) delete global.Image;
+    else global.Image = originalImage;
   }
 }
 
@@ -475,6 +507,7 @@ async function testLatestFrameWins() {
 
 Promise.all([
   testRawRgbaBypassesImageBitmapDecode(),
+  testPngDefersDecodeToTheConnectedImageElement(),
   testLatestFrameWins(),
   testResetInvalidatesInFlightDecode(),
   testDeleteInvalidatesInFlightDecode(),

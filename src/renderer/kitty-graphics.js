@@ -103,6 +103,20 @@
     return `png-bytes=${bytes.length} signature=${hasPrefix ? 'ok' : 'invalid'} iend=${hasIend ? 'ok' : 'missing'}`;
   }
 
+  function pngDimensions(bytes) {
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24 || !signature.every((value, index) => bytes[index] === value)) {
+      throw new Error('PNG signature is invalid');
+    }
+    if (String.fromCharCode(...bytes.slice(12, 16)) !== 'IHDR') {
+      throw new Error('PNG header is missing IHDR');
+    }
+    const width = ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0;
+    const height = ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0;
+    if (!(width > 0) || !(height > 0)) throw new Error('PNG has invalid dimensions');
+    return { width, height };
+  }
+
   async function inflateZlib(bytes, maxDecodedBytes) {
     if (typeof DecompressionStream !== 'function') throw new Error('zlib is unavailable');
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
@@ -415,27 +429,18 @@
       if (command.f === 100 || command.f === undefined) {
         // Use the WebView's normal <img> compositor for PNG. On affected
         // Windows WebView2 versions, createImageBitmap can decode successfully
-        // yet draw an opaque black canvas. An element also avoids a second
-        // image decode and 2D canvas copy before the overlay is presented.
+        // yet draw an opaque black canvas. Calling Image.decode() on a detached
+        // element is also rejected on some WebView2 builds even for a complete
+        // PNG. Validate the bytes/header here, then let the actual connected
+        // overlay <img> perform the one and only image decode.
+        const { width, height } = pngDimensions(bytes);
         const imageUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
-        try {
-          const image = new Image();
-          image.decoding = 'async';
-          image.src = imageUrl;
-          await image.decode();
-          if (!(image.naturalWidth > 0) || !(image.naturalHeight > 0)) {
-            throw new Error('PNG has no intrinsic dimensions');
-          }
-          return {
-            width: image.naturalWidth,
-            height: image.naturalHeight,
-            imageUrl,
-            close: () => URL.revokeObjectURL(imageUrl),
-          };
-        } catch (error) {
-          URL.revokeObjectURL(imageUrl);
-          throw error;
-        }
+        return {
+          width,
+          height,
+          imageUrl,
+          close: () => URL.revokeObjectURL(imageUrl),
+        };
       }
       const width = command.s;
       const height = command.v;
@@ -514,6 +519,9 @@
           canvas.alt = '';
           canvas.decoding = 'async';
           canvas.draggable = false;
+          canvas.addEventListener('error', () => {
+            this.onErrorDiagnostic(`fpasoterm graphics image element failed to decode id=${canvas.dataset.imageId || imageId}`);
+          });
         }
         this.layer.appendChild(canvas);
       }
@@ -783,6 +791,7 @@
     LatestJobQueue,
     describePngBytes,
     parseKittyControl,
+    pngDimensions,
     validateKittyCommand,
   };
 }));
