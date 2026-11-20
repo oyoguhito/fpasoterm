@@ -1088,6 +1088,7 @@ assert.doesNotMatch(uninstallWindowsPath, /setx/i);
 
 const tauriConfig = read('src-tauri/tauri.conf.json');
 assert.match(tauriConfig, /"withGlobalTauri": true/);
+assert.match(tauriConfig, /img-src 'self' asset: http:\/\/asset\.localhost blob:/);
 assert.match(tauriConfig, /"enableGTKAppId": false/);
 assert.match(tauriConfig, /"macOSPrivateApi": true/);
 assert.match(tauriConfig, /"macOS": \{/);
