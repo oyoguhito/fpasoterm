@@ -184,10 +184,12 @@ async function testRawRgbaBypassesImageBitmapDecode() {
     const image = await addon._createBitmap(
       { f: 32, s: 1, v: 1 },
       Uint8Array.from([1, 2, 3, 4]),
+      'fpasoterm-osc',
     );
     assert.equal(image.width, 1);
     assert.equal(image.height, 1);
     assert.deepEqual(Array.from(image.imageData.data), [1, 2, 3, 4]);
+    assert.equal(image.opaqueCanvas, true);
     assert.equal(imageBitmapCalls, 0);
   } finally {
     if (originalImageData === undefined) delete global.ImageData;
@@ -241,6 +243,31 @@ function testRawRgbaPaintsViaPutImageData() {
 }
 
 testRawRgbaPaintsViaPutImageData();
+
+function testBridgeRawRgbaUsesOpaqueCanvasBacking() {
+  const contexts = [];
+  const addon = new KittyGraphicsAddon();
+  addon.images.set(7, {
+    width: 1,
+    height: 1,
+    opaqueCanvas: true,
+    imageData: { width: 1, height: 1, data: Uint8ClampedArray.from([1, 2, 3, 255]) },
+    close() {},
+  });
+  const canvas = {
+    getContext: (kind, options) => {
+      contexts.push([kind, options]);
+      return {
+        clearRect() {},
+        putImageData() {},
+      };
+    },
+  };
+  addon._paintPlacement({ imageId: 7, canvas });
+  assert.deepEqual(contexts, [['2d', { alpha: false, willReadFrequently: true }]]);
+}
+
+testBridgeRawRgbaUsesOpaqueCanvasBacking();
 
 function testPngPaintsViaHtmlImageElement() {
   const addon = new KittyGraphicsAddon();

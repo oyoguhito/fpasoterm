@@ -353,7 +353,7 @@
           this._discardDeletedJob(job);
           return;
         }
-        const bitmap = await this._createBitmap(command, bytes);
+        const bitmap = await this._createBitmap(command, bytes, job.transport);
         if (job.generation !== this.generation) {
           bitmap.close?.();
           return;
@@ -425,7 +425,7 @@
       this.onDiagnostic(`Kitty graphics discarded deleted decode id=${job.command.i}`);
     }
 
-    async _createBitmap(command, bytes) {
+    async _createBitmap(command, bytes, transport = 'kitty') {
       if (command.f === 100 || command.f === undefined) {
         // Use the WebView's normal <img> compositor for PNG. On affected
         // Windows WebView2 versions, createImageBitmap can decode successfully
@@ -457,6 +457,12 @@
           width,
           height,
           imageData: new ImageData(new Uint8ClampedArray(bytes), width, height),
+          // fpasobrowser's Windows bridge always makes its screenshot opaque.
+          // Requesting an opaque 2D backing store avoids WebView2's
+          // transparent-overlay compositor path, which can show the whole
+          // otherwise valid raw canvas as black. Generic Kitty RGBA keeps
+          // alpha support on the normal path.
+          opaqueCanvas: transport === 'fpasoterm-osc',
           close() {},
         };
       }
@@ -573,7 +579,9 @@
       }
       placement.canvas.width = bitmap.width;
       placement.canvas.height = bitmap.height;
-      const context = placement.canvas.getContext('2d', { alpha: true });
+      const context = placement.canvas.getContext('2d', bitmap.opaqueCanvas
+        ? { alpha: false, willReadFrequently: true }
+        : { alpha: true });
       if (!context) throw new Error('2D canvas context is unavailable');
       context.clearRect(0, 0, bitmap.width, bitmap.height);
       if (bitmap.imageData) {
