@@ -15,6 +15,8 @@ const terminalLogSearchStatusElement = document.getElementById('terminal-log-sea
 const diagnosticsFilterElement = document.getElementById('diagnostics-filter');
 const diagnosticsFilterApplyButton = document.getElementById('diagnostics-filter-apply');
 const diagnosticsFilterStatusElement = document.getElementById('diagnostics-filter-status');
+const diagnosticsPauseButton = document.getElementById('diagnostics-pause');
+const diagnosticsClearButton = document.getElementById('diagnostics-clear');
 const diagnosticsCopyButton = document.getElementById('diagnostics-copy');
 const pluginCatalogSearchElement = document.getElementById('plugin-catalog-search');
 const pluginCatalogUpdatesOnlyButton = document.getElementById('plugin-catalog-updates-only');
@@ -142,6 +144,9 @@ const MAX_DIAGNOSTIC_LINES = 1000;
 let diagnosticsFilterQuery = '';
 let diagnosticRenderPending = false;
 let diagnosticRenderScrollToEnd = false;
+let diagnosticsPaused = false;
+let diagnosticsPausedNewLines = 0;
+let diagnosticsPausedSnapshot = null;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -1004,23 +1009,40 @@ function installCompositionObserver() {
   }, true);
 }
 
-// Renders the diagnostics history, optionally narrowed by a literal
+// Returns the diagnostics history, optionally narrowed by a literal
 // case-insensitive substring. This deliberately behaves like a lightweight
 // grep: punctuation in a query has no special meaning.
-function renderDiagnosticLines({ scrollToEnd = false } = {}) {
-  const lines = diagnosticsFilterQuery
-    ? diagnosticLines.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
+function filteredDiagnosticLines() {
+  const source = diagnosticsPaused && diagnosticsPausedSnapshot
+    ? diagnosticsPausedSnapshot
     : diagnosticLines;
+  return diagnosticsFilterQuery
+    ? source.filter((line) => line.toLocaleLowerCase().includes(diagnosticsFilterQuery))
+    : source;
+}
+
+function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
+  if (!diagnosticsFilterStatusElement) {
+    return;
+  }
+  const sourceCount = diagnosticsPaused && diagnosticsPausedSnapshot
+    ? diagnosticsPausedSnapshot.length
+    : diagnosticLines.length;
+  const count = diagnosticsFilterQuery ? `${lines.length}/${sourceCount}` : `${sourceCount}`;
+  const pause = diagnosticsPaused
+    ? `Paused${diagnosticsPausedNewLines > 0 ? ` +${diagnosticsPausedNewLines}` : ''}`
+    : '';
+  diagnosticsFilterStatusElement.textContent = [pause, count].filter(Boolean).join(' · ');
+}
+
+function renderDiagnosticLines({ scrollToEnd = false } = {}) {
+  const lines = filteredDiagnosticLines();
   diagnosticsElement.value = lines.length > 0
     ? lines.join('\n')
     : diagnosticsFilterQuery
       ? '(No diagnostics match this filter.)'
       : '';
-  if (diagnosticsFilterStatusElement) {
-    diagnosticsFilterStatusElement.textContent = diagnosticsFilterQuery
-      ? `${lines.length}/${diagnosticLines.length}`
-      : `${diagnosticLines.length}`;
-  }
+  updateDiagnosticsFilterStatus(lines);
   if (scrollToEnd) {
     diagnosticsElement.scrollTop = diagnosticsElement.scrollHeight;
   }
@@ -1039,6 +1061,10 @@ function scheduleDiagnosticRender({ scrollToEnd = false } = {}) {
     diagnosticRenderPending = false;
     const follow = diagnosticRenderScrollToEnd;
     diagnosticRenderScrollToEnd = false;
+    if (diagnosticsPaused) {
+      updateDiagnosticsFilterStatus();
+      return;
+    }
     renderDiagnosticLines({ scrollToEnd: follow });
   });
 }
@@ -1047,6 +1073,42 @@ function scheduleDiagnosticRender({ scrollToEnd = false } = {}) {
 // changes only the pending query; click Filter or press Enter to scan lines.
 function applyDiagnosticsFilter() {
   diagnosticsFilterQuery = String(diagnosticsFilterElement?.value || '').trim().toLocaleLowerCase();
+  renderDiagnosticLines();
+  diagnosticsElement.scrollTop = 0;
+}
+
+// Pause only the live view, not backend collection or the terminal itself.
+// This keeps keyboard diagnostics available for later inspection while the
+// displayed snapshot remains stable enough to search and copy.
+function setDiagnosticsPaused(paused) {
+  const nextPaused = Boolean(paused);
+  if (nextPaused && !diagnosticsPaused) {
+    diagnosticsPausedSnapshot = diagnosticLines.slice();
+  }
+  diagnosticsPaused = nextPaused;
+  if (!diagnosticsPaused) {
+    diagnosticsPausedNewLines = 0;
+    diagnosticsPausedSnapshot = null;
+  }
+  if (diagnosticsPauseButton) {
+    diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Resume' : 'Pause';
+    diagnosticsPauseButton.setAttribute(
+      'aria-label',
+      diagnosticsPaused ? 'Resume live diagnostics rendering' : 'Pause live diagnostics rendering',
+    );
+  }
+  diagnosticRenderScrollToEnd = false;
+  renderDiagnosticLines({ scrollToEnd: !diagnosticsPaused });
+}
+
+function clearDiagnosticsView() {
+  diagnosticLines.length = 0;
+  if (diagnosticsPausedSnapshot) {
+    diagnosticsPausedSnapshot.length = 0;
+  }
+  diagnosticsPausedNewLines = 0;
+  diagnosticRenderScrollToEnd = false;
   renderDiagnosticLines();
   diagnosticsElement.scrollTop = 0;
 }
@@ -1064,6 +1126,11 @@ function appendDiagnosticLine(message) {
     diagnosticLines.shift();
   }
   if (diagnosticsPanelMode !== 'diagnostics') {
+    return;
+  }
+  if (diagnosticsPaused) {
+    diagnosticsPausedNewLines += 1;
+    updateDiagnosticsFilterStatus();
     return;
   }
   // The Diagnostics view already owns these controls.  Toggling `hidden` on
@@ -1090,6 +1157,7 @@ function showLiveDiagnosticsView() {
   setTerminalEncodingControlsVisible(false);
   showDiagnosticsTextArea();
   setDiagnosticsFilterVisible(true);
+  setDiagnosticsLiveControlsVisible(true);
   setDiagnosticsCopyVisible(true);
   if (diagnosticsTitleElement) {
     diagnosticsTitleElement.textContent = 'Diagnostics';
@@ -1113,6 +1181,7 @@ function closeDiagnosticsPanel() {
 function showDiagnosticsTextArea() {
   diagnosticsElement.hidden = false;
   setDiagnosticsFilterVisible(false);
+  setDiagnosticsLiveControlsVisible(false);
   setDiagnosticsCopyVisible(false);
   setPluginCatalogSearchVisible(false);
   setScreenVideoPickerVisible(false);
@@ -1137,6 +1206,11 @@ function setDiagnosticsFilterVisible(visible) {
   if (diagnosticsFilterElement) diagnosticsFilterElement.hidden = !visible;
   if (diagnosticsFilterApplyButton) diagnosticsFilterApplyButton.hidden = !visible;
   if (diagnosticsFilterStatusElement) diagnosticsFilterStatusElement.hidden = !visible;
+}
+
+function setDiagnosticsLiveControlsVisible(visible) {
+  if (diagnosticsPauseButton) diagnosticsPauseButton.hidden = !visible;
+  if (diagnosticsClearButton) diagnosticsClearButton.hidden = !visible;
 }
 
 // Copies backend-retained diagnostics without selecting text in the panel or
@@ -1331,6 +1405,8 @@ function normalizeTerminalStateAfterAlternateScreenExit(data) {
   // when the alternate screen is left so the restored shell is visible.
   terminalKittyDiagnosticPayload = false;
   terminalSixelDiagnosticPayload = false;
+  terminalFpasotermGraphicsDiagnosticPayload = false;
+  pendingFpasotermGraphicsOsc.length = 0;
   resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   showDebugDiagnostic('renderer normalized terminal state after alternate-screen exit');
@@ -1339,6 +1415,8 @@ function normalizeTerminalStateAfterAlternateScreenExit(data) {
 
 let terminalKittyDiagnosticPayload = false;
 let terminalSixelDiagnosticPayload = false;
+let terminalFpasotermGraphicsDiagnosticPayload = false;
+const pendingFpasotermGraphicsOsc = [];
 
 // PTY reads may split one Kitty APC across hundreds of chunks. Track whether
 // the current chunk is inside ESC_G ... ESC\\ instead of checking only for
@@ -1392,8 +1470,38 @@ function containsSixelGraphicsPayload(data) {
   return containsGraphics;
 }
 
+// fpasobrowser uses this private OSC 777 envelope only on Windows, where
+// ConPTY discards the APC introducer used by the public Kitty protocol. Keep
+// the payload out of ordinary diagnostic/canvas work just like native Kitty
+// chunks; OSC may be split across PTY reads.
+function containsFpasotermGraphicsPayload(data) {
+  let containsGraphics = terminalFpasotermGraphicsDiagnosticPayload;
+  let offset = 0;
+  const prefix = '\x1b]777;graphics;v=1;';
+  while (offset < data.length) {
+    if (terminalFpasotermGraphicsDiagnosticPayload) {
+      containsGraphics = true;
+      const bell = data.indexOf('\x07', offset);
+      const st = data.indexOf('\x1b\\', offset);
+      const end = [bell, st].filter((value) => value >= 0).sort((left, right) => left - right)[0];
+      if (end === undefined) break;
+      terminalFpasotermGraphicsDiagnosticPayload = false;
+      offset = end + (end === bell ? 1 : 2);
+      continue;
+    }
+    const start = data.indexOf(prefix, offset);
+    if (start < 0) break;
+    containsGraphics = true;
+    terminalFpasotermGraphicsDiagnosticPayload = true;
+    offset = start + prefix.length;
+  }
+  return containsGraphics;
+}
+
 function containsTerminalGraphicsPayload(data) {
-  return containsKittyGraphicsPayload(data) || containsSixelGraphicsPayload(data);
+  return containsKittyGraphicsPayload(data)
+    || containsSixelGraphicsPayload(data)
+    || containsFpasotermGraphicsPayload(data);
 }
 
 // Restores local xterm display state after a full-screen program leaves the
@@ -1406,6 +1514,8 @@ function resetTerminalDisplayState() {
   terminalModeSequenceTail = '';
   terminalKittyDiagnosticPayload = false;
   terminalSixelDiagnosticPayload = false;
+  terminalFpasotermGraphicsDiagnosticPayload = false;
+  pendingFpasotermGraphicsOsc.length = 0;
   resetTerminalImageAddons();
   setTerminalGraphicsZoomVisible(false);
   clearImePreedit();
@@ -1443,6 +1553,10 @@ function queueTerminalOutput(data) {
   processRuntimeOsc(normalizedData);
   mirrorTerminalData(normalizedData);
   term.write(normalizedData, () => {
+    // The OSC bridge's placement is anchored at the terminal cursor. Run it
+    // after xterm has consumed the adjacent CSI H rather than before this
+    // queued write, otherwise a frame can inherit the previous status row.
+    flushFpasotermGraphicsOsc();
     removeXtermVisualOverlays();
     if (!containsTerminalGraphics) {
       logXtermCanvasDiagnostics();
@@ -2538,7 +2652,11 @@ function processRuntimeOsc(data) {
   let lastMatchEnd = 0;
   while ((match = oscPattern.exec(pendingOscData)) !== null) {
     if (match[1] === '777') {
-      applyFpasotermOsc(match[2]);
+      if (String(match[2]).startsWith('graphics;v=1;')) {
+        pendingFpasotermGraphicsOsc.push(match[2]);
+      } else {
+        applyFpasotermOsc(match[2]);
+      }
     } else if (match[1] === '52') {
       const separator = match[2].indexOf(';');
       if (separator !== -1) {
@@ -2559,6 +2677,17 @@ function processRuntimeOsc(data) {
   }
   if (pendingOscData.length > 8192 || !/\x1b\](777|52|7|133|9|99);/.test(pendingOscData)) {
     pendingOscData = pendingOscData.slice(-64);
+  }
+}
+
+function flushFpasotermGraphicsOsc() {
+  if (!pendingFpasotermGraphicsOsc.length) return;
+  const pending = pendingFpasotermGraphicsOsc.splice(0);
+  for (const command of pending) {
+    if (!imageAddon?.receiveFpasotermOsc?.(command)) {
+      showDiagnostic('fpasoterm graphics bridge is unavailable; use --backend half-block');
+      break;
+    }
   }
 }
 
@@ -2692,11 +2821,12 @@ function createTerminal() {
           maxPlacements: Math.min(16, Math.max(1, Number(imageConfig.storageLimit) || 8)),
         },
         onDiagnostic: (message) => showDebugDiagnostic(message),
+        onFrameDiagnostic: (message) => showDiagnostic(message),
         onErrorDiagnostic: (message) => showDiagnostic(message),
         onActiveChange: handleTerminalGraphicsActiveChange,
       });
       term.loadAddon(imageAddon);
-      showDiagnostic('experimental bounded Kitty graphics renderer enabled');
+      showDiagnostic('experimental bounded Kitty graphics renderer enabled (raw RGBA uses direct canvas)');
     } catch (error) {
       imageAddon = undefined;
       showDiagnostic(`Kitty graphics renderer unavailable: ${error?.message || error}`);
@@ -3921,6 +4051,8 @@ function diagnosticsPanelFocusItems() {
     terminalLogSearchNextButton,
     diagnosticsFilterElement,
     diagnosticsFilterApplyButton,
+    diagnosticsPauseButton,
+    diagnosticsClearButton,
     diagnosticsCopyButton,
     pluginCatalogSearchElement,
     pluginCatalogUpdatesOnlyButton,
@@ -6502,6 +6634,18 @@ terminalLogSearchElement.addEventListener('input', () => {
 diagnosticsFilterApplyButton?.addEventListener('click', () => {
   if (diagnosticsPanelMode === 'diagnostics') {
     applyDiagnosticsFilter();
+  }
+});
+
+diagnosticsPauseButton?.addEventListener('click', () => {
+  if (diagnosticsPanelMode === 'diagnostics') {
+    setDiagnosticsPaused(!diagnosticsPaused);
+  }
+});
+
+diagnosticsClearButton?.addEventListener('click', () => {
+  if (diagnosticsPanelMode === 'diagnostics') {
+    clearDiagnosticsView();
   }
 });
 

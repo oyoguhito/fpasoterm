@@ -12,7 +12,7 @@ screen / tmux / byobu / zellij / herdr などの terminal multiplexer と併用�
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
-Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。WindowsではConPTYがKittyのAPC envelopeをterminal hostへ渡す前に破棄するため、Windows上のfpasobrowserはzlib圧縮したraw RGBA（`f=32`）をprivate OSC 777の`graphics;v=1` bridgeで送り、WebView2のPNG合成を経由せずCanvasの`putImageData`で直接描画します。child processへ設定する`FPASOTERM_GRAPHICS_TRANSPORT=osc-v1`により、古いfpasotermを画像backendとして選ばないようにします。このbridgeはConPTY越しの汎用Kitty対応を主張するものではありません。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
 
 IME、描画、clipboard、window問題を再現して確認する手順は
 [デバッグガイド](docs/debugging.ja.md)を参照してください。

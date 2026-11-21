@@ -93,6 +93,30 @@
     return bytes;
   }
 
+  function describePngBytes(bytes) {
+    const pngSignature = [137, 80, 78, 71, 13, 10, 26, 10];
+    const iend = [0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130];
+    const hasPrefix = bytes.length >= pngSignature.length
+      && pngSignature.every((value, index) => bytes[index] === value);
+    const hasIend = bytes.length >= iend.length
+      && iend.every((value, index) => bytes[bytes.length - iend.length + index] === value);
+    return `png-bytes=${bytes.length} signature=${hasPrefix ? 'ok' : 'invalid'} iend=${hasIend ? 'ok' : 'missing'}`;
+  }
+
+  function pngDimensions(bytes) {
+    const signature = [137, 80, 78, 71, 13, 10, 26, 10];
+    if (bytes.length < 24 || !signature.every((value, index) => bytes[index] === value)) {
+      throw new Error('PNG signature is invalid');
+    }
+    if (String.fromCharCode(...bytes.slice(12, 16)) !== 'IHDR') {
+      throw new Error('PNG header is missing IHDR');
+    }
+    const width = ((bytes[16] << 24) | (bytes[17] << 16) | (bytes[18] << 8) | bytes[19]) >>> 0;
+    const height = ((bytes[20] << 24) | (bytes[21] << 16) | (bytes[22] << 8) | bytes[23]) >>> 0;
+    if (!(width > 0) || !(height > 0)) throw new Error('PNG has invalid dimensions');
+    return { width, height };
+  }
+
   async function inflateZlib(bytes, maxDecodedBytes) {
     if (typeof DecompressionStream !== 'function') throw new Error('zlib is unavailable');
     const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate'));
@@ -125,7 +149,15 @@
       this.onErrorDiagnostic = typeof options.onErrorDiagnostic === 'function'
         ? options.onErrorDiagnostic
         : this.onDiagnostic;
+      // A complete browser frame can be too noisy for the ordinary live log,
+      // but the first one is the critical protocol boundary when diagnosing a
+      // black graphics pane. Keep it visible even when --debug-keys is off.
+      this.onFrameDiagnostic = typeof options.onFrameDiagnostic === 'function'
+        ? options.onFrameDiagnostic
+        : this.onDiagnostic;
       this.onActiveChange = typeof options.onActiveChange === 'function' ? options.onActiveChange : () => {};
+      this.firstTransferReported = false;
+      this.firstRenderReported = false;
       this.active = false;
       this.images = new Map();
       this.placements = new Map();
@@ -215,7 +247,52 @@
       return true;
     }
 
-    _receive(command, payload, action) {
+    // Windows ConPTY consumes APC (`ESC _`) sequences before a terminal host
+    // can parse them.  fpasobrowser therefore puts the same Kitty control and
+    // base64 payload in fpasoterm's private OSC 777 channel on Windows.  Keep
+    // parsing here so both transports share validation, chunk assembly,
+    // decode limits, placement, and diagnostics.
+    receiveFpasotermOsc(value) {
+      const prefix = 'graphics;v=1;';
+      const body = String(value || '');
+      if (!body.startsWith(prefix)) return false;
+      const message = body.slice(prefix.length);
+      const separator = message.indexOf(';');
+      if (separator < 1) {
+        this.onErrorDiagnostic('fpasoterm graphics rejected: missing Kitty control data');
+        return true;
+      }
+      const control = message.slice(0, separator);
+      const payload = message.slice(separator + 1);
+      const command = parseKittyControl(control);
+      try {
+        const action = validateKittyCommand(command, payload.length, this.limits);
+        if (action === 'd') this._delete(command);
+        else if (action === 'p') this._placeStored(command);
+        else this._receive(command, payload, action, 'fpasoterm-osc');
+      } catch (error) {
+        this._flushDeleteSnapshots(this.deleteSequence);
+        this._respond(command, `EINVAL:${error.message}`, false);
+        this.onErrorDiagnostic(`fpasoterm graphics rejected: ${error.message}`);
+      }
+      return true;
+    }
+
+    _receive(command, payload, action, transport = 'kitty') {
+      // Only the first chunk carries a format field.  Record that boundary so
+      // diagnostics can distinguish an application that never emitted a Kitty
+      // frame from one whose subsequent decode or placement failed.
+      if (command.f !== undefined) {
+        const dimensions = command.s && command.v ? ` ${command.s}x${command.v}` : '';
+        const protocol = transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const message = `${protocol} transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'} compression=${command.o || 'none'}`;
+        if (!this.firstTransferReported) {
+          this.firstTransferReported = true;
+          this.onFrameDiagnostic(message);
+        } else {
+          this.onDiagnostic(message);
+        }
+      }
       if (command.m === 1) {
         if (!this.chunks) this.chunks = { command: { ...command }, payload: '' };
         this.chunks.payload += payload;
@@ -247,6 +324,7 @@
         anchor,
         generation: this.generation,
         deleteThrough: this.deleteSequence,
+        transport,
       });
     }
 
@@ -261,6 +339,7 @@
     async _decodeAndDisplay(job) {
       const { command } = job;
       this.activeDecodeImageIds.add(command.i);
+      let imageDiagnostics = '';
       try {
         if (this._jobWasDeleted(job)) {
           this._discardDeletedJob(job);
@@ -268,12 +347,13 @@
         }
         let bytes = decodeBase64(job.payload, this.limits.maxDecodedBytes);
         if (command.o === 'z') bytes = await inflateZlib(bytes, this.limits.maxDecodedBytes);
+        if (command.f === 100 || command.f === undefined) imageDiagnostics = describePngBytes(bytes);
         if (job.generation !== this.generation) return;
         if (this._jobWasDeleted(job)) {
           this._discardDeletedJob(job);
           return;
         }
-        const bitmap = await this._createBitmap(command, bytes);
+        const bitmap = await this._createBitmap(command, bytes, job.transport);
         if (job.generation !== this.generation) {
           bitmap.close?.();
           return;
@@ -293,7 +373,19 @@
           : null;
         this._flushDeleteSnapshots(job.deleteThrough, command.i, placementId);
         this._respond(command, 'OK', true);
-        this.onDiagnostic(`Kitty graphics rendered id=${command.i} ${bitmap.width}x${bitmap.height}`);
+        const paintPath = bitmap.imageUrl
+          ? 'png-html-image'
+          : bitmap.imageData
+            ? 'raw-rgba-putImageData'
+            : 'image-bitmap-drawImage';
+        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const message = `${protocol} rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
+        if (!this.firstRenderReported) {
+          this.firstRenderReported = true;
+          this.onFrameDiagnostic(message);
+        } else {
+          this.onDiagnostic(message);
+        }
       } catch (error) {
         if (job.generation !== this.generation) return;
         // Successful replacements flush the same snapshots after paint. A
@@ -301,7 +393,9 @@
         // keeping a stale placement visible until the fallback timer expires.
         this._flushDeleteSnapshots(job.deleteThrough);
         this._respond(command, `EINVAL:${error.message}`, false);
-        this.onErrorDiagnostic(`Kitty graphics decode failed: ${error.message}`);
+        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const details = imageDiagnostics ? ` (${imageDiagnostics})` : '';
+        this.onErrorDiagnostic(`${protocol} decode failed: ${error.message}${details}`);
       } finally {
         this.activeDecodeImageIds.delete(command.i);
         this._pruneImageDeleteSequences();
@@ -331,9 +425,22 @@
       this.onDiagnostic(`Kitty graphics discarded deleted decode id=${job.command.i}`);
     }
 
-    async _createBitmap(command, bytes) {
+    async _createBitmap(command, bytes, transport = 'kitty') {
       if (command.f === 100 || command.f === undefined) {
-        return createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+        // Use the WebView's normal <img> compositor for PNG. On affected
+        // Windows WebView2 versions, createImageBitmap can decode successfully
+        // yet draw an opaque black canvas. Calling Image.decode() on a detached
+        // element is also rejected on some WebView2 builds even for a complete
+        // PNG. Validate the bytes/header here, then let the actual connected
+        // overlay <img> perform the one and only image decode.
+        const { width, height } = pngDimensions(bytes);
+        const imageUrl = URL.createObjectURL(new Blob([bytes], { type: 'image/png' }));
+        return {
+          width,
+          height,
+          imageUrl,
+          close: () => URL.revokeObjectURL(imageUrl),
+        };
       }
       const width = command.s;
       const height = command.v;
@@ -341,7 +448,23 @@
       const expected = pixelCount * (command.f === 32 ? 4 : 3);
       if (bytes.byteLength !== expected) throw new Error('raw pixel payload has an invalid length');
       if (command.f === 32) {
-        return createImageBitmap(new ImageData(new Uint8ClampedArray(bytes), width, height));
+        // Keep direct RGBA frames as ImageData instead of round-tripping them
+        // through createImageBitmap.  WebView2 can successfully construct the
+        // ImageBitmap yet paint it as an opaque black canvas on Windows.  A
+        // canvas putImageData call is the native raw-pixel presentation path
+        // and is also independent of the browser's image decoder.
+        return {
+          width,
+          height,
+          imageData: new ImageData(new Uint8ClampedArray(bytes), width, height),
+          // fpasobrowser's Windows bridge always makes its screenshot opaque.
+          // Requesting an opaque 2D backing store avoids WebView2's
+          // transparent-overlay compositor path, which can show the whole
+          // otherwise valid raw canvas as black. Generic Kitty RGBA keeps
+          // alpha support on the normal path.
+          opaqueCanvas: transport === 'fpasoterm-osc',
+          close() {},
+        };
       }
       const rgba = new Uint8ClampedArray(pixelCount * 4);
       for (let source = 0, target = 0; source < bytes.length; source += 3, target += 4) {
@@ -350,7 +473,12 @@
         rgba[target + 2] = bytes[source + 2];
         rgba[target + 3] = 255;
       }
-      return createImageBitmap(new ImageData(rgba, width, height));
+      return {
+        width,
+        height,
+        imageData: new ImageData(rgba, width, height),
+        close() {},
+      };
     }
 
     _storeImage(id, bitmap) {
@@ -379,16 +507,28 @@
     }
 
     _createPlacement(imageId, command, anchor = this._captureAnchor()) {
-      if (!this.images.has(imageId) || !this._ensureLayer()) return null;
+      const bitmap = this.images.get(imageId);
+      if (!bitmap || !this._ensureLayer()) return null;
       const placementId = this._placementIdFor(imageId, command);
       const existing = this.placements.get(placementId);
       // terminal-browser updates the same implicit image repeatedly. Reusing
       // its canvas keeps the previous frame visible until the new bitmap is
       // painted; removing and appending a canvas for every frame produces a
       // visible blank interval, especially through Herdr pass-through.
-      const canvas = existing?.canvas || document.createElement('canvas');
-      if (!existing) {
+      const tagName = bitmap.imageUrl ? 'IMG' : 'CANVAS';
+      let canvas = existing?.canvas;
+      if (!canvas || canvas.tagName !== tagName) {
+        canvas?.remove?.();
+        canvas = document.createElement(tagName.toLowerCase());
         canvas.className = 'fpasoterm-kitty-placement';
+        if (tagName === 'IMG') {
+          canvas.alt = '';
+          canvas.decoding = 'async';
+          canvas.draggable = false;
+          canvas.addEventListener('error', () => {
+            this.onErrorDiagnostic(`fpasoterm graphics image element failed to decode id=${canvas.dataset.imageId || imageId}`);
+          });
+        }
         this.layer.appendChild(canvas);
       }
       canvas.dataset.imageId = String(imageId);
@@ -433,11 +573,25 @@
     _paintPlacement(placement) {
       const bitmap = this.images.get(placement.imageId);
       if (!bitmap) return;
+      if (bitmap.imageUrl) {
+        if (placement.canvas.src !== bitmap.imageUrl) placement.canvas.src = bitmap.imageUrl;
+        return;
+      }
       placement.canvas.width = bitmap.width;
       placement.canvas.height = bitmap.height;
-      const context = placement.canvas.getContext('2d', { alpha: true });
-      context?.clearRect(0, 0, bitmap.width, bitmap.height);
-      context?.drawImage(bitmap, 0, 0);
+      const context = placement.canvas.getContext('2d', bitmap.opaqueCanvas
+        ? { alpha: false, willReadFrequently: true }
+        : { alpha: true });
+      if (!context) throw new Error('2D canvas context is unavailable');
+      context.clearRect(0, 0, bitmap.width, bitmap.height);
+      if (bitmap.imageData) {
+        if (typeof context.putImageData !== 'function') {
+          throw new Error('2D canvas putImageData is unavailable');
+        }
+        context.putImageData(bitmap.imageData, 0, 0);
+      } else {
+        context.drawImage(bitmap, 0, 0);
+      }
     }
 
     _renderPlacements() {
@@ -639,5 +793,13 @@
     }
   }
 
-  return { DEFAULT_LIMITS, KittyGraphicsAddon, LatestJobQueue, parseKittyControl, validateKittyCommand };
+  return {
+    DEFAULT_LIMITS,
+    KittyGraphicsAddon,
+    LatestJobQueue,
+    describePngBytes,
+    parseKittyControl,
+    pngDimensions,
+    validateKittyCommand,
+  };
 }));
