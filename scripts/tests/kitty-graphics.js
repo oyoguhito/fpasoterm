@@ -143,7 +143,10 @@ function testFpasotermOscBridgeReusesKittyChunkAssembly() {
   const diagnostics = [];
   const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
   addon.terminal = {
-    buffer: { active: { baseY: 0, cursorY: 0, cursorX: 0 } },
+    // OSC commands are flushed after the rest of a terminal write. The live
+    // cursor can therefore already point at later status output, while the
+    // fpasobrowser bridge must stay anchored at the pane's home cell.
+    buffer: { active: { baseY: 12, cursorY: 7, cursorX: 4 } },
     input() {},
   };
   addon.queue = { push: (_key, job) => { queued = job; } };
@@ -156,6 +159,7 @@ function testFpasotermOscBridgeReusesKittyChunkAssembly() {
   assert.equal(addon.receiveFpasotermOsc('graphics;v=1;m=0;BA=='), true);
   assert.deepEqual(queued.command, { a: 'T', f: 32, s: 1, v: 1, i: 17, m: 0 });
   assert.equal(queued.payload, 'AQIDBA==');
+  assert.deepEqual(queued.anchor, { line: 0, column: 0 });
   assert.deepEqual(diagnostics, [
     'fpasoterm graphics transfer received id=17 action=T format=32 1x1 cells=autoxauto compression=none',
   ]);

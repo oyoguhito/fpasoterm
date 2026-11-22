@@ -269,7 +269,13 @@
         const action = validateKittyCommand(command, payload.length, this.limits);
         if (action === 'd') this._delete(command);
         else if (action === 'p') this._placeStored(command);
-        else this._receive(command, payload, action, 'fpasoterm-osc');
+        // The OSC bridge is flushed after xterm has consumed the surrounding
+        // terminal write. fpasobrowser's toolbar/status bytes can therefore
+        // advance xterm's live cursor after the sender's adjacent `CSI H` was
+        // parsed. This private bridge is exclusively its full-pane renderer,
+        // so retain the intended home anchor instead of sampling that later
+        // cursor and clipping the frame to the right/bottom of the pane.
+        else this._receive(command, payload, action, 'fpasoterm-osc', { line: 0, column: 0 });
       } catch (error) {
         this._flushDeleteSnapshots(this.deleteSequence);
         this._respond(command, `EINVAL:${error.message}`, false);
@@ -278,7 +284,7 @@
       return true;
     }
 
-    _receive(command, payload, action, transport = 'kitty') {
+    _receive(command, payload, action, transport = 'kitty', anchorOverride = null) {
       // Only the first chunk carries a format field.  Record that boundary so
       // diagnostics can distinguish an application that never emitted a Kitty
       // frame from one whose subsequent decode or placement failed.
@@ -294,7 +300,13 @@
         }
       }
       if (command.m === 1) {
-        if (!this.chunks) this.chunks = { command: { ...command }, payload: '' };
+        if (!this.chunks) {
+          this.chunks = {
+            command: { ...command },
+            payload: '',
+            anchorOverride,
+          };
+        }
         this.chunks.payload += payload;
         if (this.chunks.payload.length > this.limits.maxEncodedBytes) {
           this.chunks = null;
@@ -305,6 +317,7 @@
       if (this.chunks) {
         payload = this.chunks.payload + payload;
         command = { ...this.chunks.command, ...command, m: 0 };
+        anchorOverride = this.chunks.anchorOverride;
         this.chunks = null;
       }
       if (action === 'q') {
@@ -316,7 +329,7 @@
       // Decoding a full terminal-browser frame is asynchronous. Capture the
       // cursor anchor while the APC is parsed; reading it after decompression
       // can place the image at a cursor position belonging to later output.
-      const anchor = this._captureAnchor();
+      const anchor = anchorOverride || this._captureAnchor();
       this.queue.push(key, {
         command: { ...command, i: id },
         payload,
