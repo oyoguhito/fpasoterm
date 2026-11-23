@@ -48,6 +48,28 @@ ChromeOSの調査では、`compositionstart`のhelper textarea `value=`と直後
 
 ## 描画とWindowの診断
 
+### Windows の fpasobrowser graphics bridge
+
+WindowsのConPTYはKitty Graphics ProtocolのAPC streamをfpasotermへ渡しません。そのため
+current fpasotermはchild processに`FPASOTERM_GRAPHICS_TRANSPORT=osc-v1`を設定し、
+current fpasobrowserはprivate OSC bridgeを選びます。両方を更新してから、fpasoterm内で
+次を実行してください。
+
+```powershell
+.\fpasobrowser.cmd --backend kitty --debug
+```
+
+`fpasobrowser debug: ... transport=fpasoterm-osc-rgba-zlib`が表示され、Diagnosticsを
+`graphics`でfilterしたとき、最初のframeで`fpasoterm graphics transfer received`と
+`fpasoterm graphics rendered ... paint=raw-rgba-putImageData`が表示されればbridgeとCanvas描画が
+完了しています。`FPASOTERM_GRAPHICS_TRANSPORT`が無い古いfpasotermでは、`auto`と
+`--backend kitty`は`half-block`へfallbackします。
+
+ConPTYの長いOSC sequenceが画像payloadを壊す経路を避けるため、fpasobrowserはbridgeの
+zlib圧縮raw RGBAを短いOSC packetに分割します。`transfer received`で`format=32`と
+`compression=z`、`rendered`で`paint=raw-rgba-putImageData`が確認点です。PNG signatureや
+WebViewのPNG decoderはこのWindows bridge経路を通りません。
+
 ChromeOS/BaguetteでWebKitGTKの描画に問題がある場合は以下を使用します。
 
 ```sh

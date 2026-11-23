@@ -3,7 +3,9 @@ const {
   DEFAULT_LIMITS,
   KittyGraphicsAddon,
   LatestJobQueue,
+  describePngBytes,
   parseKittyControl,
+  pngDimensions,
   validateKittyCommand,
 } = require('../../src/renderer/kitty-graphics.js');
 
@@ -20,6 +22,17 @@ assert.throws(() => validateKittyCommand(parseKittyControl('a=T,f=99'), 8), /pix
 assert.throws(
   () => validateKittyCommand(parseKittyControl('a=T,f=100'), DEFAULT_LIMITS.maxEncodedBytes + 1),
   /encoded payload/,
+);
+assert.equal(
+  describePngBytes(Uint8Array.from([137, 80, 78, 71, 13, 10, 26, 10])),
+  'png-bytes=8 signature=ok iend=missing',
+);
+assert.deepEqual(
+  pngDimensions(Uint8Array.from([
+    137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13,
+    73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 3,
+  ])),
+  { width: 2, height: 3 },
 );
 
 function testCapabilityQuery() {
@@ -89,6 +102,191 @@ function testFrameAnchorIsCapturedBeforeAsyncDecode() {
 }
 
 testFrameAnchorIsCapturedBeforeAsyncDecode();
+
+function testRawTransferReceiptIsDiagnosed() {
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon._receive(
+    { a: 'T', f: 32, s: 2, v: 1, c: 10, r: 5, i: 7, m: 1 },
+    'AAAA',
+    'T',
+  );
+  assert.deepEqual(diagnostics, [
+    'Kitty graphics transfer received id=7 action=T format=32 2x1 cells=10x5 compression=none',
+  ]);
+}
+
+testRawTransferReceiptIsDiagnosed();
+
+function testFirstCompressedTransferUsesVisibleDiagnostic() {
+  const debugDiagnostics = [];
+  const frameDiagnostics = [];
+  const addon = new KittyGraphicsAddon({
+    onDiagnostic: (message) => debugDiagnostics.push(message),
+    onFrameDiagnostic: (message) => frameDiagnostics.push(message),
+  });
+  addon._receive(
+    { a: 'T', f: 32, s: 2, v: 1, c: 10, r: 5, i: 8, o: 'z', m: 1 },
+    'AAAA',
+    'T',
+  );
+  assert.deepEqual(frameDiagnostics, [
+    'Kitty graphics transfer received id=8 action=T format=32 2x1 cells=10x5 compression=z',
+  ]);
+  assert.deepEqual(debugDiagnostics, []);
+}
+
+testFirstCompressedTransferUsesVisibleDiagnostic();
+
+function testFpasotermOscBridgeReusesKittyChunkAssembly() {
+  let queued;
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon.terminal = {
+    // OSC commands are flushed after the rest of a terminal write. The live
+    // cursor can therefore already point at later status output, while the
+    // fpasobrowser bridge must stay anchored at the pane's home cell.
+    buffer: { active: { baseY: 12, cursorY: 7, cursorX: 4 } },
+    input() {},
+  };
+  addon.queue = { push: (_key, job) => { queued = job; } };
+  assert.equal(addon.receiveFpasotermOsc('not-graphics;v=1;a=T,f=32,s=1,v=1;AQIDBA=='), false);
+  assert.equal(
+    addon.receiveFpasotermOsc('graphics;v=1;a=T,f=32,s=1,v=1,i=17,m=1;AQID'),
+    true,
+  );
+  assert.equal(queued, undefined);
+  assert.equal(addon.receiveFpasotermOsc('graphics;v=1;m=0;BA=='), true);
+  assert.deepEqual(queued.command, { a: 'T', f: 32, s: 1, v: 1, i: 17, m: 0 });
+  assert.equal(queued.payload, 'AQIDBA==');
+  assert.deepEqual(queued.anchor, { line: 0, column: 0 });
+  assert.deepEqual(diagnostics, [
+    'fpasoterm graphics transfer received id=17 action=T format=32 1x1 cells=autoxauto compression=none',
+  ]);
+}
+
+testFpasotermOscBridgeReusesKittyChunkAssembly();
+
+async function testRawRgbaBypassesImageBitmapDecode() {
+  const originalImageData = global.ImageData;
+  const originalCreateImageBitmap = global.createImageBitmap;
+  let imageBitmapCalls = 0;
+  class TestImageData {
+    constructor(data, width, height) {
+      this.data = data;
+      this.width = width;
+      this.height = height;
+    }
+  }
+  global.ImageData = TestImageData;
+  global.createImageBitmap = async () => {
+    imageBitmapCalls += 1;
+    throw new Error('raw pixels must not use createImageBitmap');
+  };
+  try {
+    const addon = new KittyGraphicsAddon();
+    const image = await addon._createBitmap(
+      { f: 32, s: 1, v: 1 },
+      Uint8Array.from([1, 2, 3, 4]),
+      'fpasoterm-osc',
+    );
+    assert.equal(image.width, 1);
+    assert.equal(image.height, 1);
+    assert.deepEqual(Array.from(image.imageData.data), [1, 2, 3, 4]);
+    assert.equal(image.opaqueCanvas, true);
+    assert.equal(imageBitmapCalls, 0);
+  } finally {
+    if (originalImageData === undefined) delete global.ImageData;
+    else global.ImageData = originalImageData;
+    if (originalCreateImageBitmap === undefined) delete global.createImageBitmap;
+    else global.createImageBitmap = originalCreateImageBitmap;
+  }
+}
+
+async function testPngDefersDecodeToTheConnectedImageElement() {
+  const originalImage = global.Image;
+  global.Image = class DisconnectedImageMustNotBeCreated {
+    constructor() { throw new Error('PNG must not decode on a detached Image'); }
+  };
+  try {
+    const addon = new KittyGraphicsAddon();
+    const image = await addon._createBitmap(
+      { f: 100 },
+      Uint8Array.from([
+        137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13,
+        73, 72, 68, 82, 0, 0, 0, 2, 0, 0, 0, 3,
+      ]),
+    );
+    assert.equal(image.width, 2);
+    assert.equal(image.height, 3);
+    assert.match(image.imageUrl, /^blob:/);
+    image.close();
+  } finally {
+    if (originalImage === undefined) delete global.Image;
+    else global.Image = originalImage;
+  }
+}
+
+function testRawRgbaPaintsViaPutImageData() {
+  const painted = [];
+  const addon = new KittyGraphicsAddon();
+  const imageData = { width: 1, height: 1, data: Uint8ClampedArray.from([1, 2, 3, 4]) };
+  addon.images.set(7, { width: 1, height: 1, imageData, close() {} });
+  const canvas = {
+    getContext: () => ({
+      clearRect: (...args) => painted.push(['clear', ...args]),
+      putImageData: (...args) => painted.push(['put', ...args]),
+      drawImage: () => { throw new Error('raw pixels must not use drawImage'); },
+    }),
+  };
+  addon._paintPlacement({ imageId: 7, canvas });
+  assert.deepEqual(painted, [
+    ['clear', 0, 0, 1, 1],
+    ['put', imageData, 0, 0],
+  ]);
+}
+
+testRawRgbaPaintsViaPutImageData();
+
+function testBridgeRawRgbaUsesOpaqueCanvasBacking() {
+  const contexts = [];
+  const addon = new KittyGraphicsAddon();
+  addon.images.set(7, {
+    width: 1,
+    height: 1,
+    opaqueCanvas: true,
+    imageData: { width: 1, height: 1, data: Uint8ClampedArray.from([1, 2, 3, 255]) },
+    close() {},
+  });
+  const canvas = {
+    getContext: (kind, options) => {
+      contexts.push([kind, options]);
+      return {
+        clearRect() {},
+        putImageData() {},
+      };
+    },
+  };
+  addon._paintPlacement({ imageId: 7, canvas });
+  assert.deepEqual(contexts, [['2d', { alpha: false, willReadFrequently: true }]]);
+}
+
+testBridgeRawRgbaUsesOpaqueCanvasBacking();
+
+function testPngPaintsViaHtmlImageElement() {
+  const addon = new KittyGraphicsAddon();
+  addon.images.set(7, {
+    width: 1,
+    height: 1,
+    imageUrl: 'blob:fpasoterm-test',
+    close() {},
+  });
+  const image = { src: '' };
+  addon._paintPlacement({ imageId: 7, canvas: image });
+  assert.equal(image.src, 'blob:fpasoterm-test');
+}
+
+testPngPaintsViaHtmlImageElement();
 
 function testActiveChangeIsDeduplicated() {
   const states = [];
@@ -339,6 +537,8 @@ async function testLatestFrameWins() {
 }
 
 Promise.all([
+  testRawRgbaBypassesImageBitmapDecode(),
+  testPngDefersDecodeToTheConnectedImageElement(),
   testLatestFrameWins(),
   testResetInvalidatesInFlightDecode(),
   testDeleteInvalidatesInFlightDecode(),

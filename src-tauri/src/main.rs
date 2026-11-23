@@ -7991,6 +7991,10 @@ fn terminal_start(
     // xterm-256color terminfo entry so TUI applications choose their truecolor path.
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "fpasoterm");
+    // Windows ConPTY discards Kitty's APC graphics stream.  This explicit
+    // child-process capability lets fpasobrowser select the bounded OSC
+    // bridge only when the receiving fpasoterm supports it.
+    command.env("FPASOTERM_GRAPHICS_TRANSPORT", "osc-v1");
     configure_osc7_shell_integration(&mut command, &shell);
     configure_utf8_terminal_locale(&mut command, output_encoding);
     if let Some(path_value) = terminal_path_with_app_dir() {
