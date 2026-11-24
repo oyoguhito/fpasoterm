@@ -174,7 +174,13 @@ function setPluginPanelsOpen(open) {
 function refreshPluginPanels() {
   if (!pluginPanelsElement || !pluginPanelsToggleButton || !pluginPanelsItems) return;
   const panels = [...pluginElementPanels.values()];
-  pluginPanelsElement.hidden = panels.length === 0;
+  const hasPanels = panels.length > 0;
+  // Keep a fixed titlebar slot even when no element plugin is active.  Hiding
+  // this holder with display:none used to shift all adjacent window controls.
+  pluginPanelsElement.dataset.empty = String(!hasPanels);
+  pluginPanelsElement.setAttribute('aria-hidden', String(!hasPanels));
+  pluginPanelsToggleButton.disabled = !hasPanels;
+  pluginPanelsToggleButton.tabIndex = hasPanels ? 0 : -1;
   pluginPanelsToggleButton.textContent = `Panels (${panels.length})`;
   pluginPanelsToggleButton.setAttribute('aria-label', `Show ${panels.length} plugin panel${panels.length === 1 ? '' : 's'}`);
   if (panels.length === 0) {
@@ -371,6 +377,7 @@ let terminalLinksSuspended = false;
 let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
+let imeInputGuard = null;
 let terminalModeSequenceTail = '';
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
@@ -920,6 +927,17 @@ function clearStaleImeTextareaAtCompositionStart(textarea) {
   showDebugDiagnostic(`renderer ime cleared stale helper at compositionstart value=${JSON.stringify(staleValue)}`);
 }
 
+// Installs a deliberately narrow post-composition guard. xterm remains the
+// only component that emits PTY input; this only removes a confirmed immediate
+// duplicate which some Windows WebView2 IMEs send after the normal commit.
+function configureImeInputGuard() {
+  const imeConfig = appConfig.ime || {};
+  imeInputGuard = window.fpasotermImeInputGuard?.createImeInputGuard({
+    enabled: imeConfig.duplicateGuard !== false,
+    windowMs: imeConfig.duplicateWindowMs,
+  }) || null;
+}
+
 // Some Windows WebView2 builds dispatch composition events above xterm's
 // hidden textarea. Observe the document capture path for display only.
 function isTerminalImeEvent(event) {
@@ -957,8 +975,9 @@ function installImeVisualFallback() {
   }, true);
 }
 
-// Observes composition events for visual feedback only. Do not suppress,
-// replay, replace, or directly commit them: xterm.js owns normal PTY input.
+// Observes composition events for visual feedback and records only the native
+// commit boundary. xterm.js still owns normal PTY input; the guard never
+// replays or directly commits text.
 function installCompositionObserver() {
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
   if (!textarea) {
@@ -975,6 +994,7 @@ function installCompositionObserver() {
   }, true);
 
   textarea.addEventListener('compositionstart', (event) => {
+    imeInputGuard?.compositionStart();
     extendImeTraceWindow();
     traceImeEvent('compositionstart', event);
     clearImePreedit();
@@ -995,12 +1015,15 @@ function installCompositionObserver() {
     }
   }, true);
   textarea.addEventListener('compositionend', (event) => {
+    // Capture runs before xterm's own bubble listener, so the following
+    // term.onData callback can be compared to this composition commit.
+    imeInputGuard?.compositionEnd(event.data || event.target?.value || '');
     extendImeTraceWindow();
     traceImeEvent('compositionend', event);
     const committedValue = event.target?.value || event.data || '';
     showImePreedit(event.data || committedValue, true);
     clearImePreedit(180);
-  });
+  }, true);
   textarea.addEventListener('input', (event) => {
     const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
     if (isCompositionInput || Date.now() < imeTraceUntil) {
@@ -1597,11 +1620,21 @@ function showTerminalError(message) {
   terminalElement.classList.add('terminal-error');
 }
 
-// Sends terminal input as emitted by xterm.js. IME data is intentionally not
-// altered here so platform-specific input can be observed and debugged.
+// Sends terminal input as emitted by xterm.js. A very narrow IME guard handles
+// only a confirmed duplicate directly following a composition commit.
 function sendTerminalInput(data, source = 'input') {
-  showDebugDiagnostic(`renderer terminal ${source} bytes=${data.length} data=${JSON.stringify(data)} codepoints=${Array.from(data).map((character) => `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(',')}`);
-  window.fpasoterm.writeTerminal(data).catch((error) => {
+  const guardResult = source === 'input'
+    ? (imeInputGuard?.filterTerminalInput(data) || { data, action: 'pass' })
+    : { data, action: 'pass' };
+  if (!guardResult.data) {
+    showDiagnostic(`renderer suppressed IME ${guardResult.action}`);
+    return;
+  }
+  if (guardResult.action !== 'pass') {
+    showDiagnostic(`renderer corrected IME ${guardResult.action}`);
+  }
+  showDebugDiagnostic(`renderer terminal ${source} bytes=${guardResult.data.length} data=${JSON.stringify(guardResult.data)} codepoints=${Array.from(guardResult.data).map((character) => `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(',')}`);
+  window.fpasoterm.writeTerminal(guardResult.data).catch((error) => {
     showTerminalError(`terminal write failed: ${error}`);
   });
 }
@@ -2542,6 +2575,7 @@ function applyTerminalAppearance() {
 async function applyRuntimeConfig(runtimeConfig) {
   appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
   activeConfigPath = String(runtimeConfig.configPath || activeConfigPath);
+  configureImeInputGuard();
   applyKeybindingLabels();
   pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
   applyWindowAppearance();
@@ -7622,6 +7656,7 @@ async function initialize() {
   }
   primeScreenVideoRuntimePlatform();
   await loadRuntimeConfig();
+  configureImeInputGuard();
   pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();
   await refreshTerminalLogControl();

@@ -67,7 +67,7 @@ brightWhite = "#ffffff"
 
 [ime]
 duplicateGuard = true
-duplicateWindowMs = 800
+duplicateWindowMs = 400
 repeatedTextWindowMs = 140
 
 # Mod means Ctrl on Windows/Linux and Cmd on macOS. Set prefix = "Ctrl+Alt"

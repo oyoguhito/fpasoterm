@@ -20,7 +20,7 @@
             <button id="terminal-graphics-zoom-100" type="button">100%</button>
           </div>
         </div>
-        <div id="plugin-panels" hidden>
+        <div id="plugin-panels" data-empty="true" aria-hidden="true">
           <button id="plugin-panels-toggle" type="button" aria-label="Show plugin panels" aria-expanded="false">Panels</button>
           <div id="plugin-panels-items" role="menu" aria-label="Plugin panels" hidden></div>
         </div>
@@ -284,6 +284,7 @@
     <script src="./vendor/addon-web-links/addon-web-links.js"></script>
     <script src="./plugin-command-runtime.js"></script>
     <script src="./plugin-terminal-input.js"></script>
+    <script src="./ime-input-guard.js"></script>
     <script src="./vendor/addon-image/addon-image.js"></script>
     <script src="./kitty-graphics.js"></script>
     <script src="./renderer.js"></script>
