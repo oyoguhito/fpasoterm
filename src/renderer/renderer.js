@@ -5093,12 +5093,76 @@ function captureCanvasHasLegiblePixels(context, canvas) {
   return false;
 }
 
+// Converts a browser pointer location to the full-resolution capture canvas.
+// A remote canvas commonly uses `object-fit: contain`; in that case its CSS
+// rectangle includes letterbox space which has no corresponding remote pixel.
+// The input bridge already removes that space before sending RDP coordinates,
+// and video capture must make the identical conversion to draw at the same
+// point. Terminal surfaces and normal stretched canvases retain the direct
+// CSS-to-capture scale.
+function screenVideoPointerCapturePosition(sourceRect, captureCanvas, sourceCanvas = null) {
+  const { clientX, clientY } = screenVideoPointer;
+  const localX = clientX - sourceRect.left;
+  const localY = clientY - sourceRect.top;
+  const direct = () => ({
+    x: localX * captureCanvas.width / sourceRect.width,
+    y: localY * captureCanvas.height / sourceRect.height,
+  });
+  if (!sourceCanvas || !Number.isFinite(Number(sourceCanvas.width))
+      || !Number.isFinite(Number(sourceCanvas.height))
+      || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
+    return direct();
+  }
+
+  let objectFit = 'fill';
+  try {
+    objectFit = window.getComputedStyle(sourceCanvas).objectFit || 'fill';
+  } catch (_) {
+    return direct();
+  }
+  if (!['contain', 'cover', 'none', 'scale-down'].includes(objectFit)) {
+    return direct();
+  }
+
+  const sourceWidth = Number(sourceCanvas.width);
+  const sourceHeight = Number(sourceCanvas.height);
+  const containScale = Math.min(sourceRect.width / sourceWidth, sourceRect.height / sourceHeight);
+  const scale = objectFit === 'cover'
+    ? Math.max(sourceRect.width / sourceWidth, sourceRect.height / sourceHeight)
+    : objectFit === 'none'
+      ? 1
+      : objectFit === 'scale-down'
+        ? Math.min(1, containScale)
+        : containScale;
+  if (!Number.isFinite(scale) || scale <= 0) return direct();
+
+  const renderedWidth = sourceWidth * scale;
+  const renderedHeight = sourceHeight * scale;
+  // `object-position` defaults to 50% 50%, which is also the position used
+  // by the built-in RDP canvas. A custom position retains the direct mapping
+  // rather than guessing a non-default CSS position.
+  const computedPosition = window.getComputedStyle(sourceCanvas).objectPosition || '50% 50%';
+  if (computedPosition !== '50% 50%' && computedPosition !== 'center center') return direct();
+  const insetX = (sourceRect.width - renderedWidth) / 2;
+  const insetY = (sourceRect.height - renderedHeight) / 2;
+  const imageX = localX - insetX;
+  const imageY = localY - insetY;
+  if (objectFit !== 'cover'
+      && (imageX < 0 || imageY < 0 || imageX >= renderedWidth || imageY >= renderedHeight)) {
+    return null;
+  }
+  return {
+    x: imageX / scale * captureCanvas.width / sourceWidth,
+    y: imageY / scale * captureCanvas.height / sourceHeight,
+  };
+}
+
 // Adds a small high-contrast cursor after the source pixels have been copied.
 // It has no effect outside the source rectangle, so a terminal recording does
 // not reveal pointer activity in the titlebar or other app chrome. The arrow
 // is drawn by us rather than relying on browser/OS cursor capture because RDP
 // canvases and CanvasCaptureMediaStream do not include an OS cursor reliably.
-function drawScreenVideoPointer(context, sourceRect, captureCanvas) {
+function drawScreenVideoPointer(context, sourceRect, captureCanvas, sourceCanvas = null) {
   if (!screenVideoPointer.visible || !sourceRect || !captureCanvas
       || sourceRect.width <= 0 || sourceRect.height <= 0) {
     return;
@@ -5108,10 +5172,11 @@ function drawScreenVideoPointer(context, sourceRect, captureCanvas) {
       || clientY < sourceRect.top || clientY >= sourceRect.bottom) {
     return;
   }
+  const position = screenVideoPointerCapturePosition(sourceRect, captureCanvas, sourceCanvas);
+  if (!position) return;
+  const { x, y } = position;
   const scaleX = captureCanvas.width / sourceRect.width;
   const scaleY = captureCanvas.height / sourceRect.height;
-  const x = (clientX - sourceRect.left) * scaleX;
-  const y = (clientY - sourceRect.top) * scaleY;
   const scale = Math.max(1, Math.min(scaleX, scaleY));
   const size = 16 * scale;
 
@@ -5301,7 +5366,12 @@ function createPluginCanvasSurface(sourceCanvas, fixedGeometry = false) {
       // sample; the next timer tick will retry against the same live canvas.
     }
     context.restore();
-    drawScreenVideoPointer(context, sourceCanvas.getBoundingClientRect(), captureCanvas);
+    drawScreenVideoPointer(
+      context,
+      sourceCanvas.getBoundingClientRect(),
+      captureCanvas,
+      sourceCanvas,
+    );
   };
   drawFrame();
   const timer = window.setInterval(drawFrame, 1000 / 30);
