@@ -4506,7 +4506,7 @@ fn default_runtime_config() -> RuntimeConfig {
             }),
             ime: serde_json::json!({
                 "duplicateGuard": true,
-                "duplicateWindowMs": 400,
+                "duplicateWindowMs": 800,
                 "repeatedTextWindowMs": 140
             }),
             keybindings: serde_json::json!({

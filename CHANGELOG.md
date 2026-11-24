@@ -7,8 +7,9 @@
   opened, minimized, restored, or closed.
 - On Windows WebView2, defer only an empty preliminary `compositionend` until
   its populated completion arrives, so xterm finalizes the original helper
-  text once instead of replaying stale text. The existing narrow duplicate
-  guard still leaves ordinary one-character input, control input, and paste
+  text once instead of replaying stale text. The 800ms narrow duplicate guard
+  retains a just-committed value across one subsequent WebView2 composition
+  cycle, while ordinary one-character input, control input, and paste remain
   unchanged.
 
 ## 1.7.1

@@ -5,7 +5,7 @@
 }(typeof globalThis === 'object' ? globalThis : this, () => {
   'use strict';
 
-  const DEFAULT_WINDOW_MS = 400;
+  const DEFAULT_WINDOW_MS = 800;
   const MINIMUM_SUFFIX_CODEPOINTS = 2;
 
   function isPlainText(data) {
@@ -33,11 +33,34 @@
     }
 
     function compositionStart() {
-      clear();
+      // Windows WebView2 can report the duplicated final text as a fresh
+      // composition cycle. Retain a still-fresh committed payload so that
+      // second cycle can be compared at its normal xterm onData boundary.
+      // An expired record cannot affect ordinary later typing.
+      if (pendingCommit && now() - pendingCommit.time > windowMs) {
+        clear();
+      }
     }
 
     function compositionEnd(text) {
       const value = String(text || '');
+      // Preserve an already-delivered commit when this new composition is
+      // exactly the replay that WebView2 is about to send through xterm. The
+      // terminal input callback remains the single place that drops it.
+      if (
+        pendingCommit
+        && pendingCommit.delivered
+        && now() - pendingCommit.time <= windowMs
+        && (
+          value === pendingCommit.value
+          || (
+            pendingCommit.value.endsWith(value)
+            && Array.from(value).length >= MINIMUM_SUFFIX_CODEPOINTS
+          )
+        )
+      ) {
+        return;
+      }
       pendingCommit = isPlainText(value)
         ? { value, time: now(), delivered: false }
         : null;

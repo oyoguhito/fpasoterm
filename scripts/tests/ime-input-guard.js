@@ -12,6 +12,17 @@ assert.deepEqual(guard.filterTerminalInput('日本語入力'), { data: '日本�
 // A second full commit and the Windows-only final-glyph replay are removed.
 clock += 12;
 assert.deepEqual(guard.filterTerminalInput('日本語入力'), { data: '', action: 'drop-duplicated-commit' });
+
+// WebView2 can report the replay as a second composition cycle. Keep the
+// fresh original commit until its duplicate reaches xterm onData.
+guard.compositionStart();
+guard.compositionEnd('再入力');
+assert.deepEqual(guard.filterTerminalInput('再入力'), { data: '再入力', action: 'pass' });
+clock += 12;
+guard.compositionStart();
+guard.compositionEnd('再入力');
+assert.deepEqual(guard.filterTerminalInput('再入力'), { data: '', action: 'drop-duplicated-commit' });
+
 guard.compositionStart();
 guard.compositionEnd('変換後の文字');
 assert.deepEqual(guard.filterTerminalInput('変換後の文字'), { data: '変換後の文字', action: 'pass' });
