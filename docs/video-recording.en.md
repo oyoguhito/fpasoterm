@@ -10,6 +10,13 @@ operating-system picker, fpasoterm can record a user-selected screen or window.
 On WebKitGTK/ChromeOS builds without that picker, it instead records the
 fpasoterm terminal surface.
 
+Terminal and front-plugin canvas recordings draw a high-contrast fpasoterm
+pointer over the captured surface, including its primary-button pressed state.
+This makes mouse movement visible for RDP/noVNC captures without relying on an
+OS cursor. The overlay is omitted outside the recorded terminal or plugin
+canvas; an operating-system screen/window capture follows that platform's
+cursor-capture behavior.
+
 ## Record a video
 
 1. Open the titlebar hamburger menu, then **Log**.

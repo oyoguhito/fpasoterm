@@ -11,6 +11,9 @@
   retains a just-committed value across one subsequent WebView2 composition
   cycle, while ordinary one-character input, control input, and paste remain
   unchanged.
+- Canvas-based terminal and front-plugin recordings now include an in-app
+  high-contrast pointer with primary-button feedback, so remote RDP/noVNC
+  mouse movement remains visible without capturing an OS cursor.
 
 ## 1.7.1
 

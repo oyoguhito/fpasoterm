@@ -2,6 +2,8 @@
 
 fpasotermはtitlebarの **Log** menuからvideoを録画できます。これは読みやすいterminal output logとは別の機能です。macOSではすべての **Video Start** で、利用者が選択したfpasoterm windowを先に録画します。これによりterminalから開始しても、同じrecordingの途中でpluginへ切り替わった内容、remote desktop、controls、native popupを含められます。macOS WebViewにOS picker APIがない場合も、fpasoterm自身のnative windowをPNGとして取得するため、同じ範囲を記録できます。その他platformは既存どおりcanvas優先です。plugin canvasが表示されていない場合は、platform WebViewがOS pickerに対応していれば利用者が選択したscreenまたはwindowを録画し、WebKitGTK/ChromeOSのようにpickerがない場合はfpasotermのterminal surfaceを録画します。
 
+terminal と前面 plugin canvas の録画では、primary button の押下状態を含む高コントラストの fpasoterm pointer をcapture surface上に重ねます。これによりRDP/noVNC canvasでもOS cursorに依存せずmouse移動を確認できます。recording対象のterminal/plugin canvas外ではoverlayを表示しません。OSのscreen/windowを選択した録画は、そのplatformのcursor capture動作に従います。
+
 ## 録画手順
 
 1. titlebarのhamburger menuから **Log** を開きます。

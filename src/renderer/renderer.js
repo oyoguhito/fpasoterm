@@ -447,6 +447,55 @@ let screenVideoFeedbackTimer = null;
 let screenVideoCaptureSource = '';
 let screenVideoRuntimePlatformPromise = null;
 let screenVideoRuntimePlatformInfo = null;
+// Canvas recording intentionally does not ask the OS to include its pointer.
+// Keep the latest in-app pointer position so terminal and remote-plugin
+// captures can show the action that led to a visual change. This is reset at
+// the recording boundary and is only ever composited into fpasoterm-owned
+// canvas surfaces.
+const screenVideoPointer = {
+  clientX: 0,
+  clientY: 0,
+  visible: false,
+  pressed: false,
+};
+
+function resetScreenVideoPointer() {
+  screenVideoPointer.visible = false;
+  screenVideoPointer.pressed = false;
+}
+
+function trackScreenVideoPointer(event) {
+  if (!screenVideoRecorder || screenVideoRecorder.state === 'inactive') {
+    return;
+  }
+  const clientX = Number(event?.clientX);
+  const clientY = Number(event?.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    return;
+  }
+  screenVideoPointer.clientX = clientX;
+  screenVideoPointer.clientY = clientY;
+  screenVideoPointer.visible = true;
+  if (event.type === 'pointerup' || event.type === 'pointercancel') {
+    screenVideoPointer.pressed = false;
+  } else if (Number.isFinite(Number(event.buttons))) {
+    screenVideoPointer.pressed = (Number(event.buttons) & 1) !== 0;
+  }
+}
+
+function installScreenVideoPointerTracking() {
+  // Capture phase observes events from a remote canvas even when its plugin
+  // consumes them to forward input to RDP/noVNC.
+  for (const eventName of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel']) {
+    window.addEventListener(eventName, trackScreenVideoPointer, true);
+  }
+  window.addEventListener('pointerout', (event) => {
+    if (!event.relatedTarget) {
+      resetScreenVideoPointer();
+    }
+  }, true);
+  window.addEventListener('blur', resetScreenVideoPointer);
+}
 
 function setTerminalGraphicsZoomVisible(visible) {
   if (terminalGraphicsHideTimer !== null) {
@@ -4960,6 +5009,52 @@ function captureCanvasHasLegiblePixels(context, canvas) {
   return false;
 }
 
+// Adds a small high-contrast cursor after the source pixels have been copied.
+// It has no effect outside the source rectangle, so a terminal recording does
+// not reveal pointer activity in the titlebar or other app chrome. The arrow
+// is drawn by us rather than relying on browser/OS cursor capture because RDP
+// canvases and CanvasCaptureMediaStream do not include an OS cursor reliably.
+function drawScreenVideoPointer(context, sourceRect, captureCanvas) {
+  if (!screenVideoPointer.visible || !sourceRect || !captureCanvas
+      || sourceRect.width <= 0 || sourceRect.height <= 0) {
+    return;
+  }
+  const { clientX, clientY } = screenVideoPointer;
+  if (clientX < sourceRect.left || clientX >= sourceRect.right
+      || clientY < sourceRect.top || clientY >= sourceRect.bottom) {
+    return;
+  }
+  const scaleX = captureCanvas.width / sourceRect.width;
+  const scaleY = captureCanvas.height / sourceRect.height;
+  const x = (clientX - sourceRect.left) * scaleX;
+  const y = (clientY - sourceRect.top) * scaleY;
+  const scale = Math.max(1, Math.min(scaleX, scaleY));
+  const size = 16 * scale;
+
+  context.save();
+  context.translate(x, y);
+  context.lineJoin = 'round';
+  context.lineWidth = Math.max(1.25, 1.75 * scale);
+  context.strokeStyle = '#111';
+  context.fillStyle = screenVideoPointer.pressed ? '#f5d76e' : '#fff';
+  context.shadowColor = 'rgba(0, 0, 0, 0.72)';
+  context.shadowBlur = Math.max(1, 1.5 * scale);
+  context.shadowOffsetX = Math.max(1, scale);
+  context.shadowOffsetY = Math.max(1, scale);
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(0, size);
+  context.lineTo(4.5 * scale, 11 * scale);
+  context.lineTo(8.5 * scale, 17 * scale);
+  context.lineTo(12 * scale, 14.5 * scale);
+  context.lineTo(8 * scale, 8.5 * scale);
+  context.lineTo(size, 8 * scale);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+
 // Last-resort rasterizer for WebViews whose visible xterm backing canvases are
 // blank when copied into another canvas. It uses xterm's visible buffer rather
 // than terminal output history, so GIF frames remain useful instead of black.
@@ -5069,6 +5164,7 @@ function createTerminalCanvasSurface(fixedGeometry = false) {
       drawTerminalBufferTextFallback(context, terminalRect);
       context.restore();
     }
+    drawScreenVideoPointer(context, terminalRect, captureCanvas);
   };
   drawFrame();
   const timer = window.setInterval(drawFrame, 1000 / 30);
@@ -5121,6 +5217,7 @@ function createPluginCanvasSurface(sourceCanvas, fixedGeometry = false) {
       // sample; the next timer tick will retry against the same live canvas.
     }
     context.restore();
+    drawScreenVideoPointer(context, sourceCanvas.getBoundingClientRect(), captureCanvas);
   };
   drawFrame();
   const timer = window.setInterval(drawFrame, 1000 / 30);
@@ -5420,6 +5517,7 @@ async function startTerminalRasterRecording(
       },
     };
     screenVideoRecorder = recorder;
+    resetScreenVideoPointer();
     screenVideoCaptureSource = captureSource;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
@@ -5442,6 +5540,7 @@ async function startTerminalRasterRecording(
     screenVideoStopping = false;
     if (screenVideoRecorder === recorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
       screenVideoCaptureSource = '';
     }
     await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
@@ -5685,6 +5784,7 @@ async function finalizeScreenVideoRecording(recorder, stream, cleanup) {
     stopScreenVideoTracks(stream, cleanup);
     if (screenVideoRecorder === recorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
       screenVideoWriteChain = Promise.resolve();
       screenVideoStopping = false;
       screenVideoWriteError = null;
@@ -5957,6 +6057,7 @@ async function startScreenVideoRecording() {
 
     const status = await window.fpasoterm.startScreenVideoRecording(format.container);
     screenVideoRecorder = recorder;
+    resetScreenVideoPointer();
     screenVideoCaptureSource = source;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
@@ -6003,6 +6104,7 @@ async function startScreenVideoRecording() {
     screenVideoStopping = false;
     if (screenVideoRecorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
     }
     screenVideoFlushFrame = null;
     screenVideoCaptureSource = '';
@@ -7809,6 +7911,7 @@ Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   }
 
   window.addEventListener('focus', focusTerminalInput);
+  installScreenVideoPointerTracking();
   terminalElement.addEventListener('pointerdown', () => {
     setTimeout(focusTerminalInput, 0);
   });
