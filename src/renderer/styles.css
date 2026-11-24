@@ -88,6 +88,7 @@ body {
 #window-controls {
   position: relative;
   display: flex;
+  align-items: center;
   flex: 0 0 auto;
   gap: 6px;
   app-region: no-drag;
@@ -188,6 +189,8 @@ body {
 
 #plugin-panels {
   position: relative;
+  display: flex;
+  align-items: center;
   flex: 0 0 88px;
   width: 88px;
 }

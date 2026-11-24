@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.7.3
+
+- Kept the titlebar `Panels` slot and every adjacent window control vertically
+  centered, as well as fixed in horizontal position while plugin overlays are
+  opened, minimized, restored, or closed.
+- On Windows WebView2, defer only an empty preliminary `compositionend` until
+  its populated completion arrives, so xterm finalizes the original helper
+  text once instead of replaying stale text. The existing narrow duplicate
+  guard still leaves ordinary one-character input, control input, and paste
+  unchanged.
+
 ## 1.7.1
 
 - Restored Windows PowerShell live diagnostics for GUI-subsystem builds when

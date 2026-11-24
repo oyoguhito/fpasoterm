@@ -378,6 +378,15 @@ let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
 let imeInputGuard = null;
+// Windows WebView2 can issue an empty compositionend immediately before the
+// actual committed event. Let the populated event reach xterm when it arrives
+// promptly; otherwise release the original empty event after this short grace
+// period so a platform that legitimately commits without event.data still
+// works.
+const EMPTY_IME_COMPOSITION_END_GRACE_MS = 90;
+const EMPTY_IME_COMPOSITION_END_LATE_EVENT_MS = 350;
+let pendingEmptyImeCompositionEnd = null;
+const deferredImeCompositionEndEvents = new WeakSet();
 let terminalModeSequenceTail = '';
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
@@ -927,6 +936,61 @@ function clearStaleImeTextareaAtCompositionStart(textarea) {
   showDebugDiagnostic(`renderer ime cleared stale helper at compositionstart value=${JSON.stringify(staleValue)}`);
 }
 
+function clearPendingEmptyImeCompositionEnd() {
+  const pending = pendingEmptyImeCompositionEnd;
+  if (!pending) return;
+  if (pending.releaseTimer) clearTimeout(pending.releaseTimer);
+  if (pending.lateEventTimer) clearTimeout(pending.lateEventTimer);
+  pendingEmptyImeCompositionEnd = null;
+}
+
+// Releases an intercepted empty compositionend back to xterm without making
+// up or writing any text. xterm retains ownership of the helper textarea and
+// therefore derives exactly the same payload it would have received natively.
+function releaseEmptyImeCompositionEnd(pending) {
+  if (pendingEmptyImeCompositionEnd !== pending) return;
+  pending.releaseTimer = null;
+  pending.released = true;
+  const deferredEvent = new CompositionEvent('compositionend', {
+    bubbles: true,
+    cancelable: true,
+    data: '',
+  });
+  deferredImeCompositionEndEvents.add(deferredEvent);
+  pending.textarea.dispatchEvent(deferredEvent);
+  pending.lateEventTimer = setTimeout(() => {
+    if (pendingEmptyImeCompositionEnd === pending) {
+      pendingEmptyImeCompositionEnd = null;
+    }
+  }, EMPTY_IME_COMPOSITION_END_LATE_EVENT_MS);
+}
+
+function deferEmptyImeCompositionEnd(textarea) {
+  clearPendingEmptyImeCompositionEnd();
+  const pending = {
+    textarea,
+    releaseTimer: null,
+    lateEventTimer: null,
+    released: false,
+  };
+  pending.releaseTimer = setTimeout(
+    () => releaseEmptyImeCompositionEnd(pending),
+    EMPTY_IME_COMPOSITION_END_GRACE_MS,
+  );
+  pendingEmptyImeCompositionEnd = pending;
+}
+
+// Returns true only when an original populated compositionend arrived after a
+// delayed empty event was already handed to xterm. It must not finalize the
+// same helper text a second time.
+function settleEmptyImeCompositionEnd(textarea) {
+  const pending = pendingEmptyImeCompositionEnd;
+  if (!pending || pending.textarea !== textarea) return false;
+  const wasReleased = pending.released;
+  clearPendingEmptyImeCompositionEnd();
+  return wasReleased;
+}
+
 // Installs a deliberately narrow post-composition guard. xterm remains the
 // only component that emits PTY input; this only removes a confirmed immediate
 // duplicate which some Windows WebView2 IMEs send after the normal commit.
@@ -994,6 +1058,10 @@ function installCompositionObserver() {
   }, true);
 
   textarea.addEventListener('compositionstart', (event) => {
+    // A new native composition supersedes an empty-end grace period. The
+    // normal populated completion path below handles the common WebView2
+    // empty-end/real-end pair without delaying the newly started conversion.
+    clearPendingEmptyImeCompositionEnd();
     imeInputGuard?.compositionStart();
     extendImeTraceWindow();
     traceImeEvent('compositionstart', event);
@@ -1015,6 +1083,22 @@ function installCompositionObserver() {
     }
   }, true);
   textarea.addEventListener('compositionend', (event) => {
+    const isDeferredEmptyEnd = deferredImeCompositionEndEvents.has(event);
+    if (!isDeferredEmptyEnd) {
+      if (settleEmptyImeCompositionEnd(textarea)) {
+        showDebugDiagnostic('renderer ime suppressed late compositionend after deferred empty end');
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (!event.data) {
+        // Do not let xterm finalize from an old helper value before the real
+        // Windows compositionend carrying the commit follows this event.
+        deferEmptyImeCompositionEnd(textarea);
+        showDebugDiagnostic('renderer ime deferred preliminary empty compositionend');
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
     // Capture runs before xterm's own bubble listener, so the following
     // term.onData callback can be compared to this composition commit.
     imeInputGuard?.compositionEnd(event.data || event.target?.value || '');

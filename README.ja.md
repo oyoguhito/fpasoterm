@@ -331,7 +331,7 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-IME composition は表示専用です。WebView/xterm.js の入力経路で受け取った文字を、fpasoterm が抑止・再送・置換・直接確定することはありません。
+IME composition の表示は xterm/WebView に任せます。Windows WebView2 の一部 IME は、実際の確定 event の直前に空の `compositionend` を送ります。fpasoterm はこの予備 event だけを短時間保留し、xterm が元の helper text を一度だけ確定できるようにします。文字列を生成・再送することはなく、通常の一文字入力、control input、貼り付けは変更しません。
 
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 

@@ -543,7 +543,12 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-IME composition is displayed visually only. fpasoterm does not suppress, replay, replace, or directly commit text received from the WebView/xterm.js input path.
+IME composition is displayed visually by xterm/WebView. On Windows WebView2,
+some IMEs emit an empty preliminary `compositionend` immediately before the
+real populated completion; fpasoterm defers only that preliminary event so
+xterm finalizes its original helper text once. It never synthesizes text or
+replays it, and ordinary one-character input, control input, and paste remain
+unchanged.
 
 When `window.rememberBounds` is enabled, fpasoterm stores the last window size locally in `~/.config/fpasoterm/User/window-state.json`.
 
