@@ -378,11 +378,11 @@ let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
 let imeInputGuard = null;
-// Windows WebView2 can issue an empty compositionend immediately before the
-// actual committed event. Let the populated event reach xterm when it arrives
-// promptly; otherwise release the original empty event after this short grace
-// period so a platform that legitimately commits without event.data still
-// works.
+let imeCommitRouter = null;
+let imeCommitTextareaClearTimer = null;
+// Native xterm delivery is retained on Windows WebView2. Linux/ChromeOS uses
+// the explicit final-commit router below because WebKitGTK can retain stale
+// helper-textarea contents across composition cycles.
 const EMPTY_IME_COMPOSITION_END_GRACE_MS = 90;
 const EMPTY_IME_COMPOSITION_END_LATE_EVENT_MS = 350;
 let pendingEmptyImeCompositionEnd = null;
@@ -1040,18 +1040,63 @@ function settleEmptyImeCompositionEnd(textarea) {
   return wasReleased;
 }
 
-// Installs a deliberately narrow post-composition guard. xterm remains the
-// only component that emits PTY input; this only removes a confirmed immediate
-// duplicate which some Windows WebView2 IMEs send after the normal commit.
+function isLinuxPlatform() {
+  return /Linux/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+// `platform` is the safe default: Linux/ChromeOS gets one explicit owner for
+// IME commits, while Windows WebView2 and macOS retain native xterm delivery.
+// `native` is retained as an escape hatch for an unusual Linux IME.
+function usesImeCommitDelivery() {
+  const delivery = String(appConfig?.ime?.delivery || 'platform').toLowerCase();
+  return delivery === 'commit' || (delivery !== 'native' && isLinuxPlatform());
+}
+
+// Installs the native duplicate guard for Windows/macOS and the explicit
+// final-commit router for Linux/ChromeOS.
 function configureImeInputGuard() {
   const imeConfig = appConfig.ime || {};
   imeInputGuard = window.fpasotermImeInputGuard?.createImeInputGuard({
     enabled: imeConfig.duplicateGuard !== false,
     windowMs: imeConfig.duplicateWindowMs,
   }) || null;
+  imeCommitRouter = usesImeCommitDelivery()
+    ? window.fpasotermImeCommitRouter?.createImeCommitRouter({
+      duplicateWindowMs: imeConfig.duplicateWindowMs,
+    }) || null
+    : null;
 }
 
-// Some Windows WebView2 builds dispatch composition events above xterm's
+function clearScheduledImeCommitTextarea() {
+  if (imeCommitTextareaClearTimer !== null) {
+    clearTimeout(imeCommitTextareaClearTimer);
+    imeCommitTextareaClearTimer = null;
+  }
+}
+
+function scheduleImeCommitTextareaClear(textarea) {
+  clearScheduledImeCommitTextarea();
+  // Let the browser finish its final beforeinput/input pair, then remove the
+  // helper value so xterm cannot inherit it in a future native event.
+  imeCommitTextareaClearTimer = setTimeout(() => {
+    imeCommitTextareaClearTimer = null;
+    if (usesImeCommitDelivery() && textarea?.value) textarea.value = '';
+  }, 0);
+}
+
+function consumeImeCommitDecision(event, decision, textarea, stage) {
+  if (!decision?.suppress) return false;
+  event.stopImmediatePropagation();
+  showDebugDiagnostic(`renderer ime ${stage} ${decision.action}`);
+  if (decision.commit) {
+    imeInputGuard?.clear();
+    sendTerminalInput(decision.commit, 'IME commit');
+    scheduleImeCommitTextareaClear(textarea);
+  }
+  return true;
+}
+
+// Some WebView implementations dispatch composition events above xterm's
 // hidden textarea. Observe the document capture path for display only.
 function isTerminalImeEvent(event) {
   return Boolean(
@@ -1088,41 +1133,58 @@ function installImeVisualFallback() {
   }, true);
 }
 
-// Observes composition events for visual feedback and records only the native
-// commit boundary. xterm.js still owns normal PTY input; the guard never
-// replays or directly commits text.
+// Linux/ChromeOS uses a single explicit composition-commit path: marked
+// candidate updates never reach xterm, and the final text is written once at
+// compositionend (or the matching insertFromComposition fallback). Other
+// platforms retain xterm's native composition path with its narrow guard.
 function installCompositionObserver() {
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
   if (!textarea) {
     return;
   }
 
-  textarea.addEventListener('keydown', (event) => {
+  // xterm registers capture listeners on its helper textarea while it opens.
+  // Observe the parent capture phase instead: it runs before those listeners,
+  // which is required for Linux candidate keys/input to stay out of xterm.
+  terminalElement.addEventListener('keydown', (event) => {
     if (event.isComposing || event.keyCode === 229 || Date.now() < imeTraceUntil) {
       traceImeEvent('keydown', event);
     }
     if (event.isComposing || event.keyCode === 229) {
       showImePreedit(textarea.value, true);
     }
+    if (imeCommitRouter?.captureKey(event)) {
+      event.stopImmediatePropagation();
+      showDebugDiagnostic('renderer ime keydown held for composition commit');
+    }
   }, true);
 
-  textarea.addEventListener('compositionstart', (event) => {
-    // A new native composition supersedes an empty-end grace period. The
-    // normal populated completion path below handles the common WebView2
-    // empty-end/real-end pair without delaying the newly started conversion.
-    clearPendingEmptyImeCompositionEnd();
-    imeInputGuard?.compositionStart();
+  terminalElement.addEventListener('compositionstart', (event) => {
+    clearScheduledImeCommitTextarea();
     extendImeTraceWindow();
     traceImeEvent('compositionstart', event);
     clearImePreedit();
     clearStaleImeTextareaAtCompositionStart(textarea);
     showImePreedit(event.target?.value, true);
+    if (imeCommitRouter) {
+      clearPendingEmptyImeCompositionEnd();
+      consumeImeCommitDecision(event, imeCommitRouter.compositionStart(), textarea, 'compositionstart');
+      return;
+    }
+    // A new native composition supersedes an empty-end grace period. The
+    // normal populated completion path below handles the common WebView2
+    // empty-end/real-end pair without delaying the newly started conversion.
+    clearPendingEmptyImeCompositionEnd();
+    imeInputGuard?.compositionStart();
   }, true);
-  textarea.addEventListener('compositionupdate', (event) => {
+  terminalElement.addEventListener('compositionupdate', (event) => {
     extendImeTraceWindow();
     trackCompositionUpdate(event);
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionUpdate(), textarea, 'compositionupdate');
+    }
   }, true);
-  textarea.addEventListener('beforeinput', (event) => {
+  terminalElement.addEventListener('beforeinput', (event) => {
     const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
     if (isCompositionInput || Date.now() < imeTraceUntil) {
       traceImeEvent('beforeinput', event);
@@ -1130,8 +1192,27 @@ function installCompositionObserver() {
     if (event.inputType === 'insertCompositionText') {
       trackCompositionUpdate(event);
     }
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionInput(event), textarea, 'beforeinput');
+    }
   }, true);
-  textarea.addEventListener('compositionend', (event) => {
+  terminalElement.addEventListener('compositionend', (event) => {
+    if (imeCommitRouter) {
+      extendImeTraceWindow();
+      traceImeEvent('compositionend', event);
+      const committedValue = event.data || event.target?.value || '';
+      showImePreedit(event.data || committedValue, true);
+      clearImePreedit(180);
+      consumeImeCommitDecision(
+        event,
+        // Do not substitute the helper value here: an empty preliminary end
+        // must wait for the actual final composition event/input payload.
+        imeCommitRouter.compositionEnd(event.data || ''),
+        textarea,
+        'compositionend',
+      );
+      return;
+    }
     const isDeferredEmptyEnd = deferredImeCompositionEndEvents.has(event);
     if (!isDeferredEmptyEnd) {
       if (settleEmptyImeCompositionEnd(textarea)) {
@@ -1157,10 +1238,13 @@ function installCompositionObserver() {
     showImePreedit(event.data || committedValue, true);
     clearImePreedit(180);
   }, true);
-  textarea.addEventListener('input', (event) => {
+  terminalElement.addEventListener('input', (event) => {
     const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
     if (isCompositionInput || Date.now() < imeTraceUntil) {
       traceImeEvent('input', event);
+    }
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionInput(event), textarea, 'input');
     }
   }, true);
 }

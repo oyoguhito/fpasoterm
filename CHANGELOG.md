@@ -5,12 +5,11 @@
 - Kept the titlebar `Panels` slot and every adjacent window control vertically
   centered, as well as fixed in horizontal position while plugin overlays are
   opened, minimized, restored, or closed.
-- On Windows WebView2, defer only an empty preliminary `compositionend` until
-  its populated completion arrives, so xterm finalizes the original helper
-  text once instead of replaying stale text. The 800ms narrow duplicate guard
-  retains a just-committed value across one subsequent WebView2 composition
-  cycle, while ordinary one-character input, control input, and paste remain
-  unchanged.
+- On Linux/ChromeOS WebKitGTK, take ownership of IME finalization:
+  candidate/preedit updates never reach xterm, and only one populated
+  `compositionend` or its `insertFromComposition` fallback is written to the
+  PTY. Native follow-up input and a repeated complete composition cycle are
+  ignored. Windows WebView2 remains on native xterm delivery.
 - Canvas-based terminal and front-plugin recordings now include an in-app
   high-contrast pointer with primary-button feedback, so remote RDP/noVNC
   mouse movement remains visible without capturing an OS cursor.

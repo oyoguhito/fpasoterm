@@ -4505,6 +4505,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 }
             }),
             ime: serde_json::json!({
+                "delivery": "platform",
                 "duplicateGuard": true,
                 "duplicateWindowMs": 800,
                 "repeatedTextWindowMs": 140

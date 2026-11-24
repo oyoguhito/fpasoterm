@@ -52,6 +52,8 @@ assert.equal(platformDefaultConfig('linux', 'x64').terminal.kittyKeyboard, false
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.images.enabled, true);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.images.kittySupport, true);
 assert.equal(platformDefaultConfig('linux', 'x64').terminal.encoding, 'utf-8');
+assert.equal(platformDefaultConfig('linux', 'x64').ime.delivery, 'platform');
+assert.equal(platformDefaultConfig('win32', 'x64').ime.delivery, 'platform');
 assert.equal(platformDefaultConfig('linux', 'x64').security.osc8Open, false);
 assert.equal(platformDefaultConfig('linux', 'x64').security.oscNotifications, false);
 assert.equal(platformDefaultConfig('linux', 'x64').security.oscNotificationMinIntervalMs, 5000);
@@ -452,6 +454,7 @@ const migratedConfig = mergeConfig(writableConfigDefaults(), {
 assert.equal(migratedConfig.keybindings.prefix, 'Ctrl+Alt');
 assert.equal(migratedConfig.keybindings.newWindow, 'n');
 assert.equal(migratedConfig.terminal.images.sixelSupport, true);
+assert.equal(migratedConfig.ime.delivery, 'platform');
 const prunedConfig = pruneUnsupportedConfig(writableConfigDefaults(), {
   ...migratedConfig,
   retired: { enabled: true },
@@ -971,6 +974,7 @@ assert.match(read('src/renderer/renderer.js'), /capturedCodes: new Set\(\)/);
 assert.match(read('src/renderer/index.html'), /id="plugin-panels" data-empty="true" aria-hidden="true"/);
 assert.match(read('src/renderer/index.html'), /id="plugin-panels-toggle"/);
 assert.match(read('src/renderer/index.html'), /src="\.\/ime-input-guard\.js"/);
+assert.match(read('src/renderer/index.html'), /src="\.\/ime-commit-router\.js"/);
 assert.match(read('src/renderer/styles.css'), /#plugin-panels\s*\{[\s\S]*?flex:\s*0 0 88px/);
 assert.match(read('src/renderer/styles.css'), /#window-controls\s*\{[\s\S]*?align-items:\s*center/);
 assert.match(read('src/renderer/styles.css'), /#plugin-panels\s*\{[\s\S]*?display:\s*flex;[\s\S]*?align-items:\s*center/);
@@ -2656,8 +2660,17 @@ assert.match(renderer, /installCompositionObserver/);
 assert.match(renderer, /compositionupdate/);
 assert.match(renderer, /beforeinput/);
 assert.match(renderer, /insertCompositionText/);
-assert.match(renderer, /Observes composition events for visual feedback and records only the native/);
-assert.match(renderer, /xterm\.js still owns normal PTY input; the guard never/);
+assert.match(renderer, /Linux\/ChromeOS uses a single explicit composition-commit path/);
+assert.match(renderer, /function usesImeCommitDelivery\(\)/);
+assert.match(renderer, /function consumeImeCommitDecision\(event, decision, textarea, stage\)/);
+assert.match(renderer, /sendTerminalInput\(decision\.commit, 'IME commit'\)/);
+assert.match(renderer, /imeCommitRouter\.compositionEnd\(event\.data \|\| ''\)/);
+assert.match(renderer, /imeCommitRouter\.compositionInput\(event\)/);
+assert.match(renderer, /imeCommitRouter\?\.captureKey\(event\)/);
+assert.match(renderer, /terminalElement\.addEventListener\('compositionstart',/);
+assert.match(renderer, /terminalElement\.addEventListener\('beforeinput',/);
+assert.match(renderer, /terminalElement\.addEventListener\('input',/);
+assert.match(renderer, /Observe the parent capture phase instead/);
 assert.match(renderer, /function traceImeEvent\(name, event\)/);
 assert.match(renderer, /function extendImeTraceWindow\(\)/);
 assert.match(renderer, /imeTraceUntil = Date\.now\(\) \+ 800/);
@@ -2671,9 +2684,6 @@ assert.match(renderer, /function installImeVisualFallback\(\)/);
 assert.match(renderer, /document-compositionstart/);
 assert.match(renderer, /document-compositionupdate/);
 assert.match(renderer, /document-keydown/);
-assert.doesNotMatch(renderer, /routesImeCompositionCommit/);
-assert.doesNotMatch(renderer, /writeExactImeComposition/);
-assert.doesNotMatch(renderer, /pendingExactImeReplay/);
 assert.match(renderer, /function showImePreedit\(text, showComposingFallback = false\)/);
 assert.match(renderer, /function updateImeStatus\(text\)/);
 assert.match(renderer, /showComposingFallback/);

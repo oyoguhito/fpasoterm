@@ -543,12 +543,13 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-IME composition is displayed visually by xterm/WebView. On Windows WebView2,
-some IMEs emit an empty preliminary `compositionend` immediately before the
-real populated completion; fpasoterm defers only that preliminary event so
-xterm finalizes its original helper text once. It never synthesizes text or
-replays it, and ordinary one-character input, control input, and paste remain
-unchanged.
+IME composition remains visible in the WebView. On Linux/ChromeOS,
+fpasoterm holds candidate/preedit events away from xterm and writes only the
+final `compositionend` text once; if WebKitGTK reports an empty preliminary
+end, the matching `insertFromComposition` value is used instead. Later
+duplicate input events or a duplicate composition cycle are ignored. Windows
+WebView2 and macOS retain their native xterm delivery. Set `[ime] delivery =
+"native"` only when diagnosing an unusual Linux IME.
 
 When `window.rememberBounds` is enabled, fpasoterm stores the last window size locally in `~/.config/fpasoterm/User/window-state.json`.
 

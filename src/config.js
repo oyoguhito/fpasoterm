@@ -90,6 +90,14 @@ const defaultConfig = Object.freeze({
       brightWhite: '#ffffff',
     },
   },
+  ime: {
+    // On Linux/ChromeOS, one commit router sends only the finalized
+    // composition string. Windows and macOS retain native xterm delivery.
+    delivery: 'platform',
+    duplicateGuard: true,
+    duplicateWindowMs: 800,
+    repeatedTextWindowMs: 140,
+  },
   keybindings: {
     prefix: 'Mod+Shift',
     copy: 'c',
@@ -320,6 +328,14 @@ brightBlue = "#a4ceff"
 brightMagenta = "#e3c3ff"
 brightCyan = "#9de9ea"
 brightWhite = "#ffffff"
+
+# platform uses final-composition delivery on Linux/ChromeOS and native xterm
+# delivery on Windows/macOS. Set native only to diagnose an unusual Linux IME.
+[ime]
+delivery = "platform"
+duplicateGuard = true
+duplicateWindowMs = 800
+repeatedTextWindowMs = 140
 
 # Keybindings use Mod for Ctrl on Windows/Linux and Cmd on macOS.
 # Set prefix = "Ctrl+Alt" on Windows when Ctrl+Shift is unavailable.
