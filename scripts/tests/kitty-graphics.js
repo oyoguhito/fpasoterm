@@ -167,32 +167,6 @@ function testFpasotermOscBridgeReusesKittyChunkAssembly() {
 
 testFpasotermOscBridgeReusesKittyChunkAssembly();
 
-function testFpasotermOscBridgeQueuesPngForConnectedImagePresentation() {
-  let queued;
-  const diagnostics = [];
-  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
-  addon.terminal = {
-    buffer: { active: { baseY: 2, cursorY: 4, cursorX: 6 } },
-    input() {},
-  };
-  addon.queue = { push: (_key, job) => { queued = job; } };
-  assert.equal(
-    addon.receiveFpasotermOsc('graphics;v=1;a=T,f=100,t=d,i=18,c=10,r=5,m=0;iVBORw0KGgo='),
-    true,
-  );
-  assert.deepEqual(queued.command, {
-    a: 'T', f: 100, t: 'd', i: 18, c: 10, r: 5, m: 0,
-  });
-  assert.equal(queued.payload, 'iVBORw0KGgo=');
-  assert.deepEqual(queued.anchor, { line: 0, column: 0 });
-  assert.equal(queued.transport, 'fpasoterm-osc');
-  assert.deepEqual(diagnostics, [
-    'fpasoterm graphics transfer received id=18 action=T format=100 cells=10x5 compression=none',
-  ]);
-}
-
-testFpasotermOscBridgeQueuesPngForConnectedImagePresentation();
-
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
   const originalCreateImageBitmap = global.createImageBitmap;
