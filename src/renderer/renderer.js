@@ -712,6 +712,9 @@ function installTauriApiAdapter() {
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
     },
+    onTerminalGraphicsFrame: (callback) => {
+      return listen('terminal:graphics-frame', (event) => callback(event.payload));
+    },
     onTerminalBroadcastKey: (callback) => {
       return listen('terminal:broadcast-key', (event) => callback(event.payload));
     },
@@ -1710,10 +1713,10 @@ function containsSixelGraphicsPayload(data) {
   return containsGraphics;
 }
 
-// fpasobrowser uses this private OSC 777 envelope only on Windows, where
-// ConPTY discards the APC introducer used by the public Kitty protocol. Keep
-// the payload out of ordinary diagnostic/canvas work just like native Kitty
-// chunks; OSC may be split across PTY reads.
+// This legacy private OSC 777 envelope is retained for older experimental
+// clients. Current Windows fpasobrowser uses the authenticated native IPC
+// bridge instead. Keep its payload out of ordinary diagnostic/canvas work just
+// like native Kitty chunks; OSC may be split across PTY reads.
 function containsFpasotermGraphicsPayload(data) {
   let containsGraphics = terminalFpasotermGraphicsDiagnosticPayload;
   let offset = 0;
@@ -8030,6 +8033,16 @@ Promise.resolve(window.fpasoterm.onTerminalData((data) => {
 })).catch((error) => {
   showDiagnostic(`terminal data listener failed: ${error}`);
 });
+
+if (typeof window.fpasoterm.onTerminalGraphicsFrame === 'function') {
+  Promise.resolve(window.fpasoterm.onTerminalGraphicsFrame((frame) => {
+    if (!imageAddon?.receiveFpasotermIpc?.(frame)) {
+      showDiagnostic('fpasoterm graphics bridge rejected a frame');
+    }
+  })).catch((error) => {
+    showDiagnostic(`terminal graphics listener failed: ${error}`);
+  });
+}
 
 Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   dispatchTerminalBroadcastKey(keyEvent);

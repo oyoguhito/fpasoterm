@@ -167,6 +167,29 @@ function testFpasotermOscBridgeReusesKittyChunkAssembly() {
 
 testFpasotermOscBridgeReusesKittyChunkAssembly();
 
+function testFpasotermIpcBridgeReusesKittyPlacementPipeline() {
+  let queued;
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon.terminal = {
+    buffer: { active: { baseY: 12, cursorY: 7, cursorX: 4 } },
+  };
+  addon.queue = { push: (_key, job) => { queued = job; } };
+  assert.equal(addon.receiveFpasotermIpc({
+    action: 'transmit', imageId: 23, placementId: 24, columns: 10, rows: 5, pngBase64: 'AQID',
+  }), true);
+  assert.deepEqual(queued.command, {
+    a: 'T', f: 100, t: 'd', i: 23, p: 24, c: 10, r: 5, C: 1, q: 2, m: 0,
+  });
+  assert.equal(queued.payload, 'AQID');
+  assert.deepEqual(queued.anchor, { line: 0, column: 0 });
+  assert.deepEqual(diagnostics, [
+    'fpasoterm graphics transfer received id=23 action=T format=100 cells=10x5 compression=none',
+  ]);
+}
+
+testFpasotermIpcBridgeReusesKittyPlacementPipeline();
+
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
   const originalCreateImageBitmap = global.createImageBitmap;
