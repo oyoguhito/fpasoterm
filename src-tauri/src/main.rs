@@ -1349,7 +1349,7 @@ struct TerminalGraphicsBridge {
 }
 
 #[cfg(target_os = "windows")]
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 // A bounded full-frame Kitty PNG update delivered directly to the renderer.
 // The token and loopback peer check are consumed natively and never exposed to
