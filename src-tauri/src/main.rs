@@ -94,6 +94,15 @@ const TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES: usize = 32;
 const TERMINAL_GRAPHICS_BRIDGE_MAX_PNG_BYTES: usize = 8 * 1024 * 1024;
 #[cfg(target_os = "windows")]
 const TERMINAL_GRAPHICS_BRIDGE_TIMEOUT: Duration = Duration::from_millis(750);
+// A long-lived terminal multiplexer can create a pane from its background
+// server rather than from this terminal's child process.  That server cannot
+// inherit the per-terminal capability below.  Publish a short-lived recovery
+// record only in the current Windows user's LocalAppData directory so a
+// compatible child can recover the same authenticated loopback bridge.
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_DISCOVERY_FILE: &str = "terminal-graphics-bridge-v1";
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_DISCOVERY_HEADER: &str = "fpasoterm-graphics-bridge-v1";
 
 // WebKitGTK exposes GStreamer at runtime but CanvasCaptureMediaStream does
 // not reliably advance frames for an xterm canvas on ChromeOS.  The terminal
@@ -1346,6 +1355,16 @@ struct TerminalSession {
 // Stops the per-terminal graphics listener when its PTY session ends.
 struct TerminalGraphicsBridge {
     stop: Arc<AtomicBool>,
+    discovery: Option<TerminalGraphicsBridgeDiscovery>,
+}
+
+#[cfg(target_os = "windows")]
+// The capability remains private to the Windows user profile.  The endpoint
+// is loopback-only and the record is removed together with the PTY session.
+// Its token is never emitted to the renderer, diagnostics, or logs.
+struct TerminalGraphicsBridgeDiscovery {
+    path: PathBuf,
+    contents: String,
 }
 
 #[cfg(target_os = "windows")]
@@ -7987,6 +8006,16 @@ fn start_terminal_graphics_bridge(
     let mut token = [0_u8; TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES];
     rand::rngs::OsRng.fill_bytes(&mut token);
     let token_for_child = BASE64_STANDARD.encode(token);
+    let discovery = match publish_terminal_graphics_bridge_discovery(&endpoint, &token_for_child) {
+        Ok(discovery) => Some(discovery),
+        Err(error) => {
+            append_diagnostic(
+                &app,
+                &format!("fpasoterm graphics bridge recovery record unavailable: {error}"),
+            );
+            None
+        }
+    };
     let stop = Arc::new(AtomicBool::new(false));
     let stop_for_thread = Arc::clone(&stop);
     let app_for_thread = app.clone();
@@ -8028,10 +8057,45 @@ fn start_terminal_graphics_bridge(
         &format!("fpasoterm graphics bridge listening on {endpoint}"),
     );
     Ok((
-        TerminalGraphicsBridge { stop },
+        TerminalGraphicsBridge { stop, discovery },
         endpoint.to_string(),
         token_for_child,
     ))
+}
+
+#[cfg(target_os = "windows")]
+fn publish_terminal_graphics_bridge_discovery(
+    endpoint: &SocketAddr,
+    token: &str,
+) -> Result<TerminalGraphicsBridgeDiscovery, String> {
+    let local_app_data = env::var_os("LOCALAPPDATA")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "LOCALAPPDATA is unavailable".to_string())?;
+    let path = local_app_data
+        .join("fpasoterm")
+        .join(TERMINAL_GRAPHICS_DISCOVERY_FILE);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "graphics bridge recovery path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+
+    // Keep the format deliberately small and strict.  A reader validates all
+    // fields before it opens a connection; no caller-controlled path or URL is
+    // involved.  LocalAppData is per-user rather than a shared temp directory.
+    let contents = format!("{TERMINAL_GRAPHICS_DISCOVERY_HEADER}\nipc-v1\n{endpoint}\n{token}\n");
+    fs::write(&path, &contents).map_err(|error| error.to_string())?;
+    Ok(TerminalGraphicsBridgeDiscovery { path, contents })
+}
+
+#[cfg(target_os = "windows")]
+fn remove_terminal_graphics_bridge_discovery(discovery: &TerminalGraphicsBridgeDiscovery) {
+    // A newly started terminal can replace the record before an old listener
+    // finishes stopping.  Remove it only when it still identifies this exact
+    // session, so the old session never removes the new session's capability.
+    if fs::read_to_string(&discovery.path).ok().as_deref() == Some(discovery.contents.as_str()) {
+        let _ = fs::remove_file(&discovery.path);
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -13891,7 +13955,12 @@ impl Drop for TerminalSession {
     // Terminates the child shell when the session is dropped.
     fn drop(&mut self) {
         #[cfg(target_os = "windows")]
-        self.graphics_bridge.stop.store(true, Ordering::Release);
+        {
+            self.graphics_bridge.stop.store(true, Ordering::Release);
+            if let Some(discovery) = self.graphics_bridge.discovery.as_ref() {
+                remove_terminal_graphics_bridge_discovery(discovery);
+            }
+        }
         if let Ok(mut killer) = self.killer.lock() {
             let _ = killer.kill();
         }

@@ -12,7 +12,7 @@ screen / tmux / byobu / zellij / herdr などの terminal multiplexer と併用�
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
-Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。WindowsではConPTYがKittyのAPC envelopeをterminal hostへ渡す前に破棄するため、current fpasotermはterminal childだけに、PNGのKitty image/placement frame用の認証済みper-terminal loopback bridgeを継承させます。random loopback portとcapability tokenを使い、public listenerにはならず、ConPTY越しの汎用Kitty対応を主張するものではありません。`FPASOTERM_GRAPHICS_TRANSPORT=ipc-v1`により、古いfpasotermを画像backendとして選ばないようにします。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。WindowsではConPTYがKittyのAPC envelopeをterminal hostへ渡す前に破棄するため、current fpasotermはPNGのKitty image/placement frame用の認証済みper-terminal loopback bridgeを使用します。通常はrandom loopback portとcapability tokenをterminal childだけへ継承します。Herdrのように長時間動作するterminal serverが表示中のterminalとは別の環境からpaneを起動する場合は、active terminalがcurrent userのLocalAppDataに短命のrecovery recordを作成して同じbridgeを回復できます。このrecordはterminal sessionの終了時に削除され、WebView、Diagnostics、support reportへは公開されません。これはloopback-only bridgeであり、public listenerやConPTY越しの汎用Kitty対応を主張するものではありません。`FPASOTERM_GRAPHICS_TRANSPORT=ipc-v1`により、古いfpasotermを画像backendとして選ばないようにします。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
 
 IME、描画、clipboard、window問題を再現して確認する手順は
 [デバッグガイド](docs/debugging.ja.md)を参照してください。
