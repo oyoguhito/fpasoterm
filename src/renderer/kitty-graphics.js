@@ -17,6 +17,13 @@
     maxPlacements: 8,
     maxControlBytes: 512,
   });
+  // fpasobrowser assigns every process a private image-id range.  The
+  // receiver uses this only as a last-resort replacement guard for its
+  // full-pane frames: a nested multiplexer can forward the new Kitty transfer
+  // while losing its earlier delete command.  Never apply this policy to
+  // general Kitty images.
+  const FPASOBROWSER_IMAGE_ID_PREFIX = 0x46000000;
+  const FPASOBROWSER_IMAGE_ID_MASK = 0xff000000;
 
   function parseKittyControl(value) {
     const command = Object.create(null);
@@ -557,6 +564,7 @@
     _createPlacement(imageId, command, anchor = this._captureAnchor()) {
       const bitmap = this.images.get(imageId);
       if (!bitmap || !this._ensureLayer()) return null;
+      const staleFpasobrowserImageIds = this._staleFpasobrowserFullscreenImageIds(imageId, command);
       const placementId = this._placementIdFor(imageId, command);
       const existing = this.placements.get(placementId);
       // terminal-browser updates the same implicit image repeatedly. Reusing
@@ -599,7 +607,44 @@
       }
       this._paintPlacement(placement);
       this._renderPlacements();
+      if (staleFpasobrowserImageIds.length) {
+        // PNG <img> decoding is asynchronous.  Leave the predecessor visible
+        // until the replacement's load event, while raw Canvas frames finish
+        // painting synchronously in _paintPlacement.
+        if (bitmap.imageUrl) {
+          canvas.addEventListener('load', () => {
+            this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+          }, { once: true });
+          if (canvas.complete && canvas.naturalWidth > 0) {
+            this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+          }
+        } else {
+          this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+        }
+      }
       return placementId;
+    }
+
+    _staleFpasobrowserFullscreenImageIds(imageId, command) {
+      // `C=1` is fpasobrowser's full-pane cursor-placement policy.  The
+      // high-byte namespace prevents a full-size image from another Kitty
+      // application being treated as one of its replacements.
+      if (command.C !== 1 || !this._isFpasobrowserImageId(imageId)) return [];
+      return Array.from(this.images.keys()).filter((candidate) => (
+        candidate !== imageId && this._isFpasobrowserImageId(candidate)
+      ));
+    }
+
+    _isFpasobrowserImageId(imageId) {
+      return Number.isSafeInteger(imageId)
+        && ((imageId & FPASOBROWSER_IMAGE_ID_MASK) >>> 0) === FPASOBROWSER_IMAGE_ID_PREFIX;
+    }
+
+    _retireFpasobrowserFullscreenImages(imageIds) {
+      for (const imageId of imageIds) this._deleteImage(imageId);
+      if (imageIds.length) {
+        this.onDiagnostic(`fpasoterm graphics retired stale fpasobrowser frame count=${imageIds.length}`);
+      }
     }
 
     _placementIdFor(imageId, command) {
