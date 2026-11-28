@@ -12,7 +12,7 @@ screen / tmux / byobu / zellij / herdr などの terminal multiplexer と併用�
 
 fpasoterm は `かな` / `英数` キーを横取りしません。日本語入力の切替と composition は OS webview と xterm.js に任せます。
 
-Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。WindowsではConPTYがKittyのAPC envelopeをterminal hostへ渡す前に破棄するため、Windows上のfpasobrowserはzlib圧縮したraw RGBA（`f=32`）をprivate OSC 777の`graphics;v=1` bridgeで送り、WebView2のPNG合成を経由せずCanvasの`putImageData`で直接描画します。child processへ設定する`FPASOTERM_GRAPHICS_TRANSPORT=osc-v1`により、古いfpasotermを画像backendとして選ばないようにします。このbridgeはConPTY越しの汎用Kitty対応を主張するものではありません。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
+Kitty Graphics Protocolのdirect PNG/RGB/RGBA streamは、byte数・pixel数・画像数・placement数を制限し、古い未描画frameを破棄するfpasoterm独自rendererで処理します。WindowsではConPTYがKittyのAPC envelopeをterminal hostへ渡す前に破棄するため、current fpasotermはPNGのKitty image/placement frame用の認証済みper-terminal loopback bridgeを使用します。通常はrandom loopback portとcapability tokenをterminal childだけへ継承します。Herdrのように長時間動作するterminal serverが表示中のterminalとは別の環境からpaneを起動する場合は、active terminalがcurrent userのLocalAppDataに短命のrecovery recordを作成して同じbridgeを回復できます。このrecordはterminal sessionの終了時に削除され、WebView、Diagnostics、support reportへは公開されません。これはloopback-only bridgeであり、public listenerやConPTY越しの汎用Kitty対応を主張するものではありません。`FPASOTERM_GRAPHICS_TRANSPORT=ipc-v1`により、古いfpasotermを画像backendとして選ばないようにします。SIXEL DCS graphicsも、保持しているMIT licenseのxterm image addonにより上限付きで既定有効です。file/shared-memory転送、iTerm inline image、Kitty animationは未対応です。
 
 IME、描画、clipboard、window問題を再現して確認する手順は
 [デバッグガイド](docs/debugging.ja.md)を参照してください。
@@ -331,7 +331,7 @@ api.log('example plugin loaded');
 api.terminal.options.cursorBlink = true;
 ```
 
-IME composition は表示専用です。WebView/xterm.js の入力経路で受け取った文字を、fpasoterm が抑止・再送・置換・直接確定することはありません。
+IME composition は WebView 上で表示します。Linux/ChromeOS では候補・仮入力 event を xterm へ渡さず、最終 `compositionend` の文字列だけを一度 PTY へ送ります。WebKitGTK が空の予備endを送る場合は、対応する `insertFromComposition` の値だけを送ります。後続inputや重複composition cycleは無視します。Windows WebView2/macOSはnative xterm配送を維持します。特殊なLinux IMEを切り分ける場合だけ、`[ime] delivery = "native"` を設定してください。
 
 全デフォルト設定は [設定](docs/config.ja.md) にまとめています。plugin runtime/API contractは [プラグイン](docs/plugins.ja.md)、対応 API declarationは [`docs/fpasoterm-plugin.d.ts`](docs/fpasoterm-plugin.d.ts) を参照してください。設定 sample は [examples/config](examples/config)、最小のlocal plugin sampleは [examples/plugins](examples/plugins) にあります。review済みの公開pluginは、ports catalog、compatibility check、update、contribution workflowを管理する [fpasoterm-plugins](https://github.com/oyoguhito/fpasoterm-plugins) を使用してください。
 

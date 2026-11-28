@@ -82,6 +82,28 @@ const WINDOWS_CF_UNICODETEXT: u32 = 13;
 const INSTANCE_HEARTBEAT_INTERVAL: Duration = Duration::from_millis(500);
 const INSTANCE_HEARTBEAT_TIMEOUT: Duration = Duration::from_secs(3);
 
+// Windows ConPTY consumes Kitty APC before it reaches xterm.js.  A child that
+// inherits this one-time loopback capability can therefore submit a bounded
+// PNG frame directly to this fpasoterm instance.  The protocol is binary to
+// avoid an additional HTTP parser or a renderer-visible escape sequence.
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_BRIDGE_MAGIC: [u8; 8] = *b"FPTGFX1\0";
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES: usize = 32;
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_BRIDGE_MAX_PNG_BYTES: usize = 8 * 1024 * 1024;
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_BRIDGE_TIMEOUT: Duration = Duration::from_millis(750);
+// A long-lived terminal multiplexer can create a pane from its background
+// server rather than from this terminal's child process.  That server cannot
+// inherit the per-terminal capability below.  Publish a short-lived recovery
+// record only in the current Windows user's LocalAppData directory so a
+// compatible child can recover the same authenticated loopback bridge.
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_DISCOVERY_FILE: &str = "terminal-graphics-bridge-v1";
+#[cfg(target_os = "windows")]
+const TERMINAL_GRAPHICS_DISCOVERY_HEADER: &str = "fpasoterm-graphics-bridge-v1";
+
 // WebKitGTK exposes GStreamer at runtime but CanvasCaptureMediaStream does
 // not reliably advance frames for an xterm canvas on ChromeOS.  The terminal
 // GIF fallback has already proved that PNG frames are dependable, so Linux
@@ -1323,8 +1345,41 @@ struct TerminalSession {
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Arc<Mutex<Box<dyn ChildKiller + Send + Sync>>>,
     shell_pid: Option<u32>,
+    #[cfg(target_os = "windows")]
+    graphics_bridge: TerminalGraphicsBridge,
     #[cfg(unix)]
     initial_termios: Option<libc::termios>,
+}
+
+#[cfg(target_os = "windows")]
+// Stops the per-terminal graphics listener when its PTY session ends.
+struct TerminalGraphicsBridge {
+    stop: Arc<AtomicBool>,
+    discovery: Option<TerminalGraphicsBridgeDiscovery>,
+}
+
+#[cfg(target_os = "windows")]
+// The capability remains private to the Windows user profile.  The endpoint
+// is loopback-only and the record is removed together with the PTY session.
+// Its token is never emitted to the renderer, diagnostics, or logs.
+struct TerminalGraphicsBridgeDiscovery {
+    path: PathBuf,
+    contents: String,
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+// A bounded full-frame Kitty PNG update delivered directly to the renderer.
+// The token and loopback peer check are consumed natively and never exposed to
+// the WebView.
+struct TerminalGraphicsFrame {
+    action: String,
+    image_id: u32,
+    placement_id: u32,
+    columns: u16,
+    rows: u16,
+    png_base64: String,
 }
 
 // Decodes PTY bytes before they are sent to xterm.js.
@@ -4505,6 +4560,7 @@ fn default_runtime_config() -> RuntimeConfig {
                 }
             }),
             ime: serde_json::json!({
+                "delivery": "platform",
                 "duplicateGuard": true,
                 "duplicateWindowMs": 800,
                 "repeatedTextWindowMs": 140
@@ -7935,6 +7991,193 @@ fn compose_japanese_voicing(base: Option<char>, mark: char) -> Option<char> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn start_terminal_graphics_bridge(
+    app: AppHandle,
+) -> Result<(TerminalGraphicsBridge, String, String), String> {
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .map_err(|error| format!("could not bind fpasoterm graphics bridge: {error}"))?;
+    listener
+        .set_nonblocking(true)
+        .map_err(|error| format!("could not configure fpasoterm graphics bridge: {error}"))?;
+    let endpoint = listener
+        .local_addr()
+        .map_err(|error| format!("could not read fpasoterm graphics bridge address: {error}"))?;
+    let mut token = [0_u8; TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES];
+    rand::rngs::OsRng.fill_bytes(&mut token);
+    let token_for_child = BASE64_STANDARD.encode(token);
+    let discovery = match publish_terminal_graphics_bridge_discovery(&endpoint, &token_for_child) {
+        Ok(discovery) => Some(discovery),
+        Err(error) => {
+            append_diagnostic(
+                &app,
+                &format!("fpasoterm graphics bridge recovery record unavailable: {error}"),
+            );
+            None
+        }
+    };
+    let stop = Arc::new(AtomicBool::new(false));
+    let stop_for_thread = Arc::clone(&stop);
+    let app_for_thread = app.clone();
+
+    std::thread::spawn(move || {
+        while !stop_for_thread.load(Ordering::Acquire) {
+            match listener.accept() {
+                Ok((mut stream, peer)) => {
+                    if !peer.ip().is_loopback() {
+                        continue;
+                    }
+                    let frame = receive_terminal_graphics_frame(&mut stream, &token);
+                    let delivered = frame
+                        .and_then(|frame| {
+                            app_for_thread
+                                .emit("terminal:graphics-frame", frame)
+                                .map_err(|error| error.to_string())
+                        })
+                        .is_ok();
+                    let _ = stream.write_all(&[u8::from(delivered)]);
+                    let _ = stream.flush();
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                    std::thread::sleep(Duration::from_millis(20));
+                }
+                Err(error) => {
+                    append_diagnostic(
+                        &app_for_thread,
+                        &format!("fpasoterm graphics bridge stopped: {error}"),
+                    );
+                    break;
+                }
+            }
+        }
+    });
+
+    append_diagnostic(
+        &app,
+        &format!("fpasoterm graphics bridge listening on {endpoint}"),
+    );
+    Ok((
+        TerminalGraphicsBridge { stop, discovery },
+        endpoint.to_string(),
+        token_for_child,
+    ))
+}
+
+#[cfg(target_os = "windows")]
+fn publish_terminal_graphics_bridge_discovery(
+    endpoint: &SocketAddr,
+    token: &str,
+) -> Result<TerminalGraphicsBridgeDiscovery, String> {
+    let local_app_data = env::var_os("LOCALAPPDATA")
+        .filter(|path| !path.is_empty())
+        .map(PathBuf::from)
+        .ok_or_else(|| "LOCALAPPDATA is unavailable".to_string())?;
+    let path = local_app_data
+        .join("fpasoterm")
+        .join(TERMINAL_GRAPHICS_DISCOVERY_FILE);
+    let parent = path
+        .parent()
+        .ok_or_else(|| "graphics bridge recovery path has no parent".to_string())?;
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+
+    // Keep the format deliberately small and strict.  A reader validates all
+    // fields before it opens a connection; no caller-controlled path or URL is
+    // involved.  LocalAppData is per-user rather than a shared temp directory.
+    let contents = format!("{TERMINAL_GRAPHICS_DISCOVERY_HEADER}\nipc-v1\n{endpoint}\n{token}\n");
+    fs::write(&path, &contents).map_err(|error| error.to_string())?;
+    Ok(TerminalGraphicsBridgeDiscovery { path, contents })
+}
+
+#[cfg(target_os = "windows")]
+fn remove_terminal_graphics_bridge_discovery(discovery: &TerminalGraphicsBridgeDiscovery) {
+    // A newly started terminal can replace the record before an old listener
+    // finishes stopping.  Remove it only when it still identifies this exact
+    // session, so the old session never removes the new session's capability.
+    if fs::read_to_string(&discovery.path).ok().as_deref() == Some(discovery.contents.as_str()) {
+        let _ = fs::remove_file(&discovery.path);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn receive_terminal_graphics_frame(
+    stream: &mut TcpStream,
+    expected_token: &[u8; TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES],
+) -> Result<TerminalGraphicsFrame, String> {
+    stream
+        .set_read_timeout(Some(TERMINAL_GRAPHICS_BRIDGE_TIMEOUT))
+        .map_err(|error| error.to_string())?;
+    let mut magic = [0_u8; TERMINAL_GRAPHICS_BRIDGE_MAGIC.len()];
+    stream
+        .read_exact(&mut magic)
+        .map_err(|error| error.to_string())?;
+    if magic != TERMINAL_GRAPHICS_BRIDGE_MAGIC {
+        return Err("invalid graphics bridge frame magic".to_string());
+    }
+    let mut token = [0_u8; TERMINAL_GRAPHICS_BRIDGE_TOKEN_BYTES];
+    stream
+        .read_exact(&mut token)
+        .map_err(|error| error.to_string())?;
+    if token != *expected_token {
+        return Err("graphics bridge capability token was rejected".to_string());
+    }
+    let mut action = [0_u8; 1];
+    stream
+        .read_exact(&mut action)
+        .map_err(|error| error.to_string())?;
+    let read_u32 = |stream: &mut TcpStream| -> Result<u32, String> {
+        let mut bytes = [0_u8; 4];
+        stream
+            .read_exact(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        Ok(u32::from_be_bytes(bytes))
+    };
+    let read_u16 = |stream: &mut TcpStream| -> Result<u16, String> {
+        let mut bytes = [0_u8; 2];
+        stream
+            .read_exact(&mut bytes)
+            .map_err(|error| error.to_string())?;
+        Ok(u16::from_be_bytes(bytes))
+    };
+    let image_id = read_u32(stream)?;
+    let placement_id = read_u32(stream)?;
+    let columns = read_u16(stream)?;
+    let rows = read_u16(stream)?;
+    let payload_bytes = usize::try_from(read_u32(stream)?)
+        .map_err(|_| "graphics bridge payload length is invalid".to_string())?;
+    if payload_bytes > TERMINAL_GRAPHICS_BRIDGE_MAX_PNG_BYTES {
+        return Err("graphics bridge PNG exceeds the configured limit".to_string());
+    }
+    let is_delete = action[0] == 2;
+    if !(action[0] == 1 || is_delete) || image_id == 0 {
+        return Err("graphics bridge action is invalid".to_string());
+    }
+    if is_delete && payload_bytes != 0 {
+        return Err("graphics bridge delete contains a payload".to_string());
+    }
+    if !is_delete && (placement_id == 0 || columns == 0 || rows == 0 || payload_bytes == 0) {
+        return Err("graphics bridge frame geometry is invalid".to_string());
+    }
+    let mut png = vec![0_u8; payload_bytes];
+    stream
+        .read_exact(&mut png)
+        .map_err(|error| error.to_string())?;
+    if !is_delete && !png.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return Err("graphics bridge frame is not a PNG".to_string());
+    }
+    Ok(TerminalGraphicsFrame {
+        action: if is_delete { "delete" } else { "transmit" }.to_string(),
+        image_id,
+        placement_id,
+        columns,
+        rows,
+        png_base64: if is_delete {
+            String::new()
+        } else {
+            BASE64_STANDARD.encode(png)
+        },
+    })
+}
+
 // Returns the expected byte width for a UTF-8 leading byte.
 fn utf8_sequence_width(byte: u8) -> usize {
     match byte {
@@ -7991,10 +8234,17 @@ fn terminal_start(
     // xterm-256color terminfo entry so TUI applications choose their truecolor path.
     command.env("COLORTERM", "truecolor");
     command.env("TERM_PROGRAM", "fpasoterm");
-    // Windows ConPTY discards Kitty's APC graphics stream.  This explicit
-    // child-process capability lets fpasobrowser select the bounded OSC
-    // bridge only when the receiving fpasoterm supports it.
-    command.env("FPASOTERM_GRAPHICS_TRANSPORT", "osc-v1");
+    // Windows ConPTY discards Kitty's APC graphics stream before xterm.js can
+    // parse it. Give child applications a per-terminal authenticated loopback
+    // capability, rather than relying on another escape-sequence envelope.
+    #[cfg(target_os = "windows")]
+    let graphics_bridge = start_terminal_graphics_bridge(app.clone())?;
+    #[cfg(target_os = "windows")]
+    {
+        command.env("FPASOTERM_GRAPHICS_TRANSPORT", "ipc-v1");
+        command.env("FPASOTERM_GRAPHICS_ENDPOINT", &graphics_bridge.1);
+        command.env("FPASOTERM_GRAPHICS_TOKEN", &graphics_bridge.2);
+    }
     configure_osc7_shell_integration(&mut command, &shell);
     configure_utf8_terminal_locale(&mut command, output_encoding);
     if let Some(path_value) = terminal_path_with_app_dir() {
@@ -8107,6 +8357,8 @@ fn terminal_start(
         writer: writer_for_state,
         killer,
         shell_pid,
+        #[cfg(target_os = "windows")]
+        graphics_bridge: graphics_bridge.0,
         #[cfg(unix)]
         initial_termios,
     });
@@ -13702,6 +13954,13 @@ maxSourceBytes = 8388608
 impl Drop for TerminalSession {
     // Terminates the child shell when the session is dropped.
     fn drop(&mut self) {
+        #[cfg(target_os = "windows")]
+        {
+            self.graphics_bridge.stop.store(true, Ordering::Release);
+            if let Some(discovery) = self.graphics_bridge.discovery.as_ref() {
+                remove_terminal_graphics_bridge_discovery(discovery);
+            }
+        }
         if let Ok(mut killer) = self.killer.lock() {
             let _ = killer.kill();
         }

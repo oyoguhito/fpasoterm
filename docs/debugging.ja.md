@@ -51,24 +51,30 @@ ChromeOSの調査では、`compositionstart`のhelper textarea `value=`と直後
 ### Windows の fpasobrowser graphics bridge
 
 WindowsのConPTYはKitty Graphics ProtocolのAPC streamをfpasotermへ渡しません。そのため
-current fpasotermはchild processに`FPASOTERM_GRAPHICS_TRANSPORT=osc-v1`を設定し、
-current fpasobrowserはprivate OSC bridgeを選びます。両方を更新してから、fpasoterm内で
+current fpasotermはchild processに`FPASOTERM_GRAPHICS_TRANSPORT=ipc-v1`、random loopback
+endpoint、capability tokenを設定し、current fpasobrowserは認証済みnative IPC bridgeを選びます。
+Herdrのようにbackground serverからpaneを起動してchild environmentを継承できない場合も、
+current fpasotermとfpasobrowserの組合せはcurrent userのLocalAppDataにある短命のrecovery recordを
+使います。両方を更新してから、fpasoterm内で
 次を実行してください。
 
 ```powershell
 .\fpasobrowser.cmd --backend kitty --debug
 ```
 
-`fpasobrowser debug: ... transport=fpasoterm-osc-rgba-zlib`が表示され、Diagnosticsを
-`graphics`でfilterしたとき、最初のframeで`fpasoterm graphics transfer received`と
-`fpasoterm graphics rendered ... paint=raw-rgba-putImageData`が表示されればbridgeとCanvas描画が
-完了しています。`FPASOTERM_GRAPHICS_TRANSPORT`が無い古いfpasotermでは、`auto`と
-`--backend kitty`は`half-block`へfallbackします。
+`fpasobrowser debug: ... transport=fpasoterm-ipc-png`が表示されることを確認してください。fpasotermの
+direct childでは、Diagnosticsを`graphics`でfilterしたとき最初のframeに
+`fpasoterm graphics transfer received`が表示されます。ただしHerdr paneでは必須条件ではありません。
+Herdrが消費した、または外側へ転送しなかったgraphics commandを外側terminalはlogできないためです。代わりに
+fpasobrowserで`d`を押してDEVTOOLSを開き、**sender** counterを確認してください。これは送出済みframe/delete
+commandを示し、receiver acknowledgementは利用できないことも明示します。`fpasoterm IPC: ready`または
+`ready (recovered local ipc-v1 bridge; ...)`も確認できます。endpointとtokenは表示・copyされません。
+`FPASOTERM_GRAPHICS_TRANSPORT`もrecovery recordも無い古いfpasotermでは、`auto`は`half-block`へ
+fallbackします。明示した`--backend kitty`は互換性診断のためKitty出力を強制します。
 
-ConPTYの長いOSC sequenceが画像payloadを壊す経路を避けるため、fpasobrowserはbridgeの
-zlib圧縮raw RGBAを短いOSC packetに分割します。`transfer received`で`format=32`と
-`compression=z`、`rendered`で`paint=raw-rgba-putImageData`が確認点です。PNG signatureや
-WebViewのPNG decoderはこのWindows bridge経路を通りません。
+ConPTYがAPCとOSCを落とす経路を避けるため、fpasobrowserはPNG frameをbounded binary IPCで
+native listenerへ送ります。rendererは既存のKitty PNG image/placement処理へ渡すため、PNG decoderと
+placement validationは通常のgraphics pathと共通です。
 
 ChromeOS/BaguetteでWebKitGTKの描画に問題がある場合は以下を使用します。
 

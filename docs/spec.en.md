@@ -108,7 +108,7 @@ Diagnostics are written to:
 ~/.config/fpasoterm/User/logs/fpasoterm-debug.log
 ```
 
-The diagnostics and log panel textareas use the same `Ctrl+Shift+c` copy path as the terminal selection. The live **Diagnostics** view also has a **Copy diagnostics** button that copies the complete backend-retained diagnostic log without selecting text or invoking the terminal copy action.
+The diagnostics and log panel textareas use the same `Ctrl+Shift+c` copy path as the terminal selection. The live **Diagnostics** view is a bounded, in-memory runtime-event view, not a terminal transcript. **Copy saved diagnostics** copies its saved history without selecting text or invoking the terminal copy action. **Freeze display** freezes only the display (collection continues), **Show live** returns to the live end, and **Erase saved diagnostics** erases that in-memory history and resumes the live display. `Log Start` / `Log Stop` controls a separate, durable terminal-output recording file.
 
 ## Non-goals
 

@@ -66,6 +66,9 @@ brightCyan = "#9de9ea"
 brightWhite = "#ffffff"
 
 [ime]
+# platform sends only the final composition commit on Linux/ChromeOS and keeps
+# native xterm delivery on Windows/macOS. Set native only for diagnosis.
+delivery = "platform"
 duplicateGuard = true
 duplicateWindowMs = 800
 repeatedTextWindowMs = 140

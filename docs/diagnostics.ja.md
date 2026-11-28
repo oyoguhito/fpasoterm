@@ -55,6 +55,29 @@ Linuxでは`--doctor`と同じnative runtime依存関係のread-only確認も含
 macOSは`pbcopy`、Linuxは`wl-copy`、`xclip`、`xsel`を順に使います。利用可能なclipboard providerが
 無い場合はerrorになります。
 
+## window内Diagnosticsとterminal recordingの違い
+
+window menuの**Diagnostics Log**は、fpasotermのruntime event（renderer、input、plugin、
+graphics receiverなど）をその場で確認するための、上限付きlive viewです。terminal paneの全文ではなく、
+file recorderでもありません。event traceが必要なときは`--debug-keys`または
+`--console-diagnostics`を付けて起動してください。viewが保持するのは、そのwindowで最大1,000行です。
+
+- **Freeze display**は、検索・copyできるよう現在の表示だけを固定します。収集は**止まりません**。
+  後から届くruntime eventもmemory内には保存されます。**Show live**で最新表示へ戻ります。
+- **Erase saved diagnostics**は、そのwindowのmemory内履歴を消去してlive表示へ戻します。永続debug fileは消しません。
+- **Copy saved diagnostics**は、search filterで隠れている行も含むmemory内履歴をcopyします。
+
+これに対し**Log Start** / **Log Stop**は、設定済みlogging directoryへ保存するterminal-output
+recording fileの開始・終了です。file recordingの期間を選ぶためstart/stopがあります。Diagnosticsの
+producerは起動時のdebug optionで有効化するため、同じstart/stopはありません。表示をfreezeしても
+recordingを停止する操作にはなりません。
+
+Herdrなどのmultiplexerを使用する場合、fpasotermが観測できるのはHerdrが外側PTYへ実際に転送した
+byteとgraphics eventだけです。Diagnosticsやterminal logから、child paneの完全なtranscriptを得ること、
+byteごとのpane特定、Herdr内でcontrol sequenceが消費されたかの証明はできません。Kittyの問題では
+application自身のsender reportも使用してください（`fpasobrowser --debug`後に`d` / `D` / `C`）。
+これはfpasobrowserが何を送出したかは確認できますが、Herdrまたはreceiverが描画したとは主張しません。
+
 ## Log
 
 ```sh

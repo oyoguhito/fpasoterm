@@ -52,6 +52,40 @@ interaction.
 
 ## Rendering And Window Diagnostics
 
+### Windows fpasobrowser graphics bridge
+
+Windows ConPTY does not pass Kitty Graphics Protocol APC streams to
+fpasoterm. A current fpasoterm therefore gives terminal children
+`FPASOTERM_GRAPHICS_TRANSPORT=ipc-v1`, a random loopback endpoint, and a
+capability token; a current fpasobrowser uses that authenticated native IPC
+bridge. When a long-lived terminal server such as Herdr creates a pane from a
+background server and cannot inherit the presenting terminal's environment,
+the current fpasoterm/fpasobrowser pair recovers the active bridge from a
+short-lived record in the current user's LocalAppData profile.
+
+After updating both programs, run this inside fpasoterm:
+
+```powershell
+.\fpasobrowser.cmd --backend kitty --debug
+```
+
+The debug output must include `transport=fpasoterm-ipc-png`. With a direct
+fpasoterm child, filtering Diagnostics for `graphics` should show
+`fpasoterm graphics transfer received` for the first frame. That is not a
+requirement for a Herdr pane: the outer terminal cannot log a graphics command
+that Herdr has consumed or not forwarded. Press `d` in fpasobrowser to open
+DEVTOOLS and inspect its **sender** counters instead: they report emitted frame
+and delete commands and explicitly state that receiver acknowledgement is
+unavailable. `fpasoterm IPC` reports `ready` or `ready (recovered local ipc-v1
+bridge; ...)`. The endpoint and token are never displayed or copied. With an
+older fpasoterm that provides neither the inherited capability nor the recovery
+record, `auto` falls back to `half-block`; an explicit `--backend kitty` keeps
+Kitty selected for compatibility diagnostics.
+
+The bridge forwards bounded PNG frames to the native listener and then through
+the existing Kitty PNG image/placement renderer. It does not depend on a long
+OSC payload surviving ConPTY.
+
 Use this command for WebKitGTK rendering symptoms on ChromeOS/Baguette:
 
 ```sh

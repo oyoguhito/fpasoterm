@@ -147,6 +147,7 @@ let diagnosticRenderScrollToEnd = false;
 let diagnosticsPaused = false;
 let diagnosticsPausedNewLines = 0;
 let diagnosticsPausedSnapshot = null;
+let diagnosticHistoryStartedAt = null;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -174,7 +175,13 @@ function setPluginPanelsOpen(open) {
 function refreshPluginPanels() {
   if (!pluginPanelsElement || !pluginPanelsToggleButton || !pluginPanelsItems) return;
   const panels = [...pluginElementPanels.values()];
-  pluginPanelsElement.hidden = panels.length === 0;
+  const hasPanels = panels.length > 0;
+  // Keep a fixed titlebar slot even when no element plugin is active.  Hiding
+  // this holder with display:none used to shift all adjacent window controls.
+  pluginPanelsElement.dataset.empty = String(!hasPanels);
+  pluginPanelsElement.setAttribute('aria-hidden', String(!hasPanels));
+  pluginPanelsToggleButton.disabled = !hasPanels;
+  pluginPanelsToggleButton.tabIndex = hasPanels ? 0 : -1;
   pluginPanelsToggleButton.textContent = `Panels (${panels.length})`;
   pluginPanelsToggleButton.setAttribute('aria-label', `Show ${panels.length} plugin panel${panels.length === 1 ? '' : 's'}`);
   if (panels.length === 0) {
@@ -371,6 +378,16 @@ let terminalLinksSuspended = false;
 let terminalBroadcastTargets = [];
 let imePreeditClearTimer = null;
 let imeTraceUntil = 0;
+let imeInputGuard = null;
+let imeCommitRouter = null;
+let imeCommitTextareaClearTimer = null;
+// Native xterm delivery is retained on Windows WebView2. Linux/ChromeOS uses
+// the explicit final-commit router below because WebKitGTK can retain stale
+// helper-textarea contents across composition cycles.
+const EMPTY_IME_COMPOSITION_END_GRACE_MS = 90;
+const EMPTY_IME_COMPOSITION_END_LATE_EVENT_MS = 350;
+let pendingEmptyImeCompositionEnd = null;
+const deferredImeCompositionEndEvents = new WeakSet();
 let terminalModeSequenceTail = '';
 let windowStateSaveTimer = null;
 let terminalResizeTimer = null;
@@ -431,6 +448,55 @@ let screenVideoFeedbackTimer = null;
 let screenVideoCaptureSource = '';
 let screenVideoRuntimePlatformPromise = null;
 let screenVideoRuntimePlatformInfo = null;
+// Canvas recording intentionally does not ask the OS to include its pointer.
+// Keep the latest in-app pointer position so terminal and remote-plugin
+// captures can show the action that led to a visual change. This is reset at
+// the recording boundary and is only ever composited into fpasoterm-owned
+// canvas surfaces.
+const screenVideoPointer = {
+  clientX: 0,
+  clientY: 0,
+  visible: false,
+  pressed: false,
+};
+
+function resetScreenVideoPointer() {
+  screenVideoPointer.visible = false;
+  screenVideoPointer.pressed = false;
+}
+
+function trackScreenVideoPointer(event) {
+  if (!screenVideoRecorder || screenVideoRecorder.state === 'inactive') {
+    return;
+  }
+  const clientX = Number(event?.clientX);
+  const clientY = Number(event?.clientY);
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) {
+    return;
+  }
+  screenVideoPointer.clientX = clientX;
+  screenVideoPointer.clientY = clientY;
+  screenVideoPointer.visible = true;
+  if (event.type === 'pointerup' || event.type === 'pointercancel') {
+    screenVideoPointer.pressed = false;
+  } else if (Number.isFinite(Number(event.buttons))) {
+    screenVideoPointer.pressed = (Number(event.buttons) & 1) !== 0;
+  }
+}
+
+function installScreenVideoPointerTracking() {
+  // Capture phase observes events from a remote canvas even when its plugin
+  // consumes them to forward input to RDP/noVNC.
+  for (const eventName of ['pointermove', 'pointerdown', 'pointerup', 'pointercancel']) {
+    window.addEventListener(eventName, trackScreenVideoPointer, true);
+  }
+  window.addEventListener('pointerout', (event) => {
+    if (!event.relatedTarget) {
+      resetScreenVideoPointer();
+    }
+  }, true);
+  window.addEventListener('blur', resetScreenVideoPointer);
+}
 
 function setTerminalGraphicsZoomVisible(visible) {
   if (terminalGraphicsHideTimer !== null) {
@@ -646,6 +712,9 @@ function installTauriApiAdapter() {
     runtimePlatform: () => invoke('runtime_platform'),
     onTerminalData: (callback) => {
       return listen('terminal:data', (event) => callback(event.payload));
+    },
+    onTerminalGraphicsFrame: (callback) => {
+      return listen('terminal:graphics-frame', (event) => callback(event.payload));
     },
     onTerminalBroadcastKey: (callback) => {
       return listen('terminal:broadcast-key', (event) => callback(event.payload));
@@ -920,7 +989,118 @@ function clearStaleImeTextareaAtCompositionStart(textarea) {
   showDebugDiagnostic(`renderer ime cleared stale helper at compositionstart value=${JSON.stringify(staleValue)}`);
 }
 
-// Some Windows WebView2 builds dispatch composition events above xterm's
+function clearPendingEmptyImeCompositionEnd() {
+  const pending = pendingEmptyImeCompositionEnd;
+  if (!pending) return;
+  if (pending.releaseTimer) clearTimeout(pending.releaseTimer);
+  if (pending.lateEventTimer) clearTimeout(pending.lateEventTimer);
+  pendingEmptyImeCompositionEnd = null;
+}
+
+// Releases an intercepted empty compositionend back to xterm without making
+// up or writing any text. xterm retains ownership of the helper textarea and
+// therefore derives exactly the same payload it would have received natively.
+function releaseEmptyImeCompositionEnd(pending) {
+  if (pendingEmptyImeCompositionEnd !== pending) return;
+  pending.releaseTimer = null;
+  pending.released = true;
+  const deferredEvent = new CompositionEvent('compositionend', {
+    bubbles: true,
+    cancelable: true,
+    data: '',
+  });
+  deferredImeCompositionEndEvents.add(deferredEvent);
+  pending.textarea.dispatchEvent(deferredEvent);
+  pending.lateEventTimer = setTimeout(() => {
+    if (pendingEmptyImeCompositionEnd === pending) {
+      pendingEmptyImeCompositionEnd = null;
+    }
+  }, EMPTY_IME_COMPOSITION_END_LATE_EVENT_MS);
+}
+
+function deferEmptyImeCompositionEnd(textarea) {
+  clearPendingEmptyImeCompositionEnd();
+  const pending = {
+    textarea,
+    releaseTimer: null,
+    lateEventTimer: null,
+    released: false,
+  };
+  pending.releaseTimer = setTimeout(
+    () => releaseEmptyImeCompositionEnd(pending),
+    EMPTY_IME_COMPOSITION_END_GRACE_MS,
+  );
+  pendingEmptyImeCompositionEnd = pending;
+}
+
+// Returns true only when an original populated compositionend arrived after a
+// delayed empty event was already handed to xterm. It must not finalize the
+// same helper text a second time.
+function settleEmptyImeCompositionEnd(textarea) {
+  const pending = pendingEmptyImeCompositionEnd;
+  if (!pending || pending.textarea !== textarea) return false;
+  const wasReleased = pending.released;
+  clearPendingEmptyImeCompositionEnd();
+  return wasReleased;
+}
+
+function isLinuxPlatform() {
+  return /Linux/i.test(navigator.platform || navigator.userAgent || '');
+}
+
+// `platform` is the safe default: Linux/ChromeOS gets one explicit owner for
+// IME commits, while Windows WebView2 and macOS retain native xterm delivery.
+// `native` is retained as an escape hatch for an unusual Linux IME.
+function usesImeCommitDelivery() {
+  const delivery = String(appConfig?.ime?.delivery || 'platform').toLowerCase();
+  return delivery === 'commit' || (delivery !== 'native' && isLinuxPlatform());
+}
+
+// Installs the native duplicate guard for Windows/macOS and the explicit
+// final-commit router for Linux/ChromeOS.
+function configureImeInputGuard() {
+  const imeConfig = appConfig.ime || {};
+  imeInputGuard = window.fpasotermImeInputGuard?.createImeInputGuard({
+    enabled: imeConfig.duplicateGuard !== false,
+    windowMs: imeConfig.duplicateWindowMs,
+  }) || null;
+  imeCommitRouter = usesImeCommitDelivery()
+    ? window.fpasotermImeCommitRouter?.createImeCommitRouter({
+      duplicateWindowMs: imeConfig.duplicateWindowMs,
+    }) || null
+    : null;
+}
+
+function clearScheduledImeCommitTextarea() {
+  if (imeCommitTextareaClearTimer !== null) {
+    clearTimeout(imeCommitTextareaClearTimer);
+    imeCommitTextareaClearTimer = null;
+  }
+}
+
+function scheduleImeCommitTextareaClear(textarea) {
+  clearScheduledImeCommitTextarea();
+  // Let the browser finish its final beforeinput/input pair, then remove the
+  // helper value so xterm cannot inherit it in a future native event.
+  imeCommitTextareaClearTimer = setTimeout(() => {
+    imeCommitTextareaClearTimer = null;
+    if (usesImeCommitDelivery() && textarea?.value) textarea.value = '';
+  }, 0);
+}
+
+function consumeImeCommitDecision(event, decision, textarea, stage) {
+  if (!decision?.suppress) return false;
+  event.stopImmediatePropagation();
+  showDebugDiagnostic(`renderer ime ${stage} ${decision.action}`);
+  if (decision.commit) {
+    imeInputGuard?.clear();
+    sendTerminalInput(decision.commit, 'IME commit');
+    scheduleImeCommitTextareaClear(textarea);
+  }
+  return true;
+}
+
+// Some WebView implementations dispatch composition events above xterm's
 // hidden textarea. Observe the document capture path for display only.
 function isTerminalImeEvent(event) {
   return Boolean(
@@ -957,35 +1137,58 @@ function installImeVisualFallback() {
   }, true);
 }
 
-// Observes composition events for visual feedback only. Do not suppress,
-// replay, replace, or directly commit them: xterm.js owns normal PTY input.
+// Linux/ChromeOS uses a single explicit composition-commit path: marked
+// candidate updates never reach xterm, and the final text is written once at
+// compositionend (or the matching insertFromComposition fallback). Other
+// platforms retain xterm's native composition path with its narrow guard.
 function installCompositionObserver() {
   const textarea = terminalElement.querySelector('.xterm-helper-textarea');
   if (!textarea) {
     return;
   }
 
-  textarea.addEventListener('keydown', (event) => {
+  // xterm registers capture listeners on its helper textarea while it opens.
+  // Observe the parent capture phase instead: it runs before those listeners,
+  // which is required for Linux candidate keys/input to stay out of xterm.
+  terminalElement.addEventListener('keydown', (event) => {
     if (event.isComposing || event.keyCode === 229 || Date.now() < imeTraceUntil) {
       traceImeEvent('keydown', event);
     }
     if (event.isComposing || event.keyCode === 229) {
       showImePreedit(textarea.value, true);
     }
+    if (imeCommitRouter?.captureKey(event)) {
+      event.stopImmediatePropagation();
+      showDebugDiagnostic('renderer ime keydown held for composition commit');
+    }
   }, true);
 
-  textarea.addEventListener('compositionstart', (event) => {
+  terminalElement.addEventListener('compositionstart', (event) => {
+    clearScheduledImeCommitTextarea();
     extendImeTraceWindow();
     traceImeEvent('compositionstart', event);
     clearImePreedit();
     clearStaleImeTextareaAtCompositionStart(textarea);
     showImePreedit(event.target?.value, true);
+    if (imeCommitRouter) {
+      clearPendingEmptyImeCompositionEnd();
+      consumeImeCommitDecision(event, imeCommitRouter.compositionStart(), textarea, 'compositionstart');
+      return;
+    }
+    // A new native composition supersedes an empty-end grace period. The
+    // normal populated completion path below handles the common WebView2
+    // empty-end/real-end pair without delaying the newly started conversion.
+    clearPendingEmptyImeCompositionEnd();
+    imeInputGuard?.compositionStart();
   }, true);
-  textarea.addEventListener('compositionupdate', (event) => {
+  terminalElement.addEventListener('compositionupdate', (event) => {
     extendImeTraceWindow();
     trackCompositionUpdate(event);
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionUpdate(), textarea, 'compositionupdate');
+    }
   }, true);
-  textarea.addEventListener('beforeinput', (event) => {
+  terminalElement.addEventListener('beforeinput', (event) => {
     const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
     if (isCompositionInput || Date.now() < imeTraceUntil) {
       traceImeEvent('beforeinput', event);
@@ -993,18 +1196,59 @@ function installCompositionObserver() {
     if (event.inputType === 'insertCompositionText') {
       trackCompositionUpdate(event);
     }
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionInput(event), textarea, 'beforeinput');
+    }
   }, true);
-  textarea.addEventListener('compositionend', (event) => {
+  terminalElement.addEventListener('compositionend', (event) => {
+    if (imeCommitRouter) {
+      extendImeTraceWindow();
+      traceImeEvent('compositionend', event);
+      const committedValue = event.data || event.target?.value || '';
+      showImePreedit(event.data || committedValue, true);
+      clearImePreedit(180);
+      consumeImeCommitDecision(
+        event,
+        // Do not substitute the helper value here: an empty preliminary end
+        // must wait for the actual final composition event/input payload.
+        imeCommitRouter.compositionEnd(event.data || ''),
+        textarea,
+        'compositionend',
+      );
+      return;
+    }
+    const isDeferredEmptyEnd = deferredImeCompositionEndEvents.has(event);
+    if (!isDeferredEmptyEnd) {
+      if (settleEmptyImeCompositionEnd(textarea)) {
+        showDebugDiagnostic('renderer ime suppressed late compositionend after deferred empty end');
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (!event.data) {
+        // Do not let xterm finalize from an old helper value before the real
+        // Windows compositionend carrying the commit follows this event.
+        deferEmptyImeCompositionEnd(textarea);
+        showDebugDiagnostic('renderer ime deferred preliminary empty compositionend');
+        event.stopImmediatePropagation();
+        return;
+      }
+    }
+    // Capture runs before xterm's own bubble listener, so the following
+    // term.onData callback can be compared to this composition commit.
+    imeInputGuard?.compositionEnd(event.data || event.target?.value || '');
     extendImeTraceWindow();
     traceImeEvent('compositionend', event);
     const committedValue = event.target?.value || event.data || '';
     showImePreedit(event.data || committedValue, true);
     clearImePreedit(180);
-  });
-  textarea.addEventListener('input', (event) => {
+  }, true);
+  terminalElement.addEventListener('input', (event) => {
     const isCompositionInput = event.isComposing || event.inputType === 'insertCompositionText' || event.inputType === 'insertFromComposition';
     if (isCompositionInput || Date.now() < imeTraceUntil) {
       traceImeEvent('input', event);
+    }
+    if (imeCommitRouter) {
+      consumeImeCommitDecision(event, imeCommitRouter.compositionInput(event), textarea, 'input');
     }
   }, true);
 }
@@ -1028,11 +1272,16 @@ function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
   const sourceCount = diagnosticsPaused && diagnosticsPausedSnapshot
     ? diagnosticsPausedSnapshot.length
     : diagnosticLines.length;
-  const count = diagnosticsFilterQuery ? `${lines.length}/${sourceCount}` : `${sourceCount}`;
+  const count = diagnosticsFilterQuery
+    ? `Matches ${lines.length}/${sourceCount}`
+    : `Showing ${sourceCount}`;
+  const history = diagnosticHistoryStartedAt
+    ? `Runtime events since ${diagnosticHistoryStartedAt.toLocaleTimeString()}`
+    : 'Waiting for a runtime event';
   const pause = diagnosticsPaused
-    ? `Paused${diagnosticsPausedNewLines > 0 ? ` +${diagnosticsPausedNewLines}` : ''}`
+    ? `Display frozen${diagnosticsPausedNewLines > 0 ? ` (saved while frozen +${diagnosticsPausedNewLines})` : ''}`
     : '';
-  diagnosticsFilterStatusElement.textContent = [pause, count].filter(Boolean).join(' · ');
+  diagnosticsFilterStatusElement.textContent = [history, pause, count].filter(Boolean).join(' · ');
 }
 
 function renderDiagnosticLines({ scrollToEnd = false } = {}) {
@@ -1077,9 +1326,9 @@ function applyDiagnosticsFilter() {
   diagnosticsElement.scrollTop = 0;
 }
 
-// Pause only the live view, not backend collection or the terminal itself.
-// This keeps keyboard diagnostics available for later inspection while the
-// displayed snapshot remains stable enough to search and copy.
+// Freeze only the display, not runtime-event collection or the terminal.
+// This keeps a stable snapshot available for search/copy while new events
+// continue to enter the bounded in-memory history.
 function setDiagnosticsPaused(paused) {
   const nextPaused = Boolean(paused);
   if (nextPaused && !diagnosticsPaused) {
@@ -1092,10 +1341,18 @@ function setDiagnosticsPaused(paused) {
   }
   if (diagnosticsPauseButton) {
     diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
-    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Resume' : 'Pause';
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Show live' : 'Freeze display';
     diagnosticsPauseButton.setAttribute(
       'aria-label',
-      diagnosticsPaused ? 'Resume live diagnostics rendering' : 'Pause live diagnostics rendering',
+      diagnosticsPaused
+        ? 'Show the newest saved runtime events'
+        : 'Freeze only this display. Runtime events keep being saved',
+    );
+    diagnosticsPauseButton.setAttribute(
+      'title',
+      diagnosticsPaused
+        ? 'Show the newest saved runtime events'
+        : 'Freeze only this display. Runtime events keep being saved',
     );
   }
   diagnosticRenderScrollToEnd = false;
@@ -1104,10 +1361,16 @@ function setDiagnosticsPaused(paused) {
 
 function clearDiagnosticsView() {
   diagnosticLines.length = 0;
-  if (diagnosticsPausedSnapshot) {
-    diagnosticsPausedSnapshot.length = 0;
-  }
+  diagnosticHistoryStartedAt = null;
   diagnosticsPausedNewLines = 0;
+  diagnosticsPausedSnapshot = null;
+  diagnosticsPaused = false;
+  if (diagnosticsPauseButton) {
+    diagnosticsPauseButton.setAttribute('aria-pressed', 'false');
+    diagnosticsPauseButton.textContent = 'Freeze display';
+    diagnosticsPauseButton.setAttribute('aria-label', 'Freeze only this display. Runtime events keep being saved');
+    diagnosticsPauseButton.setAttribute('title', 'Freeze only this display. Runtime events keep being saved');
+  }
   diagnosticRenderScrollToEnd = false;
   renderDiagnosticLines();
   diagnosticsElement.scrollTop = 0;
@@ -1121,6 +1384,9 @@ function appendDiagnosticLine(message) {
     return;
   }
 
+  if (!diagnosticHistoryStartedAt) {
+    diagnosticHistoryStartedAt = new Date();
+  }
   diagnosticLines.push(message);
   if (diagnosticLines.length > MAX_DIAGNOSTIC_LINES) {
     diagnosticLines.shift();
@@ -1470,10 +1736,10 @@ function containsSixelGraphicsPayload(data) {
   return containsGraphics;
 }
 
-// fpasobrowser uses this private OSC 777 envelope only on Windows, where
-// ConPTY discards the APC introducer used by the public Kitty protocol. Keep
-// the payload out of ordinary diagnostic/canvas work just like native Kitty
-// chunks; OSC may be split across PTY reads.
+// This legacy private OSC 777 envelope is retained for older experimental
+// clients. Current Windows fpasobrowser uses the authenticated native IPC
+// bridge instead. Keep its payload out of ordinary diagnostic/canvas work just
+// like native Kitty chunks; OSC may be split across PTY reads.
 function containsFpasotermGraphicsPayload(data) {
   let containsGraphics = terminalFpasotermGraphicsDiagnosticPayload;
   let offset = 0;
@@ -1597,11 +1863,21 @@ function showTerminalError(message) {
   terminalElement.classList.add('terminal-error');
 }
 
-// Sends terminal input as emitted by xterm.js. IME data is intentionally not
-// altered here so platform-specific input can be observed and debugged.
+// Sends terminal input as emitted by xterm.js. A very narrow IME guard handles
+// only a confirmed duplicate directly following a composition commit.
 function sendTerminalInput(data, source = 'input') {
-  showDebugDiagnostic(`renderer terminal ${source} bytes=${data.length} data=${JSON.stringify(data)} codepoints=${Array.from(data).map((character) => `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(',')}`);
-  window.fpasoterm.writeTerminal(data).catch((error) => {
+  const guardResult = source === 'input'
+    ? (imeInputGuard?.filterTerminalInput(data) || { data, action: 'pass' })
+    : { data, action: 'pass' };
+  if (!guardResult.data) {
+    showDiagnostic(`renderer suppressed IME ${guardResult.action}`);
+    return;
+  }
+  if (guardResult.action !== 'pass') {
+    showDiagnostic(`renderer corrected IME ${guardResult.action}`);
+  }
+  showDebugDiagnostic(`renderer terminal ${source} bytes=${guardResult.data.length} data=${JSON.stringify(guardResult.data)} codepoints=${Array.from(guardResult.data).map((character) => `U+${character.codePointAt(0).toString(16).toUpperCase().padStart(4, '0')}`).join(',')}`);
+  window.fpasoterm.writeTerminal(guardResult.data).catch((error) => {
     showTerminalError(`terminal write failed: ${error}`);
   });
 }
@@ -2542,6 +2818,7 @@ function applyTerminalAppearance() {
 async function applyRuntimeConfig(runtimeConfig) {
   appConfig = mergeConfig(fallbackConfig, runtimeConfig.config || {});
   activeConfigPath = String(runtimeConfig.configPath || activeConfigPath);
+  configureImeInputGuard();
   applyKeybindingLabels();
   pluginUrls = Array.isArray(runtimeConfig.pluginUrls) ? runtimeConfig.pluginUrls : [];
   applyWindowAppearance();
@@ -4842,6 +5119,117 @@ function captureCanvasHasLegiblePixels(context, canvas) {
   return false;
 }
 
+// Converts a browser pointer location to the full-resolution capture canvas.
+// A remote canvas commonly uses `object-fit: contain`; in that case its CSS
+// rectangle includes letterbox space which has no corresponding remote pixel.
+// The input bridge already removes that space before sending RDP coordinates,
+// and video capture must make the identical conversion to draw at the same
+// point. Terminal surfaces and normal stretched canvases retain the direct
+// CSS-to-capture scale.
+function screenVideoPointerCapturePosition(sourceRect, captureCanvas, sourceCanvas = null) {
+  const { clientX, clientY } = screenVideoPointer;
+  const localX = clientX - sourceRect.left;
+  const localY = clientY - sourceRect.top;
+  const direct = () => ({
+    x: localX * captureCanvas.width / sourceRect.width,
+    y: localY * captureCanvas.height / sourceRect.height,
+  });
+  if (!sourceCanvas || !Number.isFinite(Number(sourceCanvas.width))
+      || !Number.isFinite(Number(sourceCanvas.height))
+      || sourceCanvas.width <= 0 || sourceCanvas.height <= 0) {
+    return direct();
+  }
+
+  let objectFit = 'fill';
+  try {
+    objectFit = window.getComputedStyle(sourceCanvas).objectFit || 'fill';
+  } catch (_) {
+    return direct();
+  }
+  if (!['contain', 'cover', 'none', 'scale-down'].includes(objectFit)) {
+    return direct();
+  }
+
+  const sourceWidth = Number(sourceCanvas.width);
+  const sourceHeight = Number(sourceCanvas.height);
+  const containScale = Math.min(sourceRect.width / sourceWidth, sourceRect.height / sourceHeight);
+  const scale = objectFit === 'cover'
+    ? Math.max(sourceRect.width / sourceWidth, sourceRect.height / sourceHeight)
+    : objectFit === 'none'
+      ? 1
+      : objectFit === 'scale-down'
+        ? Math.min(1, containScale)
+        : containScale;
+  if (!Number.isFinite(scale) || scale <= 0) return direct();
+
+  const renderedWidth = sourceWidth * scale;
+  const renderedHeight = sourceHeight * scale;
+  // `object-position` defaults to 50% 50%, which is also the position used
+  // by the built-in RDP canvas. A custom position retains the direct mapping
+  // rather than guessing a non-default CSS position.
+  const computedPosition = window.getComputedStyle(sourceCanvas).objectPosition || '50% 50%';
+  if (computedPosition !== '50% 50%' && computedPosition !== 'center center') return direct();
+  const insetX = (sourceRect.width - renderedWidth) / 2;
+  const insetY = (sourceRect.height - renderedHeight) / 2;
+  const imageX = localX - insetX;
+  const imageY = localY - insetY;
+  if (objectFit !== 'cover'
+      && (imageX < 0 || imageY < 0 || imageX >= renderedWidth || imageY >= renderedHeight)) {
+    return null;
+  }
+  return {
+    x: imageX / scale * captureCanvas.width / sourceWidth,
+    y: imageY / scale * captureCanvas.height / sourceHeight,
+  };
+}
+
+// Adds a small high-contrast cursor after the source pixels have been copied.
+// It has no effect outside the source rectangle, so a terminal recording does
+// not reveal pointer activity in the titlebar or other app chrome. The arrow
+// is drawn by us rather than relying on browser/OS cursor capture because RDP
+// canvases and CanvasCaptureMediaStream do not include an OS cursor reliably.
+function drawScreenVideoPointer(context, sourceRect, captureCanvas, sourceCanvas = null) {
+  if (!screenVideoPointer.visible || !sourceRect || !captureCanvas
+      || sourceRect.width <= 0 || sourceRect.height <= 0) {
+    return;
+  }
+  const { clientX, clientY } = screenVideoPointer;
+  if (clientX < sourceRect.left || clientX >= sourceRect.right
+      || clientY < sourceRect.top || clientY >= sourceRect.bottom) {
+    return;
+  }
+  const position = screenVideoPointerCapturePosition(sourceRect, captureCanvas, sourceCanvas);
+  if (!position) return;
+  const { x, y } = position;
+  const scaleX = captureCanvas.width / sourceRect.width;
+  const scaleY = captureCanvas.height / sourceRect.height;
+  const scale = Math.max(1, Math.min(scaleX, scaleY));
+  const size = 16 * scale;
+
+  context.save();
+  context.translate(x, y);
+  context.lineJoin = 'round';
+  context.lineWidth = Math.max(1.25, 1.75 * scale);
+  context.strokeStyle = '#111';
+  context.fillStyle = screenVideoPointer.pressed ? '#f5d76e' : '#fff';
+  context.shadowColor = 'rgba(0, 0, 0, 0.72)';
+  context.shadowBlur = Math.max(1, 1.5 * scale);
+  context.shadowOffsetX = Math.max(1, scale);
+  context.shadowOffsetY = Math.max(1, scale);
+  context.beginPath();
+  context.moveTo(0, 0);
+  context.lineTo(0, size);
+  context.lineTo(4.5 * scale, 11 * scale);
+  context.lineTo(8.5 * scale, 17 * scale);
+  context.lineTo(12 * scale, 14.5 * scale);
+  context.lineTo(8 * scale, 8.5 * scale);
+  context.lineTo(size, 8 * scale);
+  context.closePath();
+  context.fill();
+  context.stroke();
+  context.restore();
+}
+
 // Last-resort rasterizer for WebViews whose visible xterm backing canvases are
 // blank when copied into another canvas. It uses xterm's visible buffer rather
 // than terminal output history, so GIF frames remain useful instead of black.
@@ -4951,6 +5339,7 @@ function createTerminalCanvasSurface(fixedGeometry = false) {
       drawTerminalBufferTextFallback(context, terminalRect);
       context.restore();
     }
+    drawScreenVideoPointer(context, terminalRect, captureCanvas);
   };
   drawFrame();
   const timer = window.setInterval(drawFrame, 1000 / 30);
@@ -5003,6 +5392,12 @@ function createPluginCanvasSurface(sourceCanvas, fixedGeometry = false) {
       // sample; the next timer tick will retry against the same live canvas.
     }
     context.restore();
+    drawScreenVideoPointer(
+      context,
+      sourceCanvas.getBoundingClientRect(),
+      captureCanvas,
+      sourceCanvas,
+    );
   };
   drawFrame();
   const timer = window.setInterval(drawFrame, 1000 / 30);
@@ -5302,6 +5697,7 @@ async function startTerminalRasterRecording(
       },
     };
     screenVideoRecorder = recorder;
+    resetScreenVideoPointer();
     screenVideoCaptureSource = captureSource;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
@@ -5324,6 +5720,7 @@ async function startTerminalRasterRecording(
     screenVideoStopping = false;
     if (screenVideoRecorder === recorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
       screenVideoCaptureSource = '';
     }
     await window.fpasoterm.abortScreenVideoRecording?.().catch(() => {});
@@ -5567,6 +5964,7 @@ async function finalizeScreenVideoRecording(recorder, stream, cleanup) {
     stopScreenVideoTracks(stream, cleanup);
     if (screenVideoRecorder === recorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
       screenVideoWriteChain = Promise.resolve();
       screenVideoStopping = false;
       screenVideoWriteError = null;
@@ -5839,6 +6237,7 @@ async function startScreenVideoRecording() {
 
     const status = await window.fpasoterm.startScreenVideoRecording(format.container);
     screenVideoRecorder = recorder;
+    resetScreenVideoPointer();
     screenVideoCaptureSource = source;
     screenVideoWriteChain = Promise.resolve();
     screenVideoWriteError = null;
@@ -5885,6 +6284,7 @@ async function startScreenVideoRecording() {
     screenVideoStopping = false;
     if (screenVideoRecorder) {
       screenVideoRecorder = null;
+      resetScreenVideoPointer();
     }
     screenVideoFlushFrame = null;
     screenVideoCaptureSource = '';
@@ -7622,6 +8022,7 @@ async function initialize() {
   }
   primeScreenVideoRuntimePlatform();
   await loadRuntimeConfig();
+  configureImeInputGuard();
   pluginVersion = await window.fpasoterm.getAppVersion?.().catch(() => 'unknown') || 'unknown';
   await installSyncControls();
   await refreshTerminalLogControl();
@@ -7655,6 +8056,16 @@ Promise.resolve(window.fpasoterm.onTerminalData((data) => {
 })).catch((error) => {
   showDiagnostic(`terminal data listener failed: ${error}`);
 });
+
+if (typeof window.fpasoterm.onTerminalGraphicsFrame === 'function') {
+  Promise.resolve(window.fpasoterm.onTerminalGraphicsFrame((frame) => {
+    if (!imageAddon?.receiveFpasotermIpc?.(frame)) {
+      showDiagnostic('fpasoterm graphics bridge rejected a frame');
+    }
+  })).catch((error) => {
+    showDiagnostic(`terminal graphics listener failed: ${error}`);
+  });
+}
 
 Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   dispatchTerminalBroadcastKey(keyEvent);
@@ -7690,6 +8101,7 @@ Promise.resolve(window.fpasoterm.onTerminalBroadcastKey((keyEvent) => {
   }
 
   window.addEventListener('focus', focusTerminalInput);
+  installScreenVideoPointerTracking();
   terminalElement.addEventListener('pointerdown', () => {
     setTimeout(focusTerminalInput, 0);
   });

@@ -88,6 +88,7 @@ body {
 #window-controls {
   position: relative;
   display: flex;
+  align-items: center;
   flex: 0 0 auto;
   gap: 6px;
   app-region: no-drag;
@@ -188,12 +189,23 @@ body {
 
 #plugin-panels {
   position: relative;
+  display: flex;
+  align-items: center;
+  flex: 0 0 88px;
+  width: 88px;
 }
 
 #plugin-panels-toggle {
-  width: auto !important;
-  min-width: 70px;
+  width: 100% !important;
+  min-width: 0;
   padding: 0 6px !important;
+}
+
+/* Reserve this titlebar slot while no plugin surface is open.  The menu and
+ * native-window controls therefore never jump when Panels appears or hides. */
+#plugin-panels[data-empty="true"] {
+  visibility: hidden;
+  pointer-events: none;
 }
 
 #plugin-panels-items {
@@ -214,8 +226,7 @@ body {
   -webkit-app-region: no-drag;
 }
 
-#plugin-panels-items[hidden],
-#plugin-panels[hidden] {
+#plugin-panels-items[hidden] {
   display: none;
 }
 

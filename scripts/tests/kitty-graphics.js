@@ -167,6 +167,29 @@ function testFpasotermOscBridgeReusesKittyChunkAssembly() {
 
 testFpasotermOscBridgeReusesKittyChunkAssembly();
 
+function testFpasotermIpcBridgeReusesKittyPlacementPipeline() {
+  let queued;
+  const diagnostics = [];
+  const addon = new KittyGraphicsAddon({ onDiagnostic: (message) => diagnostics.push(message) });
+  addon.terminal = {
+    buffer: { active: { baseY: 12, cursorY: 7, cursorX: 4 } },
+  };
+  addon.queue = { push: (_key, job) => { queued = job; } };
+  assert.equal(addon.receiveFpasotermIpc({
+    action: 'transmit', imageId: 23, placementId: 24, columns: 10, rows: 5, pngBase64: 'AQID',
+  }), true);
+  assert.deepEqual(queued.command, {
+    a: 'T', f: 100, t: 'd', i: 23, p: 24, c: 10, r: 5, C: 1, q: 2, m: 0,
+  });
+  assert.equal(queued.payload, 'AQID');
+  assert.deepEqual(queued.anchor, { line: 0, column: 0 });
+  assert.deepEqual(diagnostics, [
+    'fpasoterm graphics transfer received id=23 action=T format=100 cells=10x5 compression=none',
+  ]);
+}
+
+testFpasotermIpcBridgeReusesKittyPlacementPipeline();
+
 async function testRawRgbaBypassesImageBitmapDecode() {
   const originalImageData = global.ImageData;
   const originalCreateImageBitmap = global.createImageBitmap;
@@ -398,6 +421,35 @@ async function testReplacementAtomicallyDeletesPreviousFrame() {
   assert.equal(addon.deleteSnapshots.size, 0);
 }
 
+function testFpasobrowserFullscreenFallbackRetiresOnlyItsOwnOldFrame() {
+  const removed = [];
+  const addon = new KittyGraphicsAddon();
+  const oldFrame = 0x46000011;
+  const currentFrame = 0x46000012;
+  const unrelatedImage = 71;
+  addon.images.set(oldFrame, { close: () => removed.push('image:old') });
+  addon.images.set(currentFrame, { close: () => removed.push('image:current') });
+  addon.images.set(unrelatedImage, { close: () => removed.push('image:other') });
+  addon.placements.set(1, { imageId: oldFrame, canvas: { remove: () => removed.push('placement:old') } });
+  addon.placements.set(2, { imageId: currentFrame, canvas: { remove: () => removed.push('placement:current') } });
+  addon.placements.set(3, { imageId: unrelatedImage, canvas: { remove: () => removed.push('placement:other') } });
+
+  const stale = addon._staleFpasobrowserFullscreenImageIds(currentFrame, { C: 1 });
+  assert.deepEqual(stale, [oldFrame]);
+  addon._retireFpasobrowserFullscreenImages(stale);
+
+  assert.deepEqual(removed, ['image:old', 'placement:old']);
+  assert.equal(addon.images.has(oldFrame), false);
+  assert.equal(addon.images.has(currentFrame), true);
+  assert.equal(addon.images.has(unrelatedImage), true);
+  assert.equal(addon.placements.has(2), true);
+  assert.equal(addon.placements.has(3), true);
+  assert.deepEqual(
+    addon._staleFpasobrowserFullscreenImageIds(currentFrame, { C: 0 }),
+    []
+  );
+}
+
 function testCapabilityQueryKeepsDeleteFallbackArmed() {
   const addon = new KittyGraphicsAddon();
   addon.terminal = { rows: 24, buffer: { active: { viewportY: 0 } }, input() {} };
@@ -464,6 +516,7 @@ function testDeleteAllCaseAndVisibilitySemantics() {
 
 testCapabilityQueryKeepsDeleteFallbackArmed();
 testDeleteAllCaseAndVisibilitySemantics();
+testFpasobrowserFullscreenFallbackRetiresOnlyItsOwnOldFrame();
 
 async function testResetInvalidatesInFlightDecode() {
   const replies = [];

@@ -17,6 +17,13 @@
     maxPlacements: 8,
     maxControlBytes: 512,
   });
+  // fpasobrowser assigns every process a private image-id range.  The
+  // receiver uses this only as a last-resort replacement guard for its
+  // full-pane frames: a nested multiplexer can forward the new Kitty transfer
+  // while losing its earlier delete command.  Never apply this policy to
+  // general Kitty images.
+  const FPASOBROWSER_IMAGE_ID_PREFIX = 0x46000000;
+  const FPASOBROWSER_IMAGE_ID_MASK = 0xff000000;
 
   function parseKittyControl(value) {
     const command = Object.create(null);
@@ -247,11 +254,11 @@
       return true;
     }
 
-    // Windows ConPTY consumes APC (`ESC _`) sequences before a terminal host
-    // can parse them.  fpasobrowser therefore puts the same Kitty control and
-    // base64 payload in fpasoterm's private OSC 777 channel on Windows.  Keep
-    // parsing here so both transports share validation, chunk assembly,
-    // decode limits, placement, and diagnostics.
+    // This legacy private OSC path remains for older experimental clients.
+    // Current Windows fpasobrowser uses the authenticated native IPC bridge,
+    // because ConPTY can consume both APC and OSC before xterm sees them.
+    // Keep parsing here so all supported transports share validation, chunk
+    // assembly, decode limits, placement, and diagnostics.
     receiveFpasotermOsc(value) {
       const prefix = 'graphics;v=1;';
       const body = String(value || '');
@@ -284,13 +291,48 @@
       return true;
     }
 
+    // Windows ConPTY can consume both APC and OSC before they reach xterm.
+    // fpasoterm's native loopback bridge delivers the already authenticated,
+    // bounded PNG frame here instead. Keep the same image/placement state as
+    // a Kitty transfer while anchoring the full-pane browser image at home.
+    receiveFpasotermIpc(frame) {
+      const value = frame && typeof frame === 'object' ? frame : null;
+      if (!value || !Number.isSafeInteger(value.imageId) || value.imageId <= 0) {
+        this.onErrorDiagnostic('fpasoterm graphics rejected: invalid IPC frame');
+        return false;
+      }
+      try {
+        if (value.action === 'delete') {
+          this._delete({ a: 'd', d: 'I', i: value.imageId });
+          return true;
+        }
+        if (value.action !== 'transmit'
+          || !Number.isSafeInteger(value.placementId) || value.placementId <= 0
+          || !Number.isSafeInteger(value.columns) || value.columns <= 0
+          || !Number.isSafeInteger(value.rows) || value.rows <= 0
+          || typeof value.pngBase64 !== 'string' || !value.pngBase64) {
+          throw new Error('invalid IPC frame geometry or payload');
+        }
+        const command = {
+          a: 'T', f: 100, t: 'd', i: value.imageId, p: value.placementId,
+          c: value.columns, r: value.rows, C: 1, q: 2, m: 0,
+        };
+        validateKittyCommand(command, value.pngBase64.length, this.limits);
+        this._receive(command, value.pngBase64, 'T', 'fpasoterm-ipc', { line: 0, column: 0 });
+      } catch (error) {
+        this.onErrorDiagnostic(`fpasoterm graphics rejected: ${error.message}`);
+        return false;
+      }
+      return true;
+    }
+
     _receive(command, payload, action, transport = 'kitty', anchorOverride = null) {
       // Only the first chunk carries a format field.  Record that boundary so
       // diagnostics can distinguish an application that never emitted a Kitty
       // frame from one whose subsequent decode or placement failed.
       if (command.f !== undefined) {
         const dimensions = command.s && command.v ? ` ${command.s}x${command.v}` : '';
-        const protocol = transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const protocol = transport.startsWith('fpasoterm-') ? 'fpasoterm graphics' : 'Kitty graphics';
         const message = `${protocol} transfer received id=${command.i || 'implicit'} action=${action} format=${command.f}${dimensions} cells=${command.c || 'auto'}x${command.r || 'auto'} compression=${command.o || 'none'}`;
         if (!this.firstTransferReported) {
           this.firstTransferReported = true;
@@ -391,7 +433,7 @@
           : bitmap.imageData
             ? 'raw-rgba-putImageData'
             : 'image-bitmap-drawImage';
-        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const protocol = (job.transport || 'kitty').startsWith('fpasoterm-') ? 'fpasoterm graphics' : 'Kitty graphics';
         const message = `${protocol} rendered id=${command.i} ${bitmap.width}x${bitmap.height} format=${command.f || 100} paint=${paintPath}`;
         if (!this.firstRenderReported) {
           this.firstRenderReported = true;
@@ -406,7 +448,7 @@
         // keeping a stale placement visible until the fallback timer expires.
         this._flushDeleteSnapshots(job.deleteThrough);
         this._respond(command, `EINVAL:${error.message}`, false);
-        const protocol = job.transport === 'fpasoterm-osc' ? 'fpasoterm graphics' : 'Kitty graphics';
+        const protocol = (job.transport || 'kitty').startsWith('fpasoterm-') ? 'fpasoterm graphics' : 'Kitty graphics';
         const details = imageDiagnostics ? ` (${imageDiagnostics})` : '';
         this.onErrorDiagnostic(`${protocol} decode failed: ${error.message}${details}`);
       } finally {
@@ -522,6 +564,7 @@
     _createPlacement(imageId, command, anchor = this._captureAnchor()) {
       const bitmap = this.images.get(imageId);
       if (!bitmap || !this._ensureLayer()) return null;
+      const staleFpasobrowserImageIds = this._staleFpasobrowserFullscreenImageIds(imageId, command);
       const placementId = this._placementIdFor(imageId, command);
       const existing = this.placements.get(placementId);
       // terminal-browser updates the same implicit image repeatedly. Reusing
@@ -564,7 +607,44 @@
       }
       this._paintPlacement(placement);
       this._renderPlacements();
+      if (staleFpasobrowserImageIds.length) {
+        // PNG <img> decoding is asynchronous.  Leave the predecessor visible
+        // until the replacement's load event, while raw Canvas frames finish
+        // painting synchronously in _paintPlacement.
+        if (bitmap.imageUrl) {
+          canvas.addEventListener('load', () => {
+            this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+          }, { once: true });
+          if (canvas.complete && canvas.naturalWidth > 0) {
+            this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+          }
+        } else {
+          this._retireFpasobrowserFullscreenImages(staleFpasobrowserImageIds);
+        }
+      }
       return placementId;
+    }
+
+    _staleFpasobrowserFullscreenImageIds(imageId, command) {
+      // `C=1` is fpasobrowser's full-pane cursor-placement policy.  The
+      // high-byte namespace prevents a full-size image from another Kitty
+      // application being treated as one of its replacements.
+      if (command.C !== 1 || !this._isFpasobrowserImageId(imageId)) return [];
+      return Array.from(this.images.keys()).filter((candidate) => (
+        candidate !== imageId && this._isFpasobrowserImageId(candidate)
+      ));
+    }
+
+    _isFpasobrowserImageId(imageId) {
+      return Number.isSafeInteger(imageId)
+        && ((imageId & FPASOBROWSER_IMAGE_ID_MASK) >>> 0) === FPASOBROWSER_IMAGE_ID_PREFIX;
+    }
+
+    _retireFpasobrowserFullscreenImages(imageIds) {
+      for (const imageId of imageIds) this._deleteImage(imageId);
+      if (imageIds.length) {
+        this.onDiagnostic(`fpasoterm graphics retired stale fpasobrowser frame count=${imageIds.length}`);
+      }
     }
 
     _placementIdFor(imageId, command) {
