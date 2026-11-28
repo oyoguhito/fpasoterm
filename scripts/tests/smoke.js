@@ -1628,6 +1628,9 @@ assert.match(indexHtml, /id="diagnostics-filter-status"/);
 assert.match(indexHtml, /id="diagnostics-pause"/);
 assert.match(indexHtml, /id="diagnostics-clear"/);
 assert.match(indexHtml, /id="diagnostics-copy"/);
+assert.match(indexHtml, /⏸ Freeze view/);
+assert.match(indexHtml, /🧹 Clear view/);
+assert.match(indexHtml, /📋 Copy all logs/);
 assert.match(indexHtml, /id="terminal-log-show-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-selected"/);
 assert.match(indexHtml, /id="terminal-log-delete-all"/);
@@ -2578,7 +2581,7 @@ assert.match(renderer, /const diagnosticsPauseButton = document\.getElementById\
 assert.match(renderer, /const diagnosticsClearButton = document\.getElementById\('diagnostics-clear'\)/);
 assert.match(renderer, /function setDiagnosticsPaused\(paused\)/);
 assert.match(renderer, /function clearDiagnosticsView\(\)/);
-assert.match(renderer, /Paused\$\{diagnosticsPausedNewLines/);
+assert.match(renderer, /View frozen\$\{diagnosticsPausedNewLines/);
 assert.match(renderer, /let diagnosticsPausedSnapshot = null/);
 assert.match(renderer, /diagnosticsPausedSnapshot = diagnosticLines\.slice\(\)/);
 assert.match(renderer, /function showDiagnosticsPanel\(\)/);

@@ -1271,9 +1271,11 @@ function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
   const sourceCount = diagnosticsPaused && diagnosticsPausedSnapshot
     ? diagnosticsPausedSnapshot.length
     : diagnosticLines.length;
-  const count = diagnosticsFilterQuery ? `${lines.length}/${sourceCount}` : `${sourceCount}`;
+  const count = diagnosticsFilterQuery
+    ? `Matches ${lines.length}/${sourceCount}`
+    : `Showing ${sourceCount}`;
   const pause = diagnosticsPaused
-    ? `Paused${diagnosticsPausedNewLines > 0 ? ` +${diagnosticsPausedNewLines}` : ''}`
+    ? `View frozen${diagnosticsPausedNewLines > 0 ? ` (new logs +${diagnosticsPausedNewLines})` : ''}`
     : '';
   diagnosticsFilterStatusElement.textContent = [pause, count].filter(Boolean).join(' · ');
 }
@@ -1335,10 +1337,18 @@ function setDiagnosticsPaused(paused) {
   }
   if (diagnosticsPauseButton) {
     diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
-    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Resume' : 'Pause';
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? '▶ Show newest' : '⏸ Freeze view';
     diagnosticsPauseButton.setAttribute(
       'aria-label',
-      diagnosticsPaused ? 'Resume live diagnostics rendering' : 'Pause live diagnostics rendering',
+      diagnosticsPaused
+        ? 'Return to the newest logs'
+        : 'Freeze only this screen. Logs keep being collected',
+    );
+    diagnosticsPauseButton.setAttribute(
+      'title',
+      diagnosticsPaused
+        ? 'Return to the newest logs'
+        : 'Freeze only this screen. Logs keep being collected',
     );
   }
   diagnosticRenderScrollToEnd = false;
