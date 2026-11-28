@@ -62,10 +62,13 @@ current fpasotermとfpasobrowserの組合せはcurrent userのLocalAppDataにあ
 .\fpasobrowser.cmd --backend kitty --debug
 ```
 
-`fpasobrowser debug: ... transport=fpasoterm-ipc-png`が表示され、Diagnosticsを
-`graphics`でfilterしたとき、最初のframeで`fpasoterm graphics transfer received`が表示されれば
-bridgeとrendererへのframe deliveryが完了しています。`d`のDEVTOOLSでは`fpasoterm IPC: ready`
-または`ready (recovered local ipc-v1 bridge; ...)`を確認できます。endpointとtokenは表示・copyされません。
+`fpasobrowser debug: ... transport=fpasoterm-ipc-png`が表示されることを確認してください。fpasotermの
+direct childでは、Diagnosticsを`graphics`でfilterしたとき最初のframeに
+`fpasoterm graphics transfer received`が表示されます。ただしHerdr paneでは必須条件ではありません。
+Herdrが消費した、または外側へ転送しなかったgraphics commandを外側terminalはlogできないためです。代わりに
+fpasobrowserで`d`を押してDEVTOOLSを開き、**sender** counterを確認してください。これは送出済みframe/delete
+commandを示し、receiver acknowledgementは利用できないことも明示します。`fpasoterm IPC: ready`または
+`ready (recovered local ipc-v1 bridge; ...)`も確認できます。endpointとtokenは表示・copyされません。
 `FPASOTERM_GRAPHICS_TRANSPORT`もrecovery recordも無い古いfpasotermでは、`auto`は`half-block`へ
 fallbackします。明示した`--backend kitty`は互換性診断のためKitty出力を強制します。
 

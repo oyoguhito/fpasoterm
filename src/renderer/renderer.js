@@ -147,6 +147,7 @@ let diagnosticRenderScrollToEnd = false;
 let diagnosticsPaused = false;
 let diagnosticsPausedNewLines = 0;
 let diagnosticsPausedSnapshot = null;
+let diagnosticHistoryStartedAt = null;
 let terminalMirrorText = '';
 let terminalMirrorDismissed = false;
 let pluginCommandStatusLines = [];
@@ -1274,10 +1275,13 @@ function updateDiagnosticsFilterStatus(lines = filteredDiagnosticLines()) {
   const count = diagnosticsFilterQuery
     ? `Matches ${lines.length}/${sourceCount}`
     : `Showing ${sourceCount}`;
+  const history = diagnosticHistoryStartedAt
+    ? `Runtime events since ${diagnosticHistoryStartedAt.toLocaleTimeString()}`
+    : 'Waiting for a runtime event';
   const pause = diagnosticsPaused
-    ? `View frozen${diagnosticsPausedNewLines > 0 ? ` (new logs +${diagnosticsPausedNewLines})` : ''}`
+    ? `Display frozen${diagnosticsPausedNewLines > 0 ? ` (saved while frozen +${diagnosticsPausedNewLines})` : ''}`
     : '';
-  diagnosticsFilterStatusElement.textContent = [pause, count].filter(Boolean).join(' · ');
+  diagnosticsFilterStatusElement.textContent = [history, pause, count].filter(Boolean).join(' · ');
 }
 
 function renderDiagnosticLines({ scrollToEnd = false } = {}) {
@@ -1322,9 +1326,9 @@ function applyDiagnosticsFilter() {
   diagnosticsElement.scrollTop = 0;
 }
 
-// Pause only the live view, not backend collection or the terminal itself.
-// This keeps keyboard diagnostics available for later inspection while the
-// displayed snapshot remains stable enough to search and copy.
+// Freeze only the display, not runtime-event collection or the terminal.
+// This keeps a stable snapshot available for search/copy while new events
+// continue to enter the bounded in-memory history.
 function setDiagnosticsPaused(paused) {
   const nextPaused = Boolean(paused);
   if (nextPaused && !diagnosticsPaused) {
@@ -1337,18 +1341,18 @@ function setDiagnosticsPaused(paused) {
   }
   if (diagnosticsPauseButton) {
     diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
-    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Show newest' : 'Freeze view';
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Show live' : 'Freeze display';
     diagnosticsPauseButton.setAttribute(
       'aria-label',
       diagnosticsPaused
-        ? 'Return to the newest logs'
-        : 'Freeze only this screen. Logs keep being collected',
+        ? 'Show the newest saved runtime events'
+        : 'Freeze only this display. Runtime events keep being saved',
     );
     diagnosticsPauseButton.setAttribute(
       'title',
       diagnosticsPaused
-        ? 'Return to the newest logs'
-        : 'Freeze only this screen. Logs keep being collected',
+        ? 'Show the newest saved runtime events'
+        : 'Freeze only this display. Runtime events keep being saved',
     );
   }
   diagnosticRenderScrollToEnd = false;
@@ -1357,10 +1361,16 @@ function setDiagnosticsPaused(paused) {
 
 function clearDiagnosticsView() {
   diagnosticLines.length = 0;
-  if (diagnosticsPausedSnapshot) {
-    diagnosticsPausedSnapshot.length = 0;
-  }
+  diagnosticHistoryStartedAt = null;
   diagnosticsPausedNewLines = 0;
+  diagnosticsPausedSnapshot = null;
+  diagnosticsPaused = false;
+  if (diagnosticsPauseButton) {
+    diagnosticsPauseButton.setAttribute('aria-pressed', 'false');
+    diagnosticsPauseButton.textContent = 'Freeze display';
+    diagnosticsPauseButton.setAttribute('aria-label', 'Freeze only this display. Runtime events keep being saved');
+    diagnosticsPauseButton.setAttribute('title', 'Freeze only this display. Runtime events keep being saved');
+  }
   diagnosticRenderScrollToEnd = false;
   renderDiagnosticLines();
   diagnosticsElement.scrollTop = 0;
@@ -1374,6 +1384,9 @@ function appendDiagnosticLine(message) {
     return;
   }
 
+  if (!diagnosticHistoryStartedAt) {
+    diagnosticHistoryStartedAt = new Date();
+  }
   diagnosticLines.push(message);
   if (diagnosticLines.length > MAX_DIAGNOSTIC_LINES) {
     diagnosticLines.shift();

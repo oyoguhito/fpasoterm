@@ -2581,9 +2581,12 @@ assert.match(renderer, /const diagnosticsPauseButton = document\.getElementById\
 assert.match(renderer, /const diagnosticsClearButton = document\.getElementById\('diagnostics-clear'\)/);
 assert.match(renderer, /function setDiagnosticsPaused\(paused\)/);
 assert.match(renderer, /function clearDiagnosticsView\(\)/);
-assert.match(renderer, /View frozen\$\{diagnosticsPausedNewLines/);
+assert.match(renderer, /Display frozen\$\{diagnosticsPausedNewLines/);
 assert.match(renderer, /let diagnosticsPausedSnapshot = null/);
+assert.match(renderer, /let diagnosticHistoryStartedAt = null/);
 assert.match(renderer, /diagnosticsPausedSnapshot = diagnosticLines\.slice\(\)/);
+assert.match(renderer, /Freeze only this display\. Runtime events keep being saved/);
+assert.match(renderer, /diagnosticHistoryStartedAt = new Date\(\)/);
 assert.match(renderer, /function showDiagnosticsPanel\(\)/);
 assert.match(renderer, /function closeDiagnosticsPanel\(\)/);
 assert.match(renderer, /if \(!diagnosticsPanelDismissed\)/);

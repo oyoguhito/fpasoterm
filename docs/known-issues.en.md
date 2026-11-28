@@ -1,5 +1,20 @@
 # Known Issues
 
+## Herdr And Other Multiplexer Pane Observability
+
+fpasoterm observes the outer PTY stream, not a multiplexer-internal event bus.
+When Herdr, tmux, screen, byobu, or another multiplexer is running, Diagnostics
+and terminal-output recording contain only data the multiplexer forwards to the
+outer terminal. They cannot provide a complete log for one child pane, reliably
+identify which pane produced each byte, or report a graphics/control sequence
+that the multiplexer consumed before forwarding it. Use the multiplexer\'s own
+per-pane capture/logging facility when that distinction is required.
+
+For fpasobrowser Kitty Graphics Protocol reports, `d` / `D` / `C` identifies
+the sender-side frame and delete commands emitted by the browser. It is useful
+when the outer Diagnostics view is empty, but it is not an acknowledgement
+from Herdr or the image receiver.
+
 ## ChromeOS Linux Clipboard Divergence with herdr
 
 The latest re-test confirms that the general fpasoterm clipboard bridge,

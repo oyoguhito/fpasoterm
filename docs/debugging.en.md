@@ -69,10 +69,14 @@ After updating both programs, run this inside fpasoterm:
 .\fpasobrowser.cmd --backend kitty --debug
 ```
 
-The debug output must include `transport=fpasoterm-ipc-png`. In Diagnostics,
-filter for `graphics`; the first frame should produce
-`fpasoterm graphics transfer received`. Press `d` in fpasobrowser to open
-DEVTOOLS: it reports `fpasoterm IPC: ready` or `ready (recovered local ipc-v1
+The debug output must include `transport=fpasoterm-ipc-png`. With a direct
+fpasoterm child, filtering Diagnostics for `graphics` should show
+`fpasoterm graphics transfer received` for the first frame. That is not a
+requirement for a Herdr pane: the outer terminal cannot log a graphics command
+that Herdr has consumed or not forwarded. Press `d` in fpasobrowser to open
+DEVTOOLS and inspect its **sender** counters instead: they report emitted frame
+and delete commands and explicitly state that receiver acknowledgement is
+unavailable. `fpasoterm IPC` reports `ready` or `ready (recovered local ipc-v1
 bridge; ...)`. The endpoint and token are never displayed or copied. With an
 older fpasoterm that provides neither the inherited capability nor the recovery
 record, `auto` falls back to `half-block`; an explicit `--backend kitty` keeps
