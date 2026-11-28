@@ -1337,7 +1337,7 @@ function setDiagnosticsPaused(paused) {
   }
   if (diagnosticsPauseButton) {
     diagnosticsPauseButton.setAttribute('aria-pressed', String(diagnosticsPaused));
-    diagnosticsPauseButton.textContent = diagnosticsPaused ? '▶ Show newest' : '⏸ Freeze view';
+    diagnosticsPauseButton.textContent = diagnosticsPaused ? 'Show newest' : 'Freeze view';
     diagnosticsPauseButton.setAttribute(
       'aria-label',
       diagnosticsPaused
